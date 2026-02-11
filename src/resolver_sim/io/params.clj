@@ -1,0 +1,26 @@
+(ns resolver-sim.io.params
+  "Load and validate parameter files (EDN format)."
+  (:require [resolver-sim.model.types :as types]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]))
+
+(defn load-edn
+  "Load EDN param file."
+  [path]
+  (let [file (io/file path)]
+    (if (.exists file)
+      (edn/read-string (slurp file))
+      (throw (ex-info (format "Param file not found: %s" path) {:path path})))))
+
+(defn merge-defaults
+  "Merge scenario params with defaults."
+  [scenario]
+  (merge types/default-params scenario))
+
+(defn validate-and-merge
+  "Load, validate, and merge with defaults."
+  [path]
+  (let [scenario (load-edn path)
+        merged (merge-defaults scenario)]
+    (types/validate-scenario merged)
+    merged))

@@ -1,0 +1,30 @@
+**/target
+/out
+.clj-kondo/.cache
+.cpcache
+.DS_Store
+*.swp
+*~
+.vscode
+.idea
+*.iml
+
+# Simulation results (generated)
+results/
+*.csv
+*.edn
+!params/*.edn
+!params/**/*.edn
+
+# Python/notebook artifacts
+__pycache__/
+*.pyc
+.jupyter
+.venv
+venv/
+
+# IDE
+.nrepl*
+.lsp
+.clj-kondo
+.cider
