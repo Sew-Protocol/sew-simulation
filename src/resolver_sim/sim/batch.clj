@@ -30,7 +30,7 @@
 
 (defn run-batch
   "Run N trials with given parameters and return aggregated stats.
-   Phase C: Resolvers have bonds at risk; slashing deducts from bond."
+   Phase D: Graduated slashing with reason breakdown."
   [rng n-trials params]
   (let [results
         (repeatedly n-trials
@@ -50,6 +50,12 @@
         mean-malice (mean profits-malice)
         sorted-honest (sort profits-honest)
         sorted-malice (sort profits-malice)
+        
+        ; Phase D: Slashing reason breakdown
+        total-slashed (count (filter :slashed? results))
+        timeout-slashed (count (filter #(= (:slashing-reason %) :timeout) results))
+        reversal-slashed (count (filter #(= (:slashing-reason %) :reversal) results))
+        fraud-slashed (count (filter #(= (:slashing-reason %) :fraud) results))
         
         ; Phase B: Escalation metrics
         appeal-count (count (filter :appeal-triggered? results))
@@ -85,4 +91,10 @@
      ; Phase B: Escalation statistics
      :appeal-rate (double (/ appeal-count n-trials))
      :escalation-rate (double (/ escalation-count n-trials))
-     :l2-escalation-rate (double (/ l2-count n-trials))}))
+     :l2-escalation-rate (double (/ l2-count n-trials))
+     
+     ; Phase D: Graduated slashing breakdown
+     :slash-rate (double (/ total-slashed n-trials))
+     :timeout-slash-rate (double (/ timeout-slashed n-trials))
+     :reversal-slash-rate (double (/ reversal-slashed n-trials))
+     :fraud-slash-rate (double (/ fraud-slashed n-trials))}))
