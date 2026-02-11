@@ -2,12 +2,27 @@
 
 ## Running Your First Simulation
 
+### Option 1: Using the Wrapper Script (Recommended)
 ```bash
+cd ~/Code/sew-simulation
+
 # Single scenario (baseline parameters)
-clojure -M:run -p params/baseline.edn
+./run.sh -p params/baseline.edn
 
 # Strategy sweep (test honest vs malicious vs lazy)
-clojure -M:run -p params/baseline.edn -s
+./run.sh -p params/baseline.edn -s
+```
+
+### Option 2: Direct Clojure Command
+```bash
+# Single scenario
+clojure -M:run -- -p params/baseline.edn
+
+# Strategy sweep
+clojure -M:run -- -p params/baseline.edn -s
+
+# Help
+clojure -M:run -- --help
 ```
 
 ## Understanding Results
@@ -85,7 +100,7 @@ Tests cover:
 
 1. **Export CSV & plot in Python**
    ```bash
-   python3 -c "import pandas as pd; df = pd.read_csv('results/.../results.csv'); print(df)"
+   python3 -c "import pandas as pd; df = pd.read_csv('results/*/results.csv'); print(df)"
    ```
 
 2. **Generate Clerk report**
@@ -96,7 +111,7 @@ Tests cover:
 
 3. **Run full cartel sweep** (4×4×4 = 64 scenarios, WIP)
    ```bash
-   clojure -M:run -p params/cartel.edn
+   ./run.sh -p params/cartel.edn
    ```
 
 4. **Validate with Foundry**
@@ -141,13 +156,17 @@ Run the same scenario 100 times, get identical CSV output.
 
 ## Troubleshooting
 
-**"Could not locate resolver_sim.X"**
-- Check file names match Clojure conventions (dashes → underscores)
+**"No such file or directory"**
+- Make sure you're in ~/Code/sew-simulation when running ./run.sh
+- Or use absolute path: ~/Code/sew-simulation/run.sh -p params/baseline.edn
 
 **Results look wrong (e.g., honest_mean = 0)**
 - Check parameter file has required keys
-- Validate with: `clojure -M:run -p params/baseline.edn` (no -s flag)
+- Validate with: ./run.sh -p params/baseline.edn (no -s flag for single scenario)
 
 **CSV shows NaN or Infinity**
 - Dominance ratio can be Infinity if malice_mean = 0
 - This is correct (honest infinitely better)
+
+**Permission denied on run.sh**
+- Make it executable: chmod +x ~/Code/sew-simulation/run.sh
