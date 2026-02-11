@@ -31,8 +31,7 @@
 
 (defn run-batch
   "Run N trials with given parameters and return aggregated stats.
-   Phase E1: Add Kleros backstop (L2 detection) metrics.
-   Phase G: Add slashing delay support and control baseline support."
+   Phase E1: Add Kleros backstop (L2 detection) metrics."
   [rng n-trials params]
   (let [results
         (repeatedly n-trials
@@ -41,13 +40,11 @@
             (:resolver-fee-bps params)
             (:appeal-bond-bps params)
             (:slash-multiplier params)
-            (or (:force-strategy params) (:strategy params :honest))
+            (:strategy params :honest)
             (:appeal-probability-if-correct params)
             (:appeal-probability-if-wrong params)
             (:slashing-detection-probability params)
-            :l2-detection-prob (:l2-detection-prob params 0)
-            :slashing-detection-delay-weeks (:slashing-detection-delay-weeks params 0)
-            :allow-slashing? (:allow-slashing? params true)))
+            :l2-detection-prob (:l2-detection-prob params 0)))  ; Phase E1: optional L2 detection
         
         profits-honest (map :profit-honest results)
         profits-malice (map :profit-malice results)
@@ -58,15 +55,6 @@
         
         ; Phase E1: L2 detection metrics
         l2-detected-count (count (filter :l2-detected? results))
-        
-        ; Phase G: Slashing delay metrics
-        pending-slashed (count (filter :slashing-pending? results))
-        pending-delay-weeks (if (empty? results) 0 
-                             (double (mean (map :slashing-delay-weeks (filter :slashing-pending? results)))))
-        
-        ; Phase H: Freeze and escape metrics
-        frozen-count (count (filter :frozen? results))
-        escaped-count (count (filter :escaped? results))
         
         ; Phase D: Slashing reason breakdown
         total-slashed (count (filter :slashed? results))
@@ -79,7 +67,7 @@
         escalation-count (count (filter :escalated? results))]
     
     {:n-trials n-trials
-     :strategy (or (:force-strategy params) (:strategy params :honest))
+     :strategy (:strategy params :honest)
      
      ; Honest profit statistics
      :honest-mean (double mean-honest)
@@ -115,11 +103,8 @@
       :slash-rate (double (/ total-slashed n-trials))
       :timeout-slash-rate (double (/ timeout-slashed n-trials))
       :reversal-slash-rate (double (/ reversal-slashed n-trials))
-      :fraud-slash-rate (double (/ fraud-slashed n-trials))
-      
-      ; Phase H: Freeze and escape metrics
-      :frozen-rate (double (/ frozen-count n-trials))
-      :escaped-rate (double (/ escaped-count n-trials))}))
+      :fraud-slash-rate (double (/ fraud-slashed n-trials))}))
+
 (defn run-ring-batch
   "Run N trials of a resolver ring simulation and return aggregated stats.
    

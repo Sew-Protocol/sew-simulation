@@ -10,6 +10,8 @@
    
    Phase D adds slashing reason tracking (timeout/reversal/fraud).
    Reasons are deterministically derived from existing state.
+   Phase G adds slashing delays and control baseline support.
+   Phase H adds realistic bond mechanics: immediate freeze, unstaking delays, appeal windows.
    
    Returns:
    {:dispute-correct? bool        ; Whether resolver judged correctly
@@ -17,17 +19,33 @@
     :escalated? bool              ; Whether case escalated to L2
     :escalation-level int         ; Final level (0, 1, or 2)
     :slashed? bool                ; Whether resolver caught and slashed
+    :slashing-pending? bool       ; Phase G: slashing is scheduled but delayed
+    :frozen? bool                 ; Phase H: account frozen at detection
+    :escaped? bool                ; Phase H: did resolver unstake before penalties?
+    :slashing-delay-weeks int     ; Phase G: weeks until slashing takes effect (0 = immediate)
     :slashing-reason keyword      ; Reason for slashing (timeout/reversal/fraud or nil)
     :profit-honest integer        ; Profit if honest
-    :profit-malice integer        ; Profit if malicious
+    :profit-malice integer        ; Profit if malicious (accounts for freeze/appeal/unstake delays)
     :strategy keyword}            ; Strategy used"
   [rng escrow-wei fee-bps bond-bps slash-mult strategy
    appeal-prob-correct appeal-prob-wrong detection-prob
-   & {:keys [senior-resolver-skill escalation-fee-bps resolver-bond-bps l2-detection-prob]
+   & {:keys [senior-resolver-skill escalation-fee-bps resolver-bond-bps l2-detection-prob
+             slashing-detection-delay-weeks allow-slashing?
+             unstaking-delay-days freeze-on-detection? freeze-duration-days appeal-window-days
+             detection-type timeout-detection-probability reversal-detection-probability]
       :or {senior-resolver-skill 0.95
            escalation-fee-bps 0
            resolver-bond-bps 100
-           l2-detection-prob 0}}]  ; Phase E1: L2 detection probability (default: disabled)
+           l2-detection-prob 0
+           slashing-detection-delay-weeks 0
+           allow-slashing? true
+           unstaking-delay-days 14
+           freeze-on-detection? true
+           freeze-duration-days 3
+           appeal-window-days 7
+           detection-type :fraud
+           timeout-detection-probability 0.0
+           reversal-detection-probability 0.0}}]
   
   (let [fee (econ/calculate-fee escrow-wei fee-bps)
         appeal-bond (econ/calculate-bond escrow-wei bond-bps)
@@ -68,22 +86,18 @@
           false)
         
         ; Final slashing: caught by L1 OR L2
-        slashed? (or l1-slashed? l2-slashed?)
+        slashed-detected? (and allow-slashing? (or l1-slashed? l2-slashed?))
         
         ; Phase C: Slashing loss (unchanged)
         total-bond-slashing (econ/calculate-slashing-loss 
                             (+ appeal-bond resolver-bond) slash-mult)
         bond-loss
-        (if slashed? total-bond-slashing 0)
+        (if slashed-detected? total-bond-slashing 0)
         
         ; Phase D: Slashing reason (derived from state to avoid RNG changes)
-        ; Assign based on: verdict-correct + appealed + strategy + bond values
-        ; This ensures deterministic, reproducible reason assignment
         slash-reason
-        (if slashed?
-          (let [;; Use hash of state to deterministically pick reason
-                ;; This preserves RNG sequence (no new calls) while varying reason
-                state-hash (Math/abs (hash [strategy verdict-correct? appealed? bond-loss]))
+        (if slashed-detected?
+          (let [state-hash (Math/abs (hash [strategy verdict-correct? appealed? bond-loss]))
                 reason-pct (rem state-hash 100)]
             (cond
               (< reason-pct 50) :timeout      ; 50%
@@ -91,18 +105,54 @@
               :else             :fraud))      ; 20%
           nil)
         
-        ; Honest resolver: earns fee
+        ; Phase G: Slashing delay handling
+        ; If delay > 0, slashing is scheduled but not applied immediately
+        ; Malicious can earn fees during delay before loss is applied
+        slashing-pending? (and slashed-detected? (> slashing-detection-delay-weeks 0))
+        delay-weeks (if slashing-pending? slashing-detection-delay-weeks 0)
+        
+        ; Phase H: Realistic bond mechanics
+        ; Immediate freeze on detection (vs delayed slashing)
+        ; Then appeal window, then penalty applied, then unstaking delay
+        frozen? (and slashed-detected? freeze-on-detection?)
+        
+        ; Timeline calculation:
+        ; T0: Fraud detected → frozen immediately (if freeze-on-detection? = true)
+        ; T0 + freeze-duration: Freeze expires, can request unstake
+        ; T0 + freeze-duration + appeal-window: Slash executes (to in-protocol bond)
+        ; T0 + freeze-duration + appeal-window + unstaking-delay: Can actually withdraw
+        ;
+        ; Since slash executes DURING unstaking delay, penalty is collected from in-protocol funds
+        ; Resolver cannot escape unless unstaking-delay > (freeze-duration + appeal-window)
+        ; With realistic values: 3 + 7 + 14 = 24 days to fully escape
+        ; This makes escape nearly impossible if detection happens early
+        
+        can-escape? (and frozen? (< unstaking-delay-days (+ freeze-duration-days appeal-window-days)))
+        escaped? (if frozen? (not can-escape?) false)
+        
+        ; Phase H: Penalty is always applied to in-protocol bond (never escapes if frozen immediately)
+        ; Only defer penalty application if they somehow escape during the tiny window
+        effective-bond-loss (if (and slashed-detected? frozen? (not escaped?)) 
+                              bond-loss 
+                              (if slashing-pending? 0 bond-loss))
+        
+        ; Honest resolver: earns fee (never slashed unless allow-slashing? is true)
         profit-honest (long fee)
         
         ; Malicious resolver: earns fee, but loses bonds if caught
-        profit-malice (long (- fee bond-loss))]
+        ; With Phase H mechanics, escape is nearly impossible if frozen immediately
+        profit-malice (long (- fee effective-bond-loss))]
     
     {:dispute-correct? verdict-correct?
      :appeal-triggered? appealed?
-     :l2-detected? l2-slashed?  ; Phase E1: Track L2 detection
+     :l2-detected? l2-slashed?
      :escalated? escalated?
      :escalation-level escalation-level
-     :slashed? slashed?
+     :slashed? slashed-detected?
+     :frozen? frozen?
+     :escaped? escaped?
+     :slashing-pending? slashing-pending?
+     :slashing-delay-weeks delay-weeks
      :slashing-reason slash-reason
      :profit-honest profit-honest
      :profit-malice profit-malice

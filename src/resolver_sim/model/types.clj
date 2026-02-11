@@ -65,7 +65,17 @@
    :slashing-detection-probability 0.10
    :n-trials 1000
    :n-seeds 1
-   :parallelism :auto})
+   :parallelism :auto
+   :slashing-detection-delay-weeks 0      ; Phase G: delay before slashing hits
+   :force-strategy nil                    ; Phase G: override strategy-mix (for control baselines)
+   :allow-slashing? true                  ; Phase G: if false, never slash (control baseline)
+   :unstaking-delay-days 14               ; Phase H: days to unstake (RESOLVER_UNBOND_DELAY)
+   :freeze-on-detection? true             ; Phase H: immediate freeze when detected?
+   :freeze-duration-days 3                ; Phase H: 72 hours freeze duration
+   :appeal-window-days 7                  ; Phase H: days before slash executes
+   :detection-type :fraud                 ; Phase H: :fraud (explicit), :timeout (automatic), :reversal (on appeal)
+   :timeout-detection-probability 0.0     ; Phase H: automatic detection rate (separate from fraud)
+   :reversal-detection-probability 0.0})  ; Phase H: detection on appeal (separate from fraud)
 
 (defn validate-scenario
   "Validate scenario params against schema. Throws if invalid."
@@ -74,6 +84,11 @@
     (if-let [v (get scenario k)]
       (when-not (validator v)
         (throw (ex-info (format "Invalid param %s: %s" k v) {:param k :value v})))
-      (when (not (some #(= k %) [:sweep-params :attacker-extra-capital-multiplier :resolver-bond-bps]))
+      (when (not (some #(= k %) [:sweep-params :attacker-extra-capital-multiplier :resolver-bond-bps
+                                    :slashing-detection-delay-weeks :force-strategy :allow-slashing?
+                                    :unstaking-delay-days :freeze-on-detection? :freeze-duration-days
+                                    :appeal-window-days :detection-type :timeout-detection-probability
+                                    :reversal-detection-probability
+                                    :ring-spec :l2-detection-prob :senior-resolver-skill :escalation-fee-bps]))
         (throw (ex-info (format "Missing required param %s" k) {:param k})))))
   scenario)

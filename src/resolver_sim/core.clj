@@ -72,25 +72,43 @@
   (let [scenario-id (:scenario-id params "unnamed")
         run-dir (results/create-run-directory output-dir (str scenario-id "-sweep"))
         
-        _ (println (format "\n📊 Running strategy sweep: %s" scenario-id))
-        _ (println (format "   Seed: %d" (:rng-seed params)))
-        _ (println (format "   Trials per strategy: %d" (:n-trials params)))
+        ; Check if this is a custom sweep (2D+) or strategy sweep
+        custom-sweep-params (:sweep-params params)
         
-        ; Run all strategies
-        results-list (sweep/run-strategy-sweep params (:rng-seed params))]
+        _ (if custom-sweep-params
+            (println (format "\n📊 Running parameter sweep: %s" scenario-id))
+            (println (format "\n📊 Running strategy sweep: %s" scenario-id)))
+        _ (println (format "   Seed: %d" (:rng-seed params)))
+        _ (println (format "   Trials per combo: %d" (:n-trials params)))
+        
+        ; Run appropriate sweep
+        results-list (if custom-sweep-params
+                      (sweep/run-parameter-sweep params (:rng-seed params) custom-sweep-params)
+                      (sweep/run-strategy-sweep params (:rng-seed params)))]
     
-    (println "\n✓ Sweep complete. Results by strategy:")
-    (doseq [result results-list]
-      (println (format "   %s: honest=%.2f, malice=%.2f, ratio=%.2f"
-                      (:strategy result) (:honest-mean result) (:malice-mean result)
-                      (:dominance-ratio result))))
+    (println (format "\n✓ Sweep complete. %d results:" (count results-list)))
+    (if custom-sweep-params
+      ; For multi-D sweeps, show parameter values
+      (doseq [result results-list]
+        (let [param-str (->> custom-sweep-params
+                           keys
+                           (map #(format "%s=%s" (name %) (get result %)))
+                           (clojure.string/join " "))]
+          (println (format "   %s: honest=%.2f, malice=%.2f, ratio=%.2f"
+                          param-str (:honest-mean result) (:malice-mean result)
+                          (:dominance-ratio result)))))
+      ; For strategy sweeps, show strategy
+      (doseq [result results-list]
+        (println (format "   %s: honest=%.2f, malice=%.2f, ratio=%.2f"
+                        (:strategy result) (:honest-mean result) (:malice-mean result)
+                        (:dominance-ratio result)))))
     
     ; Write outputs
     (results/write-edn (format "%s/summary.edn" run-dir) results-list)
     (results/write-csv (format "%s/results.csv" run-dir) results-list)
     (results/write-run-metadata (format "%s/metadata.edn" run-dir)
                                {:scenario-id scenario-id
-                                :sweep-type :strategy
+                                :sweep-type (if custom-sweep-params :parameter :strategy)
                                 :params params
                                 :results results-list})
     
