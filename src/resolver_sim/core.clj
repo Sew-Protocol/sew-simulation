@@ -5,7 +5,8 @@
             [resolver-sim.sim.batch :as batch]
             [resolver-sim.sim.sweep :as sweep]
             [resolver-sim.model.rng :as rng]
-            [clojure.tools.cli :refer [parse-opts]]))
+            [clojure.tools.cli :refer [parse-opts]])
+  (:gen-class))
 
 (def cli-options
   [["-p" "--params PATH" "Path to params.edn file"
