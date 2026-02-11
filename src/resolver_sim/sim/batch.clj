@@ -1,7 +1,8 @@
 (ns resolver-sim.sim.batch
   "Batch runner: aggregate N trials into summary statistics."
   (:require [resolver-sim.model.rng :as rng]
-            [resolver-sim.model.dispute :as dispute]))
+            [resolver-sim.model.dispute :as dispute]
+            [resolver-sim.model.resolver-ring :as ring]))
 
 (defn mean [vals]
   (if (empty? vals) 0 (double (/ (reduce + vals) (count vals)))))
@@ -103,3 +104,58 @@
       :timeout-slash-rate (double (/ timeout-slashed n-trials))
       :reversal-slash-rate (double (/ reversal-slashed n-trials))
       :fraud-slash-rate (double (/ fraud-slashed n-trials))}))
+
+(defn run-ring-batch
+  "Run N trials of a resolver ring simulation and return aggregated stats.
+   
+   Phase F1: Multi-resolver collusion with waterfall slashing."
+  [rng n-trials params ring-spec]
+  (let [;; Initialize the ring
+        initial-ring (ring/create-ring ring-spec)
+        
+        ;; Run repeated disputes for the ring
+        ring-results
+        (reduce
+          (fn [ring-state _trial]
+            (let [dispute-result
+                  (ring/simulate-ring-dispute
+                   rng ring-state
+                   (:escrow-size params 10000)
+                   (:resolver-fee-bps params)
+                   (:appeal-bond-bps params)
+                   (:slash-multiplier params)
+                   (:appeal-probability-if-correct params)
+                   (:appeal-probability-if-wrong params)
+                   (:slashing-detection-probability params)
+                   :l2-detection-prob (:l2-detection-prob params 0))]
+              (:ring dispute-result)))
+          initial-ring
+          (range n-trials))
+        
+        ;; Extract profitability analysis
+        profitability (ring/ring-profitability ring-results)
+        
+        ;; Individual resolver states
+        member-states (:member-states profitability)
+        senior-state (first (filter #(= (:tier %) :senior) member-states))
+        junior-states (filter #(= (:tier %) :junior) member-states)]
+    
+    {:n-trials n-trials
+     :ring-type (str (count junior-states) "-junior-ring")
+     
+     ;; Aggregate ring profitability
+     :ring-total-profit (double (:total-profit profitability))
+     :ring-avg-profit-per-dispute (double (:average-profit-per-dispute profitability))
+     :ring-catch-rate (double (:catch-rate profitability))
+     :ring-viable? (:viable? profitability)
+     :ring-senior-exhausted? (:senior-exhausted? profitability)
+     
+     ;; Individual member status
+     :senior-bond-remaining (:bond-remaining senior-state)
+     :senior-slashed-amount (:slashed-amount senior-state)
+     :juniors-bond-remaining (mapv :bond-remaining junior-states)
+     :juniors-slashed-amounts (mapv :slashed-amount junior-states)
+     
+     ;; Comparative threshold
+     :ring-profitable? (> (:total-profit profitability) 0)
+     :ring-solvent? (some #(> (:bond-remaining %) 0) member-states)}))

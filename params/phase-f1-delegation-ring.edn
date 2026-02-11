@@ -1,0 +1,64 @@
+{
+ ;; Metadata
+ :run-id "phase-f1-delegation-ring"
+ :description "Test collusion ring: 1 senior + 3 juniors, all collude 100%"
+ 
+ ;; RNG
+ :seed 42
+ 
+ ;; Escrow distribution (same as Phase E1)
+ :escrow-size-distribution {:type :lognormal :median 1000 :sigma 2.0}
+ 
+ ;; Fee market
+ :fee-bps 25
+ 
+ ;; Resolver bonds & slashing
+ :bond-bps 100
+ :slash-multiplier 2.0
+ 
+ ;; Appeal dynamics
+ :appeal-prob-correct 0.05
+ :appeal-prob-wrong 0.20
+ 
+ ;; Detection
+ :detection-prob 0.1
+ :l2-detection-prob 0.90  ;; Kleros enabled
+ 
+ ;; Simulation parameters
+ :num-trials 1000
+ :parallelism 4
+ 
+ ;; Ring specification
+ :ring-spec
+ {:senior {:bond 10000 :name "senior-1"}
+  :juniors [
+    {:bond 1000 :name "junior-1"}
+    {:bond 1000 :name "junior-2"}
+    {:bond 1000 :name "junior-3"}
+  ]}
+ 
+ ;; Comparison sweeps
+ :sweeps
+ [
+   ;; Baseline: without L2 detection
+   {:name "ring-no-l2"
+    :params {:l2-detection-prob 0}
+    :num-trials 1000}
+   
+   ;; With L2 detection (Kleros backstop)
+   {:name "ring-with-l2"
+    :params {:l2-detection-prob 0.90}
+    :num-trials 1000}
+   
+   ;; Solo malicious for comparison
+   {:name "solo-no-l2"
+    :params {:l2-detection-prob 0}
+    :num-trials 1000
+    :strategy-override :malicious}
+   
+   {:name "solo-with-l2"
+    :params {:l2-detection-prob 0.90}
+    :num-trials 1000
+    :strategy-override :malicious}
+ ]
+}
