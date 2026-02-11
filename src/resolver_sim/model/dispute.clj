@@ -11,8 +11,9 @@
    {:dispute-correct? bool        ; Whether resolver judged correctly
     :appeal-triggered? bool       ; Whether outcome is appealed
     :slashed? bool                ; Whether resolver caught and slashed
-    :profit-honest integer        ; Profit earned if honest
-    :profit-malice integer}       ; Profit earned if malicious"
+    :profit-honest integer        ; Profit if honest
+    :profit-malice integer        ; Profit if malicious
+    :strategy keyword}            ; Strategy used"
   [rng escrow-wei fee-bps bond-bps slash-mult strategy
    appeal-prob-correct appeal-prob-wrong detection-prob]
   
@@ -24,7 +25,7 @@
         (case strategy
           :honest       true
           :lazy         (< (rng/next-double rng) 0.5)
-          :malicious    (> escrow-wei (* bond 0.5))  ; Lie if profitable
+          :malicious    (< (rng/next-double rng) 0.3)  ; Lie 70% of the time
           :collusive    (< (rng/next-double rng) 0.8))  ; Mostly honest
         
         ; Appeal rate depends on correctness
@@ -33,7 +34,7 @@
         appealed?
         (< (rng/next-double rng) appeal-prob)
         
-        ; Slashing: 1% base rate, higher for malicious
+        ; Slashing: only if verdict is WRONG and detected
         base-detection-prob
         (case strategy
           :honest 0.01
@@ -46,17 +47,17 @@
         slashing-loss
         (if slashed? (* bond slash-mult) 0)
         
-        ; Profit calculations
-        profit-honest
-        (if (= strategy :honest) (- fee) 0)
-        profit-malice
-        (if (= strategy :malicious) (- fee slashing-loss) (- fee))]
+        ; Honest resolver: earns fee (always positive)
+        profit-honest (long fee)
+        
+        ; Malicious resolver: earns fee from correct verdict, but loses bond if caught
+        profit-malice (long (- fee slashing-loss))]
     
     {:dispute-correct? verdict-correct?
      :appeal-triggered? appealed?
      :slashed? slashed?
-     :profit-honest (long profit-honest)
-     :profit-malice (long profit-malice)
+     :profit-honest profit-honest
+     :profit-malice profit-malice
      :strategy strategy}))
 
 (defn multiple-disputes

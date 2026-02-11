@@ -1,4 +1,4 @@
-(ns resolver-sim.core-test
+(ns resolver-sim.core-tests
   (:require [clojure.test :refer [deftest is testing]]
             [resolver-sim.model.types :as types]
             [resolver-sim.model.economics :as econ]
