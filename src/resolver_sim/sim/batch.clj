@@ -30,7 +30,7 @@
 
 (defn run-batch
   "Run N trials with given parameters and return aggregated stats.
-   Phase B: Includes escalation metrics."
+   Phase C: Resolvers have bonds at risk; slashing deducts from bond."
   [rng n-trials params]
   (let [results
         (repeatedly n-trials

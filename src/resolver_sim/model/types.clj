@@ -74,6 +74,6 @@
     (if-let [v (get scenario k)]
       (when-not (validator v)
         (throw (ex-info (format "Invalid param %s: %s" k v) {:param k :value v})))
-      (when (not (some #(= k %) [:sweep-params :attacker-extra-capital-multiplier]))
+      (when (not (some #(= k %) [:sweep-params :attacker-extra-capital-multiplier :resolver-bond-bps]))
         (throw (ex-info (format "Missing required param %s" k) {:param k})))))
   scenario)
