@@ -23,10 +23,11 @@
     :strategy keyword}            ; Strategy used"
   [rng escrow-wei fee-bps bond-bps slash-mult strategy
    appeal-prob-correct appeal-prob-wrong detection-prob
-   & {:keys [senior-resolver-skill escalation-fee-bps resolver-bond-bps]
+   & {:keys [senior-resolver-skill escalation-fee-bps resolver-bond-bps l2-detection-prob]
       :or {senior-resolver-skill 0.95
            escalation-fee-bps 0
-           resolver-bond-bps 100}}]
+           resolver-bond-bps 100
+           l2-detection-prob 0}}]  ; Phase E1: L2 detection probability (default: disabled)
   
   (let [fee (econ/calculate-fee escrow-wei fee-bps)
         appeal-bond (econ/calculate-bond escrow-wei bond-bps)
@@ -50,15 +51,24 @@
         escalation-level (if appealed? 1 0)
         escalated? (and appealed? (= strategy :malicious))
         
-        ; Slashing: only if verdict is WRONG and detected
+        ; Slashing: only if verdict is WRONG and detected at L1
         base-detection-prob
         (case strategy
           :honest 0.01
           :lazy 0.02
           :malicious detection-prob
           :collusive 0.05)
-        slashed?
+        l1-slashed?
         (and (not verdict-correct?) (< (rng/next-double rng) base-detection-prob))
+        
+        ; Phase E1: L2 (Kleros) detection - additional catch by L2 if appealed
+        l2-slashed?
+        (if (and appealed? (not verdict-correct?) (> l2-detection-prob 0))
+          (< (rng/next-double rng) l2-detection-prob)
+          false)
+        
+        ; Final slashing: caught by L1 OR L2
+        slashed? (or l1-slashed? l2-slashed?)
         
         ; Phase C: Slashing loss (unchanged)
         total-bond-slashing (econ/calculate-slashing-loss 
@@ -89,6 +99,7 @@
     
     {:dispute-correct? verdict-correct?
      :appeal-triggered? appealed?
+     :l2-detected? l2-slashed?  ; Phase E1: Track L2 detection
      :escalated? escalated?
      :escalation-level escalation-level
      :slashed? slashed?

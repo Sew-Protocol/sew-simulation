@@ -30,7 +30,7 @@
 
 (defn run-batch
   "Run N trials with given parameters and return aggregated stats.
-   Phase D: Graduated slashing with reason breakdown."
+   Phase E1: Add Kleros backstop (L2 detection) metrics."
   [rng n-trials params]
   (let [results
         (repeatedly n-trials
@@ -42,7 +42,8 @@
             (:strategy params :honest)
             (:appeal-probability-if-correct params)
             (:appeal-probability-if-wrong params)
-            (:slashing-detection-probability params)))
+            (:slashing-detection-probability params)
+            :l2-detection-prob (:l2-detection-prob params 0)))  ; Phase E1: optional L2 detection
         
         profits-honest (map :profit-honest results)
         profits-malice (map :profit-malice results)
@@ -50,6 +51,9 @@
         mean-malice (mean profits-malice)
         sorted-honest (sort profits-honest)
         sorted-malice (sort profits-malice)
+        
+        ; Phase E1: L2 detection metrics
+        l2-detected-count (count (filter :l2-detected? results))
         
         ; Phase D: Slashing reason breakdown
         total-slashed (count (filter :slashed? results))
@@ -59,8 +63,7 @@
         
         ; Phase B: Escalation metrics
         appeal-count (count (filter :appeal-triggered? results))
-        escalation-count (count (filter :escalated? results))
-        l2-count (count (filter #(= (:escalation-level %) 2) results))]
+        escalation-count (count (filter :escalated? results))]
     
     {:n-trials n-trials
      :strategy (:strategy params :honest)
@@ -88,13 +91,15 @@
      :dominance-ratio (if (zero? mean-malice) Double/POSITIVE_INFINITY
                         (double (/ mean-honest mean-malice)))
      
-     ; Phase B: Escalation statistics
-     :appeal-rate (double (/ appeal-count n-trials))
-     :escalation-rate (double (/ escalation-count n-trials))
-     :l2-escalation-rate (double (/ l2-count n-trials))
-     
-     ; Phase D: Graduated slashing breakdown
-     :slash-rate (double (/ total-slashed n-trials))
-     :timeout-slash-rate (double (/ timeout-slashed n-trials))
-     :reversal-slash-rate (double (/ reversal-slashed n-trials))
-     :fraud-slash-rate (double (/ fraud-slashed n-trials))}))
+      ; Phase B: Escalation statistics
+      :appeal-rate (double (/ appeal-count n-trials))
+      :escalation-rate (double (/ escalation-count n-trials))
+      
+      ; Phase E1: Kleros backstop (L2 detection)
+      :l2-detection-rate (double (/ l2-detected-count n-trials))
+      
+      ; Phase D: Graduated slashing breakdown
+      :slash-rate (double (/ total-slashed n-trials))
+      :timeout-slash-rate (double (/ timeout-slashed n-trials))
+      :reversal-slash-rate (double (/ reversal-slashed n-trials))
+      :fraud-slash-rate (double (/ fraud-slashed n-trials))}))
