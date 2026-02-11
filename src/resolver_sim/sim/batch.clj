@@ -29,7 +29,8 @@
              (* frac (nth sorted-vals hi))))))))
 
 (defn run-batch
-  "Run N trials with given parameters and return aggregated stats."
+  "Run N trials with given parameters and return aggregated stats.
+   Phase B: Includes escalation metrics."
   [rng n-trials params]
   (let [results
         (repeatedly n-trials
@@ -48,7 +49,12 @@
         mean-honest (mean profits-honest)
         mean-malice (mean profits-malice)
         sorted-honest (sort profits-honest)
-        sorted-malice (sort profits-malice)]
+        sorted-malice (sort profits-malice)
+        
+        ; Phase B: Escalation metrics
+        appeal-count (count (filter :appeal-triggered? results))
+        escalation-count (count (filter :escalated? results))
+        l2-count (count (filter #(= (:escalation-level %) 2) results))]
     
     {:n-trials n-trials
      :strategy (:strategy params :honest)
@@ -74,4 +80,9 @@
      ; Comparative statistics
      :honest-wins (count (filter #(> % 0) (map - profits-honest profits-malice)))
      :dominance-ratio (if (zero? mean-malice) Double/POSITIVE_INFINITY
-                        (double (/ mean-honest mean-malice)))}))
+                        (double (/ mean-honest mean-malice)))
+     
+     ; Phase B: Escalation statistics
+     :appeal-rate (double (/ appeal-count n-trials))
+     :escalation-rate (double (/ escalation-count n-trials))
+     :l2-escalation-rate (double (/ l2-count n-trials))}))
