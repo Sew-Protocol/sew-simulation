@@ -97,6 +97,42 @@
     (println (format "\n💾 Sweep results saved to: %s" run-dir))
     results-list))
 
+(defn run-ring-simulation [params output-dir]
+  (let [scenario-id (:scenario-id params "unnamed")
+        run-dir (results/create-run-directory output-dir (str scenario-id "-ring"))
+        rng (rng/make-rng (:rng-seed params))
+        ring-spec (:ring-spec params)
+        
+        _ (when-not ring-spec (throw (Exception. "ring-spec not found in params")))
+        _ (println (format "\n📊 Running ring simulation: %s" scenario-id))
+        _ (println (format "   Seed: %d" (:rng-seed params)))
+        _ (println (format "   Trials: %d" (:n-trials params)))
+        _ (let [senior (:senior ring-spec)
+                juniors (:juniors ring-spec)]
+            (println (format "   Ring: 1 senior ($%d bond) + %d juniors"
+                            (:bond senior) (count juniors))))
+        
+        ; Run ring batch
+        ring-result (batch/run-ring-batch rng (:n-trials params) params ring-spec)
+        
+        _ (println "\n✓ Ring simulation complete. Results:")
+        _ (println (format "   Total ring profit: %.2f" (:ring-total-profit ring-result)))
+        _ (println (format "   Avg profit/dispute: %.2f" (:ring-avg-profit-per-dispute ring-result)))
+        _ (println (format "   Catch rate: %.4f" (:ring-catch-rate ring-result)))
+        _ (println (format "   Ring viable: %s" (:ring-viable? ring-result)))
+        _ (println (format "   Senior exhausted: %s" (:ring-senior-exhausted? ring-result)))]
+    
+    ; Write outputs (skip CSV for now since format is different for ring vs strategy sweep)
+    (results/write-edn (format "%s/summary.edn" run-dir) ring-result)
+    (results/write-run-metadata (format "%s/metadata.edn" run-dir)
+                               {:scenario-id scenario-id
+                                :type :ring
+                                :params params
+                                :ring-result ring-result})
+    
+    (println (format "\n💾 Ring results saved to: %s" run-dir))
+    ring-result))
+
 (defn -main [& args]
   (let [{:keys [options exit-message ok?]} (validate-args args)]
     (if exit-message
@@ -106,8 +142,14 @@
       (try
         (println "Loading params from:" (:params options))
         (let [params (params/validate-and-merge (:params options))]
-          (if (:sweep options)
+          (cond
+            (:ring-spec params)
+            (run-ring-simulation params (:output options))
+            
+            (:sweep options)
             (run-sweep params (:output options))
+            
+            :else
             (run-simulation params (:output options)))
           (System/exit 0))
         

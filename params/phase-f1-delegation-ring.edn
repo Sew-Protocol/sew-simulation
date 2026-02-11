@@ -1,34 +1,37 @@
 {
  ;; Metadata
- :run-id "phase-f1-delegation-ring"
+ :scenario-id "phase-f1-delegation-ring"
  :description "Test collusion ring: 1 senior + 3 juniors, all collude 100%"
  
  ;; RNG
- :seed 42
+ :rng-seed 42
  
- ;; Escrow distribution (same as Phase E1)
- :escrow-size-distribution {:type :lognormal :median 1000 :sigma 2.0}
+ ;; Escrow distribution (for per-escrow sizing, not used in ring sim)
+ :escrow-distribution {:type :constant :value 10000}
+ 
+ ;; Strategy mix (not used for ring sim, but required by validator)
+ :strategy-mix {:honest 0.5 :lazy 0.0 :malicious 0.5 :collusive 0.0}
  
  ;; Fee market
- :fee-bps 25
+ :resolver-fee-bps 25
  
  ;; Resolver bonds & slashing
- :bond-bps 100
+ :appeal-bond-bps 100
  :slash-multiplier 2.0
  
  ;; Appeal dynamics
- :appeal-prob-correct 0.05
- :appeal-prob-wrong 0.20
+ :appeal-probability-if-correct 0.05
+ :appeal-probability-if-wrong 0.20
  
  ;; Detection
- :detection-prob 0.1
+ :slashing-detection-probability 0.1
  :l2-detection-prob 0.90  ;; Kleros enabled
  
  ;; Simulation parameters
- :num-trials 1000
+ :n-trials 100
  :parallelism 4
  
- ;; Ring specification
+ ;; Ring specification (triggers ring simulation mode)
  :ring-spec
  {:senior {:bond 10000 :name "senior-1"}
   :juniors [
@@ -36,29 +39,6 @@
     {:bond 1000 :name "junior-2"}
     {:bond 1000 :name "junior-3"}
   ]}
- 
- ;; Comparison sweeps
- :sweeps
- [
-   ;; Baseline: without L2 detection
-   {:name "ring-no-l2"
-    :params {:l2-detection-prob 0}
-    :num-trials 1000}
-   
-   ;; With L2 detection (Kleros backstop)
-   {:name "ring-with-l2"
-    :params {:l2-detection-prob 0.90}
-    :num-trials 1000}
-   
-   ;; Solo malicious for comparison
-   {:name "solo-no-l2"
-    :params {:l2-detection-prob 0}
-    :num-trials 1000
-    :strategy-override :malicious}
-   
-   {:name "solo-with-l2"
-    :params {:l2-detection-prob 0.90}
-    :num-trials 1000
-    :strategy-override :malicious}
- ]
 }
+
+

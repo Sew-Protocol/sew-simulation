@@ -150,12 +150,16 @@
      :ring-viable? (:viable? profitability)
      :ring-senior-exhausted? (:senior-exhausted? profitability)
      
-     ;; Individual member status
-     :senior-bond-remaining (:bond-remaining senior-state)
-     :senior-slashed-amount (:slashed-amount senior-state)
-     :juniors-bond-remaining (mapv :bond-remaining junior-states)
-     :juniors-slashed-amounts (mapv :slashed-amount junior-states)
+     ;; Individual member status (scalars only for CSV compatibility)
+     :senior-bond-remaining (double (:bond-remaining senior-state))
+     :senior-slashed-amount (double (:slashed-amount senior-state))
+     :juniors-count (count junior-states)
+     :juniors-avg-bond-remaining (double 
+       (if (empty? junior-states) 0 
+         (/ (reduce + (map :bond-remaining junior-states)) (count junior-states))))
+     :juniors-total-slashed (double
+       (reduce + (map :slashed-amount junior-states)))
      
      ;; Comparative threshold
-     :ring-profitable? (> (:total-profit profitability) 0)
-     :ring-solvent? (some #(> (:bond-remaining %) 0) member-states)}))
+     :ring-profitable? (:ring-profitable? profitability)
+     :ring-solvent? (:ring-solvent? profitability)}))
