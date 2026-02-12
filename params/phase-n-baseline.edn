@@ -1,0 +1,26 @@
+{:scenario-id "phase-n-baseline-appeals"
+ :description "Phase N: Appeal outcomes validation for Phase L baseline"
+
+ ; Simulation Parameters (same as Phase L baseline)
+ :n-seniors 5
+ :n-juniors-per-senior 10
+ :n-trials 1000
+ 
+ ; Fraud & Slashing Parameters
+ :fraud-rate 0.10                    ; 10% fraud baseline
+ :slashing-detection-probability 0.10
+ 
+ ; Bond & Coverage Parameters
+ :junior-bond-amount 10000          ; $10k junior bond
+ :senior-bond-amount 100000         ; $100k senior bond
+ :coverage-multiplier 3.0           ; 3× junior bond coverage
+ :utilization-factor 0.5            ; 50% utilization
+ :fraud-slash-bps 50                ; 0.5% fraud slash
+ 
+ ; Economic Parameters
+ :escrow-size 1000
+ :fee-basis-points 50
+ 
+ ; Note: Phase N will test multiple appeal success rates (0%, 10%, 20%, 30%, 50%)
+ ;       parametrically, so no single appeal-success-rate here
+}

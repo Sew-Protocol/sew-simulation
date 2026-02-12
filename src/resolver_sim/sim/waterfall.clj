@@ -244,9 +244,10 @@
         waterfall-saturation (if (zero? total-slashed)
                               0.0
                               (double (* 100.0 (/ slashed-by-senior total-slashed))))
-        adequacy (if (zero? total-events)
-                  100.0
-                  (double (* 100.0 (- 1.0 (/ total-unmet total-slashed)))))]
+        adequacy (cond
+            (zero? total-events) 100.0
+            (zero? total-slashed) 0.0  ; No payout despite events = 0% adequacy
+            :else (double (* 100.0 (- 1.0 (/ total-unmet total-slashed)))))]
     
     {:juniors-exhausted-count exhausted
      :juniors-exhausted-pct (if (zero? n-juniors)

@@ -1,0 +1,19 @@
+{:scenario-id "phase-n-high-fraud-appeals"
+ :description "Phase N: Appeal outcomes validation for Phase L high fraud stress test"
+
+ :n-seniors 5
+ :n-juniors-per-senior 10
+ :n-trials 1000
+ 
+ :fraud-rate 0.30                    ; 30% fraud stress (3× baseline)
+ :slashing-detection-probability 0.10
+ 
+ :junior-bond-amount 10000
+ :senior-bond-amount 100000
+ :coverage-multiplier 3.0
+ :utilization-factor 0.5
+ :fraud-slash-bps 50
+ 
+ :escrow-size 1000
+ :fee-basis-points 50
+}
