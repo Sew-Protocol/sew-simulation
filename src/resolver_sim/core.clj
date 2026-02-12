@@ -7,6 +7,7 @@
             [resolver-sim.sim.multi-epoch :as multi-epoch]
             [resolver-sim.sim.waterfall :as waterfall]
             [resolver-sim.sim.governance-impact :as gov-impact]
+            [resolver-sim.sim.phase-o :as phase-o]
             [resolver-sim.model.rng :as rng]
             [clojure.tools.cli :refer [parse-opts]])
   (:gen-class))
@@ -20,6 +21,7 @@
    ["-m" "--multi-epoch" "Run Phase J multi-epoch simulation (10+ epochs)"]
    ["-l" "--waterfall" "Run Phase L waterfall stress testing"]
    ["-g" "--governance-impact" "Run Phase M governance response time impact analysis"]
+   ["-O" "--market-exit" "Run Phase O market exit cascade modeling"]
    ["-h" "--help" "Show this help"]])
 
 (defn usage [options-summary]
@@ -305,6 +307,10 @@
           (cond
             (:ring-spec params)
             (run-ring-simulation params (:output options))
+            
+            (:market-exit options)
+            (do (println "\n🔄 Running Phase O Market Exit Cascade")
+               (phase-o/run-phase-o-complete params))
             
             (:governance-impact options)
             (run-governance-impact-simulation params (:output options))

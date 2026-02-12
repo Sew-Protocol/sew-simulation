@@ -1,0 +1,13 @@
+{:scenario-id "phase-o-high-fraud"
+ :description "Phase O: Market Exit Cascade - high fraud baseline"
+ 
+ :n-resolvers 100
+ :strategy-mix {:honest 0.60 :lazy 0.15 :fraud 0.15 :other 0.10}
+ 
+ :fraud-rate 0.30                    ; 30% baseline fraud
+ :slashing-detection-probability 0.10
+ 
+ :escrow-size 1000
+ :fee-basis-points 50
+ :n-trials-per-epoch 500
+}

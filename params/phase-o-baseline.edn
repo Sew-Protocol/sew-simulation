@@ -1,0 +1,19 @@
+{:scenario-id "phase-o-market-exit"
+ :description "Phase O: Market Exit Cascade - baseline test scenario"
+ 
+ ; Required fields
+ :n-resolvers 100
+ :n-trials 1000
+ 
+ ; Escrow configuration
+ :escrow-size 1000
+ :escrow-distribution :uniform
+ :fee-basis-points 50
+ 
+ ; Fraud & Detection
+ :fraud-rate 0.10
+ :slashing-detection-probability 0.10
+ 
+ ; Batch simulation 
+ :n-trials-per-epoch 500
+}
