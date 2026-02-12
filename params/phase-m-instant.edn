@@ -1,0 +1,35 @@
+{:scenario-id "phase-m-instant-governance"
+ :description "Phase M: Governance delay = 0 (instant response baseline)"
+
+ ; Governance Parameters
+ :governance-response-days 0  ; Instant approval (no delay)
+ 
+ ; Simulation Parameters
+ :n-resolvers 100
+ :n-epochs 10
+ :n-trials-per-epoch 500
+ 
+ ; Strategy Mix
+ :strategy-mix {:honest 0.50 :lazy 0.15 :malicious 0.25 :collusive 0.10}
+ 
+ ; Detection Parameters
+ :slashing-detection-probability 0.10  ; 10% fraud detection (baseline)
+ :fraud-detection-probability 0.00     ; Fraud detection disabled by default
+ :reversal-detection-probability 0.00  ; Reversal detection disabled
+ 
+ ; Slashing Parameters
+ :slashing-multiplier 5.0               ; 5× bond slash on fraud
+ :junior-bond-amount 10000              ; $10k junior bond
+ :senior-bond-amount 100000             ; $100k senior bond
+ :coverage-multiplier 3.0               ; 3× junior bond = $30k per senior per junior
+ 
+ ; Economic Parameters
+ :escrow-size 1000                      ; $1k typical escrow
+ :fee-basis-points 50                   ; 0.5% fee
+ :appeal-probability 0.15               ; 15% of verdicts appealed
+ 
+ ; Resolver Exit Parameters
+ :exit-profit-threshold 0.0             ; Exit if cumulative profit < 0
+ :exit-probability-on-loss 0.10         ; 10% chance to exit if unprofitable
+ :new-resolver-entry-rate 0.05          ; 5% of pool enters each epoch
+}

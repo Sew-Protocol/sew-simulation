@@ -18,6 +18,11 @@
    :appeal-probability-if-correct (fn [x] (and (number? x) (>= x 0) (<= x 1)))
    :appeal-probability-if-wrong (fn [x] (and (number? x) (>= x 0) (<= x 1)))
    :slashing-detection-probability (fn [x] (and (number? x) (>= x 0) (<= x 1)))
+   :fraud-detection-probability (fn [x] (and (number? x) (>= x 0) (<= x 1)))
+   :fraud-slash-bps (fn [x] (and (number? x) (>= x 0) (<= x 10000)))
+   :reversal-detection-probability (fn [x] (and (number? x) (>= x 0) (<= x 1)))
+   :reversal-slash-bps (fn [x] (and (number? x) (>= x 0) (<= x 10000)))
+   :timeout-slash-bps (fn [x] (and (number? x) (>= x 0) (<= x 10000)))
    :n-trials (fn [x] (and (integer? x) (> x 0)))
    :n-seeds (fn [x] (and (integer? x) (> x 0)))
    :parallelism (fn [x] (or (keyword? x) (integer? x)))})
@@ -63,6 +68,11 @@
    :appeal-probability-if-correct 0.05
    :appeal-probability-if-wrong 0.40
    :slashing-detection-probability 0.10
+   :fraud-detection-probability 0.0              ; Phase I: fraud detection disabled by default
+   :fraud-slash-bps 0                           ; Phase I: fraud slashing disabled (0 bps)
+   :reversal-detection-probability 0.0          ; Phase I: reversal detection disabled by default
+   :reversal-slash-bps 0                        ; Phase I: reversal slashing disabled (0 bps)
+   :timeout-slash-bps 200                       ; Phase I: timeout penalty (2% = 200 bps, from contracts)
    :n-trials 1000
    :n-seeds 1
    :parallelism :auto
@@ -74,8 +84,7 @@
    :freeze-duration-days 3                ; Phase H: 72 hours freeze duration
    :appeal-window-days 7                  ; Phase H: days before slash executes
    :detection-type :fraud                 ; Phase H: :fraud (explicit), :timeout (automatic), :reversal (on appeal)
-   :timeout-detection-probability 0.0     ; Phase H: automatic detection rate (separate from fraud)
-   :reversal-detection-probability 0.0})  ; Phase H: detection on appeal (separate from fraud)
+   :timeout-detection-probability 0.0})  ; Phase H: detection on appeal (separate from fraud)
 
 (defn validate-scenario
   "Validate scenario params against schema. Throws if invalid."
@@ -88,7 +97,8 @@
                                     :slashing-detection-delay-weeks :force-strategy :allow-slashing?
                                     :unstaking-delay-days :freeze-on-detection? :freeze-duration-days
                                     :appeal-window-days :detection-type :timeout-detection-probability
-                                    :reversal-detection-probability
+                                    :reversal-detection-probability :fraud-detection-probability :fraud-slash-bps
+                                    :reversal-slash-bps :timeout-slash-bps
                                     :ring-spec :l2-detection-prob :senior-resolver-skill :escalation-fee-bps]))
         (throw (ex-info (format "Missing required param %s" k) {:param k})))))
   scenario)

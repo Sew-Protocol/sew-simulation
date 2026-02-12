@@ -1,0 +1,28 @@
+{:scenario-id "phase-m-3day-governance"
+ :description "Phase M: Governance delay = 3 days (realistic baseline)"
+
+ :governance-response-days 3  ; 3 days for governance vote + execution
+ 
+ :n-resolvers 100
+ :n-epochs 10
+ :n-trials-per-epoch 500
+ 
+ :strategy-mix {:honest 0.50 :lazy 0.15 :malicious 0.25 :collusive 0.10}
+ 
+ :slashing-detection-probability 0.10
+ :fraud-detection-probability 0.00
+ :reversal-detection-probability 0.00
+ 
+ :slashing-multiplier 5.0
+ :junior-bond-amount 10000
+ :senior-bond-amount 100000
+ :coverage-multiplier 3.0
+ 
+ :escrow-size 1000
+ :fee-basis-points 50
+ :appeal-probability 0.15
+ 
+ :exit-profit-threshold 0.0
+ :exit-probability-on-loss 0.10
+ :new-resolver-entry-rate 0.05
+}

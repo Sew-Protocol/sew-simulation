@@ -4,6 +4,9 @@
             [resolver-sim.io.results :as results]
             [resolver-sim.sim.batch :as batch]
             [resolver-sim.sim.sweep :as sweep]
+            [resolver-sim.sim.multi-epoch :as multi-epoch]
+            [resolver-sim.sim.waterfall :as waterfall]
+            [resolver-sim.sim.governance-impact :as gov-impact]
             [resolver-sim.model.rng :as rng]
             [clojure.tools.cli :refer [parse-opts]])
   (:gen-class))
@@ -14,6 +17,9 @@
    ["-o" "--output DIR" "Output directory for results"
     :default "results"]
    ["-s" "--sweep" "Run strategy sweep (honest, lazy, malicious, collusive)"]
+   ["-m" "--multi-epoch" "Run Phase J multi-epoch simulation (10+ epochs)"]
+   ["-l" "--waterfall" "Run Phase L waterfall stress testing"]
+   ["-g" "--governance-impact" "Run Phase M governance response time impact analysis"]
    ["-h" "--help" "Show this help"]])
 
 (defn usage [options-summary]
@@ -151,6 +157,142 @@
     (println (format "\n💾 Ring results saved to: %s" run-dir))
     ring-result))
 
+(defn run-multi-epoch-simulation [params output-dir]
+  (let [scenario-id (:scenario-id params "unnamed")
+        run-dir (results/create-run-directory output-dir (str scenario-id "-multi-epoch"))
+        rng (rng/make-rng (:rng-seed params))
+        n-epochs (get params :n-epochs 10)
+        n-trials-per-epoch (get params :n-trials-per-epoch 500)
+        
+        ; Run Phase J multi-epoch simulation
+        result (multi-epoch/run-multi-epoch rng n-epochs n-trials-per-epoch params)]
+    
+    ; Write outputs
+    (results/write-edn (format "%s/summary.edn" run-dir) result)
+    (results/write-run-metadata (format "%s/metadata.edn" run-dir)
+                               {:scenario-id scenario-id
+                                :type :multi-epoch
+                                :n-epochs n-epochs
+                                :n-trials-per-epoch n-trials-per-epoch
+                                :params params
+                                :result result})
+    
+    (println (format "\n💾 Multi-epoch results saved to: %s" run-dir))
+    result))
+
+(defn run-waterfall-simulation [params output-dir]
+  (let [scenario-id (:scenario-id params "unnamed")
+        scenario-name (:scenario-name params scenario-id)
+        run-dir (results/create-run-directory output-dir (str scenario-name "-waterfall"))
+        
+        ; Initialize pools
+        pool (waterfall/initialize-waterfall-pool params)
+        
+        ; Simulate waterfall stress
+        _ (println (format "\n🌊 Running waterfall stress test: %s" scenario-name))
+        _ (println (format "   Seniors: %d | Juniors: %d" 
+                          (:n-seniors params 5)
+                          (* (:n-seniors params 5) (:n-juniors-per-senior params 10))))
+        _ (println (format "   Fraud rate: %.1f%% | Coverage multiplier: %.1f×"
+                          (* 100 (:fraud-rate params 0.10))
+                          (:coverage-multiplier params 3.0)))
+        
+        ; Generate slash events based on fraud rate
+        n-trials (get params :n-trials 1000)
+        n-fraud-events (int (* n-trials (:fraud-rate params 0.10)))
+        
+        ; Create synthetic slash events (simplified)
+        slash-events (mapv (fn [i]
+                            (let [n-juniors (* (:n-seniors params 5) (:n-juniors-per-senior params 10))
+                                  junior-idx (mod i n-juniors)
+                                  senior-idx (int (/ junior-idx (:n-juniors-per-senior params 10)))]
+                              {:resolver-id (str "j" senior-idx "_" (mod junior-idx (:n-juniors-per-senior params 10)))
+                               :senior-id (str "s" senior-idx)
+                               :slash-amount (waterfall/calculate-slash-amount 
+                                            (:junior-bond-amount params 500)
+                                            (:fraud-slash-bps params 50))
+                               :reason :fraud
+                               :epoch (int (/ i 10))}))
+                          (range n-fraud-events))
+        
+        ; Process all slash events
+        result (reduce (fn [state event]
+                        (waterfall/process-slash-event event (:resolvers state) (:seniors state)))
+                      {:resolvers (:juniors pool)
+                       :seniors (:seniors pool)
+                       :events []}
+                      slash-events)
+        
+        ; Aggregate metrics
+        metrics (waterfall/aggregate-waterfall-metrics 
+                (:resolvers result)
+                (:seniors result)
+                (mapv :event-result (map (fn [e] (waterfall/process-slash-event e (:juniors pool) (:seniors pool)))
+                                        slash-events)))
+        
+        summary {:scenario-id scenario-id
+                :scenario-name scenario-name
+                :type :waterfall
+                :params (select-keys params [:fraud-rate :coverage-multiplier :utilization-factor
+                                           :n-seniors :n-juniors-per-senior
+                                           :senior-bond-amount :junior-bond-amount])
+                :results metrics}]
+    
+    ; Print key findings
+    (println (format "   Juniors exhausted: %.1f%%" (:juniors-exhausted-pct metrics)))
+    (println (format "   Coverage used: %.1f%%" (:seniors-coverage-used-avg-pct metrics)))
+    (println (format "   Adequacy score: %.1f%%" (:coverage-adequacy-score metrics)))
+    
+    ; Write outputs
+    (results/write-edn (format "%s/summary.edn" run-dir) summary)
+    (results/write-run-metadata (format "%s/metadata.edn" run-dir)
+                               {:scenario-id scenario-id
+                                :type :waterfall
+                                :params params
+                                :results metrics})
+    
+    (println (format "\n💾 Waterfall results saved to: %s" run-dir))
+    summary))
+
+(defn run-governance-impact-simulation [params output-dir]
+  (let [scenario-id (:scenario-id params "unnamed")
+        scenario-name (:scenario-name params scenario-id)
+        run-dir (results/create-run-directory output-dir (str scenario-name "-governance-impact"))
+        
+        rng (rng/make-rng (:seed params 42))
+        n-epochs (get params :n-epochs 10)
+        n-trials (get params :n-trials-per-epoch 500)
+        
+        _ (println (format "\n🏛️  Running governance impact test: %s" scenario-name))
+        _ (println (format "   Governance response: %d days" (:governance-response-days params 3)))
+        
+        result (gov-impact/run-multi-epoch-governance-impact rng n-epochs n-trials params)
+        
+        summary {:scenario-id scenario-id
+                 :scenario-name scenario-name
+                 :type :governance-impact
+                 :governance-response-days (:governance-response-days params 3)
+                 :params (select-keys params [:governance-response-days :n-epochs :n-trials-per-epoch 
+                                            :slashing-detection-probability :strategy-mix])
+                 :results (select-keys result [:epoch-results :governance-metrics :aggregated-stats])}]
+    
+    ; Print key findings
+    (println (format "   Final honest resolvers: %d" (get-in result [:aggregated-stats :honest-final-count])))
+    (println (format "   Slashes executed: %d" (get-in result [:governance-metrics :total-pending-slashes-resolved])))
+    (println (format "   Still pending: %d" (get-in result [:governance-metrics :pending-slashes-still-waiting])))
+    (println (format "   Frozen resolvers: %d" (get-in result [:governance-metrics :frozen-resolvers])))
+    
+    ; Write outputs
+    (results/write-edn (format "%s/summary.edn" run-dir) summary)
+    (results/write-run-metadata (format "%s/metadata.edn" run-dir)
+                               {:scenario-id scenario-id
+                                :type :governance-impact
+                                :params params
+                                :results result})
+    
+    (println (format "\n💾 Governance impact results saved to: %s" run-dir))
+    summary))
+
 (defn -main [& args]
   (let [{:keys [options exit-message ok?]} (validate-args args)]
     (if exit-message
@@ -163,6 +305,15 @@
           (cond
             (:ring-spec params)
             (run-ring-simulation params (:output options))
+            
+            (:governance-impact options)
+            (run-governance-impact-simulation params (:output options))
+            
+            (:waterfall options)
+            (run-waterfall-simulation params (:output options))
+            
+            (:multi-epoch options)
+            (run-multi-epoch-simulation params (:output options))
             
             (:sweep options)
             (run-sweep params (:output options))

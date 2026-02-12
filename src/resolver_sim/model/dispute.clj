@@ -32,7 +32,8 @@
    & {:keys [senior-resolver-skill escalation-fee-bps resolver-bond-bps l2-detection-prob
              slashing-detection-delay-weeks allow-slashing?
              unstaking-delay-days freeze-on-detection? freeze-duration-days appeal-window-days
-             detection-type timeout-detection-probability reversal-detection-probability]
+             detection-type timeout-detection-probability reversal-detection-probability
+             fraud-detection-probability fraud-slash-bps reversal-slash-bps timeout-slash-bps]
       :or {senior-resolver-skill 0.95
            escalation-fee-bps 0
            resolver-bond-bps 100
@@ -45,7 +46,11 @@
            appeal-window-days 7
            detection-type :fraud
            timeout-detection-probability 0.0
-           reversal-detection-probability 0.0}}]
+           reversal-detection-probability 0.0
+           fraud-detection-probability 0.0
+           fraud-slash-bps 0
+           reversal-slash-bps 0
+           timeout-slash-bps 200}}]
   
   (let [fee (econ/calculate-fee escrow-wei fee-bps)
         appeal-bond (econ/calculate-bond escrow-wei bond-bps)
@@ -76,8 +81,27 @@
           :lazy 0.02
           :malicious detection-prob
           :collusive 0.05)
+        ; Phase I: Multi-mechanism detection (fraud + reversal + timeout)
+        ; Fraud: intentional wrong verdict (penalty: fraud-slash-bps, e.g., 5000 = 50%)
+        ; Reversal: L2 disagrees with L1 (penalty: reversal-slash-bps, e.g., 2500 = 25%)
+        ; Timeout: missed deadline (penalty: timeout-slash-bps, e.g., 200 = 2%)
+        
+        ; Base detection: generic detection rate (Phase H model)
         l1-slashed?
         (and (not verdict-correct?) (< (rng/next-double rng) base-detection-prob))
+        
+        ; Phase I: Fraud-specific detection (enables 50% slashing penalty when triggered)
+        fraud-detected?
+        (if (and (not verdict-correct?) (> fraud-detection-probability 0) (= strategy :malicious))
+          (< (rng/next-double rng) fraud-detection-probability)
+          false)
+        
+        ; Phase I: Reversal detection (enables 25% slashing penalty when triggered)
+        reversal-detected?
+        (if (and (not verdict-correct?) (> reversal-detection-probability 0) 
+                 (or (= strategy :lazy) (= strategy :collusive)))
+          (< (rng/next-double rng) reversal-detection-probability)
+          false)
         
         ; Phase E1: L2 (Kleros) detection - additional catch by L2 if appealed
         l2-slashed?
@@ -85,24 +109,34 @@
           (< (rng/next-double rng) l2-detection-prob)
           false)
         
-        ; Final slashing: caught by L1 OR L2
-        slashed-detected? (and allow-slashing? (or l1-slashed? l2-slashed?))
+        ; Final slashing: caught by any mechanism (L1, fraud, reversal, or L2)
+        slashed-detected? (and allow-slashing? (or l1-slashed? fraud-detected? reversal-detected? l2-slashed?))
         
-        ; Phase C: Slashing loss (unchanged)
+        ; Phase I: Calculate penalty based on detection mechanism
+        ; Fraud detection: use fraud-slash-bps (e.g., 5000 = 50%)
+        ; Reversal detection: use reversal-slash-bps (e.g., 2500 = 25%)
+        ; Timeout detection: use timeout-slash-bps (e.g., 200 = 2%)
+        ; Default/base detection: use slash-multiplier (Phase H legacy)
+        
+        effective-slash-multiplier
+        (cond
+          fraud-detected?     (/ fraud-slash-bps 10000.0)
+          reversal-detected?  (/ reversal-slash-bps 10000.0)
+          :else               slash-mult)  ; Fall back to original slash-mult for L1/L2 detection
+        
+        ; Slashing loss calculation using Phase I-determined penalty
         total-bond-slashing (econ/calculate-slashing-loss 
-                            (+ appeal-bond resolver-bond) slash-mult)
+                            (+ appeal-bond resolver-bond) effective-slash-multiplier)
         bond-loss
         (if slashed-detected? total-bond-slashing 0)
         
-        ; Phase D: Slashing reason (derived from state to avoid RNG changes)
+        ; Phase D: Slashing reason (determined by which mechanism caught them)
         slash-reason
         (if slashed-detected?
-          (let [state-hash (Math/abs (hash [strategy verdict-correct? appealed? bond-loss]))
-                reason-pct (rem state-hash 100)]
-            (cond
-              (< reason-pct 50) :timeout      ; 50%
-              (< reason-pct 80) :reversal     ; 30%
-              :else             :fraud))      ; 20%
+          (cond
+            fraud-detected?     :fraud
+            reversal-detected?  :reversal
+            :else               :timeout)
           nil)
         
         ; Phase G: Slashing delay handling
