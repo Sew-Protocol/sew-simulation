@@ -66,7 +66,7 @@
         ; Run multiple disputes
         results (for [trial-idx (range num-trials)]
                   (let [; Randomize parameters per trial
-                        ground-truth (< (rng/random rng) 0.5)
+                        ground-truth (< (rng/next-double rng) 0.5)
                         difficulty (rand-nth ["easy" "medium" "hard"])
                         
                         ; Simulate full appeal
@@ -97,7 +97,7 @@
         ; Aggregate results
         correct-count (count (filter #(= (:correct %) (:ground-truth %)) results))
         error-rate (/ (count (filter :error results)) num-trials)
-        avg-escalations (/ (apply + (map :escalation-count results))
+        avg-escalations (/ (apply + (map :escalations results))
                           num-trials)
         avg-cascade-risk (/ (apply + (map :cascade-risk results))
                            num-trials)
@@ -148,7 +148,7 @@
   
   (println "\n📊 Running Phase P Revised: Sequential Appeal System")
   (println "   Testing: Information cascades, escalation economics, sequential corruption")
-  (println ""
+  (println "")
   
   (let [; Generate all combinations
         scenarios (for [tp TIME_PRESSURE_LEVELS
@@ -191,10 +191,11 @@
     (println "  Scenario C (Fragile):    " class-c " scenarios")
     (println "")
     (println "Key metrics:")
-    (println "  Avg cascade risk: " (format "%.2f" (:avg-cascade-risk summary)))
-    (println "  Error range: " (format "%.1f%%" (* (:best-error-rate summary) 100))
-             " - " (format "%.1f%%" (* (:worst-error-rate summary) 100)))
-    (println ""
+    (println "  Avg cascade risk: " (format "%.2f" (double (:avg-cascade-risk summary))))
+    (let [best (* (:best-error-rate summary) 100.0)
+          worst (* (:worst-error-rate summary) 100.0)]
+      (println "  Error range: " (format "%.1f" best) "% - " (format "%.1f" worst) "%"))
+    (println "")
     
     {:summary summary
      :results results}))
@@ -213,7 +214,7 @@
   []
   
   (println "\n🔍 Analyzing Information Cascade Vulnerability")
-  (println ""
+  (println "")
   
   (let [rng (rng/make-rng 42)
         
@@ -244,7 +245,7 @@
                          :vulnerable? (> cascade-risk 0.4)}))]
     
     (println "Cascade analysis (hard case, ambiguous evidence):")
-    (println ""
+    (println "")
     (doseq [test cascade-tests]
       (println (format "  Reputation=%.1f Appeal=%.1f → Risk=%.2f Break=%.2f %s"
                       (:reputation-weight test)
@@ -252,7 +253,7 @@
                       (:cascade-risk test)
                       (:break-probability test)
                       (if (:vulnerable? test) "⚠️ VULNERABLE" "✓ OK"))))
-    (println ""
+    (println "")
     
     {:tests cascade-tests}))
 
@@ -265,28 +266,26 @@
   []
   
   (println "\n📊 Phase P Revised vs Phase P Lite: Model Comparison")
-  (println ""
-  (println "Architecture:"
+  (println "")
+  (println "Architecture:")
   (println "  Phase P Lite: 3-resolver PARALLEL panel voting")
   (println "  Phase P Revised: 1-resolver SEQUENTIAL appeals")
-  (println ""
-  (println "Vulnerability Type:"
+  (println "")
+  (println "Vulnerability Type:")
   (println "  Phase P Lite: Herding cascade (impossible in sequential)")
   (println "  Phase P Revised: Information cascade (realistic in sequential)")
-  (println ""
-  (println "Mechanism:"
+  (println "")
+  (println "Mechanism:")
   (println "  Phase P Lite: Attacker corrupts 2/3 to break majority")
   (println "  Phase P Revised: Attacker corrupts each level independently")
-  (println ""
-  (println "Result:"
+  (println "")
+  (println "Result:")
   (println "  Phase P Lite: System breaks at rho ≥ 0.5")
   (println "  Phase P Revised: System has cascade risk but with friction")
-  (println ""
-  (println "Confidence Impact:"
+  (println "")
+  (println "Confidence Impact:")
   (println "  Phase P Lite: 99% → 40% (INVALID - wrong model)")
   (println "  Phase P Revised: 99% → ? (actual findings TBD)")
-  (println ""
+  (println "")
   
   {})
-)
-
