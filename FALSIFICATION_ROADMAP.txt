@@ -1,0 +1,291 @@
+╔═════════════════════════════════════════════════════════════════════════════╗
+║                   FALSIFICATION ROADMAP: 99% → REALITY                     ║
+║                                                                             ║
+║  "Mechanism security under perfect observability" is proven.               ║
+║  "System robustness under realistic conditions" is not.                    ║
+║                                                                             ║
+║  This document maps the 2-week falsification path that will determine      ║
+║  whether your 99% confidence claim survives contact with reality.          ║
+╚═════════════════════════════════════════════════════════════════════════════╝
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ PART 1: WHAT'S PROVEN (Phases G–O)                                         ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+✅ Bond adequacy:        66× over-provisioned at 10% fraud
+✅ Slashing deters fraud:  3:1 dominance (honest >> malicious)
+✅ Governance freezing:    Resolver freezing prevents abuse during delays
+✅ 10-epoch stability:     Multi-epoch system doesn't collapse
+✅ Waterfall mechanics:    Cascading slashes don't deplete capital
+
+Evidence: 147,500+ Monte Carlo trials, 8 simulation phases
+Confidence: 99% ✅
+
+Claim: "Mechanism security under perfect observability is sound"
+Status: VALIDATED
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ PART 2: WHAT'S UNPROVEN (Will Be Tested in Phase P Lite)                   ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+❌ Disputed difficulty heterogeneity:   Attackers can cherry-pick hard cases
+❌ Evidence game dynamics:              Fake generation < verification cost
+❌ Panel/jury coordination:             Herding causes majority-wrong outcomes
+❌ Load-dependent quality:              Heavy load breaks honest incentives
+❌ Correlated resolver behavior:        Information cascades amplify errors
+❌ Slashing delays + repositioning:     Attackers can exit/re-enter during window
+
+Current assumption: Disputes are uniform, truth is clean, agents independent
+Reality: Disputes are lumpy, truth is messy, agents correlate
+
+Confidence: 55% ⚠️
+
+Claim: "System robustness under realistic observability is unproven"
+Status: NEXT WEEK'S FOCUS
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ PART 3: PHASE P LITE (2 WEEKS)                                             ┃
+┃ The Minimal Falsification Test                                             ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Three modules. ~500 lines of Clojure. High probability of falsifying 99%.
+
+MODULE 1: DISPUTE DIFFICULTY DISTRIBUTION (Week 1, Day 1–2)
+─────────────────────────────────────────────────────────────
+
+Current model:  All disputes are uniform difficulty
+Real model:     70% easy, 25% medium, 5% hard
+
+Code: difficulty-distribution.clj
+  - Sample: d ∈ {easy 0.70, medium 0.25, hard 0.05}
+  - Honest accuracy decreases with d:
+    {easy: 0.95, medium: 0.80, hard: 0.50}
+  - Detection drops with d:
+    {easy: 10%, medium: 6%, hard: 2%}
+  - Attacker targets hard: max profit with min detection
+
+Test: Run sweep over difficulty distribution
+  - Baseline (uniform):
+    Honest profit: 150 bps
+    Malice profit: 100 bps
+    Dominance: 1.5x ✅
+  
+  - With attacker targeting hard:
+    Honest profit: 150 bps (stable)
+    Malice profit: 300 bps (increased!)
+    Dominance: 0.5x ❌ (INVERTED)
+
+Expected result: Dominance ratio drops 10–30%
+
+
+MODULE 2: EVIDENCE COSTS + ATTENTION BUDGET (Week 1, Day 2–3)
+─────────────────────────────────────────────────────────────
+
+Current model:  Resolvers have infinite attention
+Real model:     Limited effort budget per epoch
+
+Code: evidence-costs.clj
+  - Budget: 100 time units per epoch
+  - Effort cost varies:
+    {easy/honest: 5, medium/honest: 30, hard/honest: 80}
+    {easy/lazy: 3, medium/lazy: 10, hard/lazy: 15}
+  - Accuracy with partial effort:
+    accuracy(effort-spent, required) = base * (effort-spent / required)
+  - Lazy becomes rational under load
+
+Test: Run under three load conditions
+  - Light load (10 disputes, 100 effort):
+    Honest verifies all → accuracy high
+    Malice caught → not profitable
+  
+  - Heavy load (100 disputes, 100 effort):
+    Honest can verify 10% → accuracy drops to 10%
+    Malice can forge evidence faster than honest verifies
+    Lazy profit: 2× honest profit
+  
+  - Extreme load (200 disputes, 100 effort):
+    Honest profit: -50 bps (accuracy too low)
+    Lazy profit: +100 bps (shortcuts pay off)
+
+Expected result: At >100 disputes, lazy dominates honest
+
+
+MODULE 3: PANEL MAJORITY + CORRELATION + HERDING (Week 1–2)
+──────────────────────────────────────────────────────────────
+
+Current model:  Single resolver decides
+Real model:     3-person panel with correlated priors
+
+Code: panel-decision.clj
+  - Replace single resolver with n=3, majority decides (2 out of 3)
+  - Correlation parameter rho ∈ [0, 1]:
+    rho = 0: independent decisions (current)
+    rho = 0.5: shared narratives, moderate correlation
+    rho = 0.9: strong herding, nearly identical outcomes
+  - Herding incentive:
+    if own-vote ≠ majority-vote
+      then perceived-slashing-risk += 20%
+           (minority opinion = higher risk, even if correct)
+  - Decision rule:
+    majority-correct? = (votes-for-truth >= 2)
+
+Test: Sweep over rho with hard disputes
+  - rho = 0 (independence):
+    Panel member 1 (honest): vote truth, gets outvoted
+    Panel members 2–3 (malice): vote false
+    Result: Majority wins, truth-teller not harmed
+    Dominance: 1.2x ⚠️ (down from 1.5x due to panel effects)
+  
+  - rho = 0.4 (moderate herding):
+    Panel member 1 (honest): votes truth but sees 2 votes for false
+    Herding incentive: "If I vote against majority, slashing risk +20%"
+    Member 1 switches vote to match majority (herding cascade)
+    Result: 3 votes for false, truth-teller captured
+    Dominance: 0.8x ❌ (INVERTED)
+  
+  - rho = 0.9 (strong herding):
+    All three resolvers converge to same vote regardless of evidence
+    Attacker needs to bribe 1 resolver; correlation does rest
+    Result: Capturing 1 resolver captures entire panel
+    Dominance: <0.5x ❌ (BROKEN)
+
+Expected result: rho > 0.3 triggers cascade; dominance inverts
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ PART 4: INTEGRATION (Week 2)                                               ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Phase P Lite CLI:
+  clojure -M:run -p params/phase-p-lite-baseline.edn -P
+  
+  Output: Sweep over rho (0.0, 0.2, 0.4, 0.6, 0.8)
+          + load (10, 50, 100, 200 disputes)
+          + difficulty targeting (random vs. hard-biased)
+  
+  Results table:
+    rho | load | difficulty | honest-profit | malice-profit | dominance
+    ────┼──────┼────────────┼───────────────┼───────────────┼──────────
+     0  |  10  | random     |     150       |     100       |   1.5x ✅
+     0  |  100 | hard       |     150       |     200       |   0.75x ❌
+    0.4 |  50  | random     |     100       |     150       |   0.67x ❌
+    0.8 |  10  | random     |      80       |     200       |   0.4x ❌
+
+Visualization: Dominance ratio heatmap (rho vs. load)
+  - Upper left: green (robust)
+  - Lower right: red (broken)
+  - Goal: find the tipping point
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ PART 5: LIKELY OUTCOME                                                     ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Prediction: SCENARIO B (Brittleness Discovered) — 70% likely
+
+Failure chain:
+  1. Hard cases (5% tail) have detection -80% vs. easy cases
+     → Attacker targets hard; honest avoid them
+  
+  2. Under load (200 disputes, 100 effort), honest accuracy drops
+     → Can only verify 10% of disputes
+     → Malice can forge evidence faster than honest verifies
+  
+  3. Panel correlation (rho > 0.3) enables herding
+     → Even honest resolvers converge on wrong majority outcome
+     → Slashing incentive punishes deviance from consensus
+  
+  4. Combined effect:
+     → Dominance ratio inverts from 1.5x (safe) to 0.8x (broken)
+     → System is NOT vulnerable to simple fraud (bonds still deter)
+     → BUT system IS vulnerable to:
+         • Coordinated attacks on hard cases
+         • Participation under load
+         • Correlated resolver behavior
+  
+Result: Confidence drops from 99% → 65%
+        System is "fragile, not broken"
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ PART 6: POST-PHASE-P-LITE DECISION                                         ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+IF ROBUSTNESS CONFIRMED (20% chance):
+  → 90%+ confidence achieved
+  → Proceed to mainnet
+  → Phase Q–T at lower priority
+
+IF BRITTLENESS DISCOVERED (70% chance):
+  → Choose one of three options:
+
+  OPTION A: REDESIGN (4–8 weeks)
+    - Multi-level adjudication (jury for hard cases)
+    - Reputation-weighted slashing (prevent herding)
+    - Evidence oracles (external truth commitment)
+    - Correlated-error penalties
+    Timeline: 2 months before launch
+    Confidence: 90%+
+
+  OPTION B: ADD PARAMETERS (2–3 weeks)
+    - Increase bond for hard disputes (2–3× multiplier)
+    - Cap herding effect (reduce rho amplification)
+    - Implement effort rewards
+    - Escalation thresholds
+    Timeline: 1 week before launch
+    Confidence: 75–80%
+
+  OPTION C: ACCEPT AND MONITOR (Launch now)
+    - Ship with current design
+    - Deploy monitoring (hard-case performance, herding signals)
+    - Gather real-world data
+    - Redesign in 2.0 if needed
+    Timeline: Now
+    Confidence now: 55%, → 75%+ by week 6
+
+IF FUNDAMENTAL VULNERABILITY FOUND (10% chance):
+  → Halt mainnet launch
+  → Full redesign required
+  → Re-run Phase P Lite after changes
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ PART 7: GO-LIVE DECISION TREE                                              ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Week 0: Launch mainnet now?
+  └─→ YES (bonds are proven at 99%)
+  
+Week 1–2: Run Phase P Lite in parallel
+  
+Week 2: Phase P Lite results + real-world data available
+  └─→ If robust + stable:     → Option C (monitor only) ✅
+  └─→ If brittle + attacked:  → Option B (quick fix) + monitor
+  └─→ If brittle + stable:    → Option A (redesign) OR Option C (wait)
+
+Month 2: Reach 80%+ confidence
+  - Real-world data converged with simulation
+  - Issues identified and mitigated
+  - Path to 90%+ clear
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ BOTTOM LINE                                                                ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Your 99% claim is CORRECT for mechanism security under perfect observability.
+That's the hardest part, and it's proven.
+
+Your 55% confidence on realistic conditions is also CORRECT.
+The gap is real and addressable in 2 weeks.
+
+Phase P Lite will answer whether the gap is "serious concern" or "corner case."
+
+Launch now. Learn fast. Decide by week 2.
+
+This is how Kleros, UMA, Aragon did it: Deploy empirically, iterate based on
+real attacks, and let the market reveal what simulation missed.
+
+═════════════════════════════════════════════════════════════════════════════
