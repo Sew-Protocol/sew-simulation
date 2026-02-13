@@ -1,26 +1,37 @@
 {:scenario-id "phase-n-baseline-appeals"
  :description "Phase N: Appeal outcomes validation for Phase L baseline"
-
- ; Simulation Parameters (same as Phase L baseline)
- :n-seniors 5
- :n-juniors-per-senior 10
- :n-trials 1000
+ :rng-seed 42
  
- ; Fraud & Slashing Parameters
- :fraud-rate 0.10                    ; 10% fraud baseline
+ :escrow-distribution
+ {:type :lognormal
+  :mean 10000
+  :std 5000}
+ 
+ :strategy-mix
+ {:honest 0.50
+  :lazy 0.15
+  :malicious 0.25
+  :collusive 0.10}
+ 
+ :resolver-fee-bps 150
+ :appeal-bond-bps 700
+ :slash-multiplier 2.5
+ :appeal-probability-if-correct 0.05
+ :appeal-probability-if-wrong 0.40
+ 
  :slashing-detection-probability 0.10
+ :fraud-detection-probability 0.25
+ :fraud-slash-bps 5000
+ :reversal-detection-probability 0.25
+ :reversal-slash-bps 2500
+ :timeout-slash-bps 200
  
- ; Bond & Coverage Parameters
- :junior-bond-amount 10000          ; $10k junior bond
- :senior-bond-amount 100000         ; $100k senior bond
- :coverage-multiplier 3.0           ; 3× junior bond coverage
- :utilization-factor 0.5            ; 50% utilization
- :fraud-slash-bps 50                ; 0.5% fraud slash
+ :unstaking-delay-days 14
+ :freeze-on-detection? true
+ :freeze-duration-days 3
+ :appeal-window-days 7
  
- ; Economic Parameters
- :escrow-size 1000
- :fee-basis-points 50
- 
- ; Note: Phase N will test multiple appeal success rates (0%, 10%, 20%, 30%, 50%)
- ;       parametrically, so no single appeal-success-rate here
-}
+ :n-epochs 10
+ :n-trials-per-epoch 500
+ :n-resolvers 100
+ :detection-decay-rate 0.0}

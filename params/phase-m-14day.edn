@@ -1,28 +1,38 @@
 {:scenario-id "phase-m-14day-governance"
  :description "Phase M: Governance delay = 14 days (governance failure / slow response)"
-
- :governance-response-days 14  ; 14 days = governance failure / extreme delay
+ :rng-seed 42
  
- :n-resolvers 100
- :n-epochs 10
- :n-trials-per-epoch 500
+ :escrow-distribution
+ {:type :lognormal
+  :mean 10000
+  :std 5000}
  
- :strategy-mix {:honest 0.50 :lazy 0.15 :malicious 0.25 :collusive 0.10}
+ :strategy-mix
+ {:honest 0.50
+  :lazy 0.15
+  :malicious 0.25
+  :collusive 0.10}
+ 
+ :resolver-fee-bps 150
+ :appeal-bond-bps 700
+ :slash-multiplier 2.5
+ :appeal-probability-if-correct 0.05
+ :appeal-probability-if-wrong 0.40
  
  :slashing-detection-probability 0.10
- :fraud-detection-probability 0.00
- :reversal-detection-probability 0.00
+ :fraud-detection-probability 0.25
+ :fraud-slash-bps 5000
+ :reversal-detection-probability 0.25
+ :reversal-slash-bps 2500
+ :timeout-slash-bps 200
  
- :slashing-multiplier 5.0
- :junior-bond-amount 10000
- :senior-bond-amount 100000
- :coverage-multiplier 3.0
+ :unstaking-delay-days 14
+ :freeze-on-detection? true
+ :freeze-duration-days 3
+ :appeal-window-days 7
  
- :escrow-size 1000
- :fee-basis-points 50
- :appeal-probability 0.15
- 
- :exit-profit-threshold 0.0
- :exit-probability-on-loss 0.10
- :new-resolver-entry-rate 0.05
-}
+ :governance-response-days 14
+ :n-epochs 10
+ :n-trials-per-epoch 500
+ :n-resolvers 100
+ :detection-decay-rate 0.0}
