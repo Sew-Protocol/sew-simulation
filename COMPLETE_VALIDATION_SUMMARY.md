@@ -211,3 +211,76 @@ Governance can respond faster than attackers can adapt.
 *Phases tested: P, Q, R, U (228 scenarios)*  
 *Confidence range: 80-88%*  
 *Status: Ready for Phase 1 launch ✅*
+
+---
+
+# Appendix: Phase V/W/X Analysis (Session 014)
+
+## Remaining Unknown Unknowns Identified
+
+After validating Phases P/Q/R/U (228 scenarios, 80-88% confidence), analysis identified 7 remaining failure classes not covered by current tests.
+
+### Why These Matter
+
+**Current tests focus on**: Economic attacks, mechanism design, liveness  
+**Current validation**: 80-88% confidence ✅
+
+**Gap**: Coordination failures, game-theory cascades, behavioral breakdowns  
+**Historical precedent**: Aragon, Kleros, UMA all failed in this domain
+
+### High-Priority Tests (Tier 1)
+
+**Phase V: Correlated Belief Cascades** (3-4 days, 300-400 LOC)
+- Test: Small early bias (20% wrong in first 3 cases) → permanent drift?
+- Model: Confidence signals + public priors + slashing asymmetry
+- Failure condition: Bias doesn't recover within 10 epochs
+- Real-world analog: Kleros cascade effect, early cases biasing later ones
+
+**Phase W: Dispute Type Clustering** (2-3 days, 250-350 LOC)
+- Test: Attacker discovers weak category, concentrates volume
+- Model: 10 categories with hidden difficulty, attacker learning
+- Failure condition: One category >50% success rate (avg 80%)
+- Real-world analog: System-wide security strong, but one niche fails
+
+**Phase X: Burst Concurrency Exploit** (2 days, 200-300 LOC)
+- Test: 20 simultaneous disputes within slashing window
+- Model: Overload effects + detection lag + governance response lag
+- Failure condition: Burst attack becomes profitable (EV > 0)
+- Real-world analog: Attacker weaponizes concurrency, batching discount
+
+### Supporting Tests (Tier 2)
+
+**Phase Y: Participation Liquidity Shocks** (2-3 days)
+- 30-50% resolver withdrawal during high load
+- Test for phase transitions vs. graceful degradation
+
+**Phase Z: Economic Reflexivity Loops** (2-3 days)
+- Unfair outcomes → reputation loss → participation decline → security collapse
+- Test for spirals in 10-20 epoch window
+
+### Expected Outcomes
+
+| Scenario | Confidence | Recommendation |
+|----------|-----------|---|
+| All pass (V/W/X safe) | 85-90% | LAUNCH IMMEDIATELY |
+| One fails | 75-80% | LAUNCH + SAFEGUARDS |
+| Multiple fail | 60-70% | DEFER 2-4 WEEKS |
+
+### Implementation Timeline
+
+**Week 1**: Phase V + Phase W (parallel)  
+**Week 2**: Phase X + consolidated analysis  
+**Decision**: End of week 2 with hard data
+
+### Why Now
+
+- **Small effort**: <1% of codebase (750-1050 LOC vs 160K existing)
+- **High signal**: Closes 15% confidence gap
+- **Strategic**: Complements P/Q/R/U perfectly (moves from economics to game theory)
+- **Real-world relevance**: Tests actual failure modes of decentralized systems
+
+---
+
+**Full specification**: See `PHASE_V_W_X_PROPOSAL.md` in session files  
+**Decision framework**: See `plan.md` Phases V/W/X section  
+**Status**: Analysis complete, awaiting governance decision on implementation
