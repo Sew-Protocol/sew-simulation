@@ -8,6 +8,7 @@
             [resolver-sim.sim.waterfall :as waterfall]
             [resolver-sim.sim.governance-impact :as gov-impact]
             [resolver-sim.sim.phase-o :as phase-o]
+            [resolver-sim.sim.phase-p-lite :as phase-p-lite]
             [resolver-sim.model.rng :as rng]
             [clojure.tools.cli :refer [parse-opts]])
   (:gen-class))
@@ -22,6 +23,7 @@
    ["-l" "--waterfall" "Run Phase L waterfall stress testing"]
    ["-g" "--governance-impact" "Run Phase M governance response time impact analysis"]
    ["-O" "--market-exit" "Run Phase O market exit cascade modeling"]
+   ["-P" "--phase-p-lite" "Run Phase P Lite: falsification test (difficulty, evidence, herding)"]
    ["-h" "--help" "Show this help"]])
 
 (defn usage [options-summary]
@@ -308,6 +310,10 @@
             (:ring-spec params)
             (run-ring-simulation params (:output options))
             
+             
+             (:phase-p-lite options)
+             (do (println "\n📊 Running Phase P Lite Falsification Test")
+                (phase-p-lite/run-phase-p-lite params))
             (:market-exit options)
             (do (println "\n🔄 Running Phase O Market Exit Cascade")
                (phase-o/run-phase-o-complete params))
