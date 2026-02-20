@@ -32,7 +32,8 @@
 (defn run-batch
   "Run N trials with given parameters and return aggregated stats.
    Phase E1: Add Kleros backstop (L2 detection) metrics.
-   Phase G: Add slashing delay support and control baseline support."
+   Phase G: Add slashing delay support and control baseline support.
+   Phase DR2: Add resolver-bond-bps for reputation+slashing model."
   [rng n-trials params]
   (let [results
         (repeatedly n-trials
@@ -48,6 +49,7 @@
             :l2-detection-prob (:l2-detection-prob params 0)
             :slashing-detection-delay-weeks (:slashing-detection-delay-weeks params 0)
             :allow-slashing? (:allow-slashing? params true)
+            :resolver-bond-bps (:resolver-bond-bps params 0)
             :fraud-detection-probability (:fraud-detection-probability params 0.0)
             :fraud-slash-bps (:fraud-slash-bps params 0)
             :reversal-detection-probability (:reversal-detection-probability params 0.0)

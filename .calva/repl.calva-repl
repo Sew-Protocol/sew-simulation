@@ -1,0 +1,3 @@
+; Jacking in...
+; Connecting using "deps.edn" project type.
+; Starting Jack-in: (cd /home/user/Code/sew-simulation; clojure -Sdeps '{:deps {nrepl/nrepl {:mvn/version,"1.5.1"},cider/cider-nrepl {:mvn/version,"0.58.0"}}}' -M:dev)

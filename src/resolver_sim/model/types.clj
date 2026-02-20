@@ -14,7 +14,8 @@
                                  (or (== sum 1.0) (== sum 1)))))
    :resolver-fee-bps (fn [x] (and (number? x) (>= x 0) (<= x 10000)))
    :appeal-bond-bps (fn [x] (and (number? x) (>= x 0) (<= x 10000)))
-   :slash-multiplier (fn [x] (and (number? x) (> x 0)))
+   :resolver-bond-bps (fn [x] (and (number? x) (>= x 0) (<= x 10000)))
+   :slash-multiplier (fn [x] (and (number? x) (>= x 0)))  ; 0 = no slashing (DR1)
    :appeal-probability-if-correct (fn [x] (and (number? x) (>= x 0) (<= x 1)))
    :appeal-probability-if-wrong (fn [x] (and (number? x) (>= x 0) (<= x 1)))
    :slashing-detection-probability (fn [x] (and (number? x) (>= x 0) (<= x 1)))
@@ -64,6 +65,7 @@
 (def default-params
   {:resolver-fee-bps 150
    :appeal-bond-bps 700
+   :resolver-bond-bps 1000         ; DR3: 10% bond (DR1=0, DR2=500)
    :slash-multiplier 2.5
    :appeal-probability-if-correct 0.05
    :appeal-probability-if-wrong 0.40

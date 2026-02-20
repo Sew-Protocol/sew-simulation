@@ -9,6 +9,7 @@
             [resolver-sim.sim.governance-impact :as gov-impact]
             [resolver-sim.sim.phase-o :as phase-o]
             [resolver-sim.sim.phase-p-lite :as phase-p-lite]
+            [resolver-sim.sim.adversarial :as adversarial]
             [resolver-sim.model.rng :as rng]
             [clojure.tools.cli :refer [parse-opts]])
   (:gen-class))
@@ -24,6 +25,7 @@
    ["-g" "--governance-impact" "Run Phase M governance response time impact analysis"]
    ["-O" "--market-exit" "Run Phase O market exit cascade modeling"]
    ["-P" "--phase-p-lite" "Run Phase P Lite: falsification test (difficulty, evidence, herding)"]
+   ["-a" "--adversarial" "Run adversarial parameter search (falsification)"]
    ["-h" "--help" "Show this help"]])
 
 (defn usage [options-summary]
@@ -329,6 +331,9 @@
             
             (:sweep options)
             (run-sweep params (:output options))
+            
+            (:adversarial options)
+            (adversarial/run-adversarial-search params)
             
             :else
             (run-simulation params (:output options)))
