@@ -2,7 +2,8 @@
   "Batch runner: aggregate N trials into summary statistics."
   (:require [resolver-sim.model.rng :as rng]
             [resolver-sim.model.dispute :as dispute]
-            [resolver-sim.model.resolver-ring :as ring]))
+            [resolver-sim.model.resolver-ring :as ring]
+            [resolver-sim.sim.batch-integration :as integration]))
 
 (defn mean [vals]
   (if (empty? vals) 0 (double (/ (reduce + vals) (count vals)))))
@@ -35,14 +36,17 @@
    Phase G: Add slashing delay support and control baseline support.
    Phase DR2: Add resolver-bond-bps for reputation+slashing model."
   [rng n-trials params]
-  (let [results
+  (let [base-strategy (or (:force-strategy params) (:strategy params :honest))
+        ;; Phase P: Adjust strategy if bribery cost makes attack infeasible
+        strategy (integration/adjust-strategy-for-bribery base-strategy params)
+        results
         (repeatedly n-trials
           #(dispute/resolve-dispute
             rng (:escrow-size params 10000)
             (:resolver-fee-bps params)
             (:appeal-bond-bps params)
             (:slash-multiplier params)
-            (or (:force-strategy params) (:strategy params :honest))
+            strategy
             (:appeal-probability-if-correct params)
             (:appeal-probability-if-wrong params)
             (:slashing-detection-probability params)
