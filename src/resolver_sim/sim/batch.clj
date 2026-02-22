@@ -134,7 +134,15 @@
       
       ; Phase H: Freeze and escape metrics
       :frozen-rate (double (/ frozen-count n-trials))
-      :escaped-rate (double (/ escaped-count n-trials))}))
+      :escaped-rate (double (/ escaped-count n-trials))
+      
+      ; Phase P: Bribery metrics
+      :adjusted-strategy strategy
+      :bribery-enabled (boolean (and (:bribe-cost-ratio params) 
+                                     (:fraud-slash-bps params)
+                                     (> (:fraud-slash-bps params) 0)))
+      :bribery-cost (when (:bribe-cost-ratio params)
+                      (integration/calculate-bribery-cost params))}))
 (defn run-ring-batch
   "Run N trials of a resolver ring simulation and return aggregated stats.
    
