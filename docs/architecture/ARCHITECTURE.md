@@ -1,254 +1,220 @@
-# Dispute Resolver Simulation - Architecture
+# sew-simulation Architecture
 
-## Overview
+## What this system is
 
-Monte Carlo simulation engine (Clojure/JVM) validating that honest dispute resolution incentives dominate malicious strategies across a range of economic parameters.
+A Monte Carlo + contract-model simulation engine validating that honest dispute
+resolution incentives dominate malicious strategies in the SEW protocol. It
+operates at two levels:
 
-**Goal**: Provide credible, reproducible evidence that Sew's dispute resolution mechanism correctly aligns resolver behavior with protocol safety.
+1. **Statistical simulation** (`sim/`, `model/`) — probabilistic phases that
+   test incentive properties across parameter spaces.
+2. **Live contract simulation** (`contract_model/`) — a deterministic model of
+   the actual SEW smart contract, run trial-by-trial and recorded to XTDB.
 
-## Design Principles
+Results feed an engineering brief (`docs/results/`) that drives protocol
+implementation and remediation.
 
-1. **Pure Functions**: Model logic is side-effect-free. RNG is an explicit parameter.
-2. **Deterministic Parallelism**: SplittableRandom ensures identical results regardless of execution order.
-3. **Reproducibility**: Same seed + params → identical CSV output, byte-for-byte.
-4. **Transparent Economics**: Fee, bond, slashing calculations are explicit and auditable.
+---
 
-## Core Components
+## Design principles
 
-### Model Layer (`src/resolver_sim/model/`)
+- **Functional core, imperative shell**: all model and simulation logic is pure
+  (no I/O, no DB). Only `io/` (file I/O) and `db/` (XTDB) are effectful.
+- **Pure functions, explicit RNG**: randomness is an explicit parameter — same
+  seed + params → identical output, byte-for-byte.
+- **Reproducibility**: every run is auditable via params EDN + git commit.
+- **Transparent economics**: fee, bond, slashing calculations are explicit and
+  independently verifiable.
 
-**types.clj**: Parameter validation
-- Schema for all inputs (fee-bps, bond-bps, slashing rates, etc.)
-- Default values (when not in param file)
-- Validation rules (fee > 0, strategy ∈ {honest, lazy, malicious, collusive})
+---
 
-**rng.clj**: Deterministic randomness
-- Wraps `java.util.SplittableRandom` for parallel Monte Carlo
-- `make-rng(seed)` → reproducible stream
-- `split-rng(rng)` → two independent sub-streams (both deterministic)
-- `next-double(rng)` → value in [0, 1)
-
-**economics.clj**: Payoff calculations
-- `calculate-fee(escrow-wei, fee-bps)` → fee earned per dispute
-- `calculate-bond(escrow-wei, bond-bps)` → bond at stake
-- `calculate-slashing-loss(bond, slash-mult)` → loss if caught
-- `honest-expected-value(fee, appeal-prob)` → EV for honest strategy
-- `malicious-expected-value(fee, slashing, detection-prob)` → EV for malice
-- `strategy-dominance-score(ev-honest, ev-malice)` → ratio (goal: ≥3.0)
-
-**dispute.clj**: Single dispute resolution
-- `resolve-dispute(rng, escrow-wei, fee-bps, bond-bps, slash-mult, strategy, appeal-probs, detection-prob)`
-- Returns: `{dispute-correct? appeal-triggered? slashed? profit-honest profit-malice strategy}`
-- Strategy logic:
-  - `:honest` → always judge correctly
-  - `:lazy` → 50% correct (honest vs sloppy)
-  - `:malicious` → 30% correct (lie often)
-  - `:collusive` → 80% correct (mostly honest colluding)
-- Slashing only applies if verdict is WRONG and caught (detection-prob)
-
-### Simulation Layer (`src/resolver_sim/sim/`)
-
-**batch.clj**: Aggregate N trials
-- `run-batch(rng, n-trials, params)` → batch summary
-- Computes: mean, std, min/max, quantiles (25/50/75), dominance ratio
-- Handles empty sequences (defaults to 0)
-- Sorts for percentile calculation
-
-**sweep.clj**: Parameter space exploration
-- `run-parameter-sweep(params, base-seed, sweep-params)` → list of batch results
-- Currently: single-parameter sweeps only (1D grid)
-- Example: `{:strategy [:honest :lazy :malicious :collusive]}`
-- Output: one batch result per parameter value
-- Note: Multi-dimensional sweeps (2D+) not yet implemented
-
-### I/O Layer (`src/resolver_sim/io/`)
-
-**params.clj**: Load & validate
-- `load-edn(path)` → raw EDN data from file
-- `merge-defaults(scenario)` → apply defaults (from types/default-params)
-- `validate-and-merge(path)` → load + validate + merge + return
-
-**results.clj**: Export results
-- `write-edn(filepath, data)` → full results as EDN (auditable)
-- `write-csv(filepath, results)` → spreadsheet format (plottable)
-- `write-run-metadata(filepath, metadata)` → git info, timestamp, params
-- `create-run-directory(base-path, scenario-id)` → timestamped directory
-
-### CLI (`src/resolver_sim/core.clj`)
-
-**Entry point**: `-main` (arity with args)
-- Parses: `-p PARAMS -o OUTPUT [-s for sweep]`
-- Loads and validates params
-- Calls `run-simulation` or `run-sweep`
-- Persists results + metadata
-- Exit code: 0 on success, 1 on error
-
-## Data Flow
+## Namespace map
 
 ```
-Parameter File (EDN)
-        ↓
-   io/params.clj
-   - Load
-   - Validate
-   - Merge defaults
-        ↓
-   Validated Params Map
-        ↓
-   core.clj
-   - Single scenario: → run-simulation
-   - Sweep: → run-sweep
-        ↓
-   Model Functions (pure)
-   - Create RNG seeded
-   - Call sim/batch or sim/sweep
-        ↓
-   sim/batch.clj or sim/sweep.clj
-   - Run N trials (via model/dispute.clj)
-   - Aggregate stats
-        ↓
-   Batch Result(s)
-   - Map with :honest-mean :malice-mean :dominance-ratio etc.
-        ↓
-   io/results.clj
-   - Write EDN
-   - Write CSV
-   - Write metadata
-        ↓
-   results/TIMESTAMP_scenario_id/
-   - summary.edn
-   - results.csv
-   - metadata.edn
+src/resolver_sim/
+
+  contract_model/       ← deterministic SEW contract model (pure)
+    accounting.clj        fee/bond/slashing arithmetic
+    authority.clj         resolver authority checks
+    invariants.clj        CM invariant assertions
+    lifecycle.clj         escrow lifecycle transitions
+    resolution.clj        dispute resolution logic
+    runner.clj            single trial entry point → result map
+    state_machine.clj     escrow FSM
+    types.clj             domain types and param schema
+
+  db/                   ← imperative shell: XTDB persistence
+    store.clj             sew_trial_outcomes + sew_escrow_events tables,
+                          queries, summarise-batch (pure aggregate helper)
+    telemetry.clj         adapter: runner output → db writes
+
+  sim/                  ← statistical simulation phases (pure)
+    phase_o.clj … phase_aa.clj   individual hypothesis phases
+    batch.clj, sweep.clj          batch runners
+    adversarial.clj, waterfall.clj, multi_epoch.clj, reputation.clj
+    governance_delay.clj, governance_impact.clj
+    appeal_outcomes.clj, batch_integration.clj
+
+  model/                ← statistical / economic models (pure)
+    types.clj, rng.clj, economics.clj, dispute.clj
+    bribery_markets.clj, contingent_bribery.clj
+    correlated_failures.clj, decision_quality.clj
+    delegation.clj, difficulty.clj
+    escalation_economics.clj, evidence_costs.clj, evidence_spoofing.clj
+    information_cascade.clj, liveness_failures.clj
+    panel_decision.clj, resolver_ring.clj
+
+  governance/           ← governance rule models (pure)
+    rules.clj
+
+  adversaries/          ← adversary strategy models (pure)
+    strategy.clj
+
+  oracle/               ← detection models (pure)
+    detection.clj
+
+  io/                   ← imperative shell: file I/O
+    params.clj            load + validate EDN params
+    results.clj           write CSV / EDN / metadata
+
+  core.clj              ← CLI entry point (imperative shell)
 ```
 
-## Execution Model
+---
 
-### Single Scenario
-1. Load params from `params/baseline.edn`
-2. Create RNG with seed 42
-3. Run 1000 trials:
-   - Each trial: `resolve-dispute(rng, 10000, ...)`
-   - Collect profits (honest + malice paths)
-4. Aggregate: mean, std, quantiles
-5. Write 3 output files
-6. Display summary
+## Functional core / imperative shell boundary
 
-### Strategy Sweep
-1. Load params
-2. For each strategy in [:honest :lazy :malicious :collusive]:
-   - Create new RNG with same base seed
-   - Run 1000 trials with that strategy
-   - Aggregate
-3. Collect all 4 batch results
-4. Write CSV with 4 rows (one per strategy)
-5. Display strategy comparison
+```
+FUNCTIONAL CORE (no I/O, easily testable)
+  contract_model/*, model/*, sim/*, governance/*, adversaries/*, oracle/*
 
-## Key Invariants
+IMPERATIVE SHELL (effectful)
+  db/*      — XTDB reads/writes via evaluation.xtdb (from eval-engine dep)
+  io/*      — file reads/writes
+  core.clj  — CLI, wires shell to core
+```
 
-1. **Profit is always fees-earned minus slashing-loss** (never negative expected value for honest)
-2. **Slashing only occurs if verdict is wrong AND detected** (reward honest when right)
-3. **RNG seeding is deterministic** (reproducibility guarantee)
-4. **Honest strategy earns constant fee** (zero variance)
-5. **Malice variance increases with detection probability** (risk from uncertainty)
+**Rule**: namespaces in the functional core must never import `evaluation.xtdb`
+or any `db/*` namespace. Shell code flows inward; core code never reaches out.
+
+---
+
+## Cross-project coupling (eval-engine)
+
+`sew-simulation` depends on `eval-engine` as a local dep:
+```clojure
+og/eval-engine {:local/root "../og/eval-engine"}
+```
+
+Only `resolver-sim.db.*` may import `evaluation.xtdb` (eval-engine's shared
+XTDB infrastructure). The rest of the codebase is decoupled from eval-engine.
+
+When `evaluation.xtdb` moves to `evaluation.db.xtdb` (planned eval-engine
+restructure), update `db/store.clj` require accordingly.
+
+---
+
+## XTDB persistence layer (`db/`)
+
+Two tables, auto-created by XTDB on first INSERT:
+
+| Table | Purpose |
+|---|---|
+| `sew_trial_outcomes` | One row per simulation trial — strategy, final state, profits, invariant results |
+| `sew_escrow_events` | One row per escrow state transition within a trial — valid-time semantics |
+
+Valid-time semantics: `_valid_from` = simulated block timestamp. Queries with
+`FOR VALID_TIME AS OF` reproduce the escrow state at any point in the simulated
+chain timeline.
+
+SQL literals (not JDBC `?` params) are used for INSERTs because XTDB 2.x
+pgwire rejects double-parenthesised VALUES from `preferQueryMode=simple` param
+substitution. See `evaluation.xtdb/sql-str` etc.
+
+Pass `nil` as datasource to skip all writes — enables offline simulation runs
+and unit tests without a live XTDB instance.
+
+---
+
+## Evaluation pipeline (statistical simulation)
+
+```
+params/*.edn
+  ↓  io/params.clj  (load + validate + merge defaults)
+Validated params map
+  ↓  core.clj  (CLI dispatch)
+  ├── sim/phase_*.clj  (statistical phase runner)
+  │     ↓  model/*.clj  (pure economic/adversarial models)
+  │   Phase summary printed + saved to results/
+  │
+  └── contract_model/runner.clj  (live contract trial)
+        ↓  db/telemetry.clj  (write to XTDB if ds provided)
+      Trial result map → XTDB
+```
+
+---
+
+## Namespace growth guidance
+
+### `sim/` — currently ~15 files
+Stays manageable to ~25 before navigation suffers. When it tips, group by
+what is being tested rather than chronologically:
+
+```
+sim/
+  statistical/    ← early model-validation phases (A–N)
+  live/           ← contract-model phases (O–AA) + future
+  adversarial.clj, batch.clj, sweep.clj, waterfall.clj
+```
+
+Do not split prematurely — wait until a flat listing is confusing to navigate.
+
+### `model/` — currently ~10 files
+Split only when two distinct sub-domains emerge (e.g. `model/economic/` vs
+`model/adversarial/`). `bribery_markets.clj` and `contingent_bribery.clj` are
+natural neighbours; keep them together.
+
+### `db/` — currently 2 files
+New tables get new files here (e.g. `db/governance.clj` for governance event
+tables). Do not grow `store.clj` indefinitely — one file per table group.
+
+### `contract_model/` — currently 8 files
+If the live contract simulation expands significantly (e.g. multi-escrow
+workflows, oracle integration), sub-group into `contract_model/state/` and
+`contract_model/oracle/`. Not needed yet.
+
+---
+
+## Validation phases
+
+27 phases implemented (G through AA). Results in `docs/results/`.
+
+| Range | Focus |
+|---|---|
+| G–N | Statistical model baseline and edge cases |
+| O–X | Contract model: lifecycle, adversarial, divergence |
+| Y | Evidence fog and attention budget exhaustion |
+| Z | Legitimacy and reflexive participation loop |
+| AA | Governance as adversary (capacity attack + rule drift) |
+
+Key findings documented in `docs/results/PHASE_YZA_FINDINGS.md`.
+Remediation status tracked in `docs/results/COMPLETE_VALIDATION_SUMMARY.md`.
+
+---
 
 ## Testing
 
-Unit tests in `test/resolver_sim/core_tests.clj`:
+- **Unit tests**: `test/resolver_sim/contract_model/*_test.clj` — pure functions,
+  no XTDB required (ds=nil)
+- **Integration tests**: `test/resolver_sim/db/telemetry_integration_test.clj` —
+  requires live XTDB on localhost:5432
+- **Simulation smoke tests**: `test-all.sh` — runs all 27 phases, checks for
+  expected completion output (27/27 passing)
 
-```clojure
-(deftest fee-calculation-test)      ; 1000 × 150bps = 15
-(deftest bond-calculation-test)     ; 10000 × 700bps = 700
-(deftest slashing-loss-test)        ; 700 × 2.5 = 1750
-(deftest honest-ev-test)            ; >= 0
-(deftest malice-ev-test)            ; EV = fee - loss*detection
-(deftest rng-determinism-test)      ; Same seed = same sequence
-(deftest rng-split-determinism-test) ; Splits are deterministic
-(deftest dispute-resolution-test)   ; Output shape correct
-(deftest honest-vs-malice-test)     ; Honest > Malice in expectation
-(deftest params-validation-test)    ; Valid/invalid scenarios
-```
-
-All 10 tests pass (18 assertions).
-
-## Reproducibility
-
-### Guarantees
-- Same seed + params → identical mean/std/quantiles
-- Date of run doesn't matter
-- Hardware doesn't matter (JVM semantics)
-
-### Metadata Captured
-- RNG seed used
-- Full params snapshot
-- Git commit (if available)
-- Timestamp
-- Trial count
-- JVM version (optional)
-
-### Verifying Reproducibility
+Run unit tests:
 ```bash
-# Run 1
-clojure -M:run -p params/baseline.edn > out1.txt
-CSV1=$(ls -t results/*/results.csv | head -1)
-
-# Run 2 (same seed)
-clojure -M:run -p params/baseline.edn > out2.txt
-CSV2=$(ls -t results/*/results.csv | head -1)
-
-# Compare
-diff <(tail +2 $CSV1) <(tail +2 $CSV2)  # Should be identical
+clojure -M:test -e "
+  (require 'clojure.test)
+  (require 'resolver-sim.db.telemetry-test)
+  (clojure.test/run-tests 'resolver-sim.db.telemetry-test)"
 ```
-
-## Performance
-
-| Scenario | Trials | Time | Notes |
-|----------|--------|------|-------|
-| Baseline | 1,000 | 2-3s | Single scenario |
-| Baseline | 10,000 | 20-30s | For narrow CI |
-| Sweep (4 strats) | 1,000 each | 8-10s | Strategy comparison |
-| Whale Attack | 2,000 | 4-6s | Large escrows |
-
-No parallelism currently (sequential for reproducibility). Could pmap trials if parallelism is needed.
-
-## Parameter File Format
-
-```edn
-{:scenario-id "baseline-v1"
- :rng-seed 42
- :escrow-size 10000  ; Single fixed size, or draw from distribution
- :resolver-fee-bps 150
- :appeal-bond-bps 700
- :slash-multiplier 2.5
- :appeal-probability-if-correct 0.05
- :appeal-probability-if-wrong 0.40
- :slashing-detection-probability 0.10
- :strategy :honest  ; Or :lazy :malicious :collusive
- :n-trials 1000
- :n-seeds 1         ; Number of independent RNG seeds to run
- :parallelism :auto ; :auto :single :cores-X
- :save-samples? false
- :save-sweep? false}
-```
-
-## Future Extensions
-
-1. **Multi-dimensional sweeps**: 2D+ parameter grids (fee×bond×slashing)
-2. **Parallel execution**: pmap with seed splitting for speed
-3. **Network simulation**: N resolvers, reputation, appeal cascades
-4. **Strategy learning**: Payoff-responsive strategy evolution (Mesa-style)
-5. **Integration with Foundry**: Export recommended params as Solidity constants
-6. **Interactive dashboard**: ClojureScript UI for parameter exploration
-
-## Known Limitations
-
-1. **No network effects**: Each dispute is independent (no cumulative reputation)
-2. **No appeal ladder**: Appeals just have a fixed probability, not a dynamic process
-3. **No resolver reputation**: All resolvers have same detection rate
-4. **Escrow size**: Currently fixed per scenario (no distribution sampling yet)
-5. **Single RNG seed**: Limited exploration of seed sensitivity (n-seeds param unused)
-
-## References
-
-- **SplittableRandom**: Lindholm, Melin (OpenJDK)
-- **Reproducible Monte Carlo**: Salmon et al., "Parallel Random Numbers: As Easy as 1, 2, 3"
-- **Economic Mechanisms**: Myerson, "Game Theory: Analysis of Conflict" (mechanism design basics)
