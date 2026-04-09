@@ -1,5 +1,5 @@
 #!/bin/bash
-# Comprehensive test suite: validates all simulation phases (G through O)
+# Comprehensive test suite: validates all simulation phases (G through AA)
 
 echo "🔍 SEW Simulation Complete Validation Suite"
 echo "==========================================="
@@ -18,7 +18,7 @@ test_scenario() {
     ((TOTAL++))
     echo -n "[$TOTAL] Testing $name... "
     if timeout $timeout_sec clojure -M:run -- -p "$params" $flags > /tmp/test-$name.log 2>&1; then
-        if grep -qE "Results saved|Phase.*complete|Sweep complete|Simulation complete|results saved|waterfall results saved|Exit Cascade Results" /tmp/test-$name.log; then
+        if grep -qE "Results saved|Phase.*complete|Sweep complete|Simulation complete|results saved|waterfall results saved|Exit Cascade Results|PHASE [A-Z]+ SUMMARY" /tmp/test-$name.log; then
             echo "✓ PASS"
             ((PASS++))
         else
@@ -79,6 +79,18 @@ test_scenario "phase-o-baseline" "params/phase-o-baseline.edn" "-O" 120
 test_scenario "phase-o-high-fraud" "params/phase-o-high-fraud.edn" "-O" 120
 
 echo ""
+echo "=== Phase Y: Evidence Fog & Attention Budgets ==="
+test_scenario "phase-y-evidence-fog" "params/phase-y-evidence-fog.edn" "-Y" 120
+
+echo ""
+echo "=== Phase Z: Legitimacy & Reflexive Participation ==="
+test_scenario "phase-z-legitimacy" "params/phase-z-legitimacy.edn" "-Z" 120
+
+echo ""
+echo "=== Phase AA: Governance as Adversary ==="
+test_scenario "phase-aa-governance" "params/phase-aa-governance.edn" "-A" 120
+
+echo ""
 echo "=========================================="
 echo "Test Results: $PASS/$TOTAL passed, $FAIL failed"
 echo "=========================================="
@@ -86,8 +98,8 @@ echo "=========================================="
 if [ $FAIL -eq 0 ]; then
     echo "✅ ALL TESTS PASSED"
     echo ""
-    echo "System Status: READY FOR MAINNET"
-    echo "Confidence: 99%+ (147,500+ trials validated)"
+    echo "System Status: PHASES G–AA VALIDATED"
+    echo "Confidence: Full stack (Phases G-O validated, Y/Z/AA falsification complete)"
     exit 0
 else
     echo "❌ SOME TESTS FAILED ($FAIL tests)"

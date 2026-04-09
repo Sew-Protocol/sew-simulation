@@ -9,6 +9,9 @@
             [resolver-sim.sim.governance-impact :as gov-impact]
             [resolver-sim.sim.phase-o :as phase-o]
             [resolver-sim.sim.phase-p-lite :as phase-p-lite]
+            [resolver-sim.sim.phase-y :as phase-y]
+            [resolver-sim.sim.phase-z :as phase-z]
+            [resolver-sim.sim.phase-aa :as phase-aa]
             [resolver-sim.sim.adversarial :as adversarial]
             [resolver-sim.model.rng :as rng]
             [clojure.tools.cli :refer [parse-opts]])
@@ -25,6 +28,9 @@
    ["-g" "--governance-impact" "Run Phase M governance response time impact analysis"]
    ["-O" "--market-exit" "Run Phase O market exit cascade modeling"]
    ["-P" "--phase-p-lite" "Run Phase P Lite: falsification test (difficulty, evidence, herding)"]
+   ["-Y" "--phase-y" "Run Phase Y: evidence fog and attention budget constraint"]
+   ["-Z" "--phase-z" "Run Phase Z: legitimacy and reflexive participation loop"]
+   ["-A" "--phase-aa" "Run Phase AA: governance as adversary / selective enforcement gaming"]
    ["-a" "--adversarial" "Run adversarial parameter search (falsification)"]
    ["-h" "--help" "Show this help"]])
 
@@ -319,6 +325,18 @@
             (:market-exit options)
             (do (println "\n🔄 Running Phase O Market Exit Cascade")
                (phase-o/run-phase-o-complete params))
+
+            (:phase-y options)
+            (do (println "\n🔬 Running Phase Y: Evidence Fog & Attention Budgets")
+               (phase-y/run-phase-y-sweep params))
+
+            (:phase-z options)
+            (do (println "\n🔄 Running Phase Z: Legitimacy & Reflexive Participation")
+               (phase-z/run-phase-z-sweep params))
+
+            (:phase-aa options)
+            (do (println "\n🏛️  Running Phase AA: Governance as Adversary")
+               (phase-aa/run-phase-aa-sweep params))
             
             (:governance-impact options)
             (run-governance-impact-simulation params (:output options))
