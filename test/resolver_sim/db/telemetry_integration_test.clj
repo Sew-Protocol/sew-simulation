@@ -1,4 +1,4 @@
-(ns resolver-sim.contract-model.telemetry-integration-test
+(ns resolver-sim.db.telemetry-integration-test
   "End-to-end integration tests: run trials → write to live XTDB → query back.
 
    Requires XTDB running on localhost:5432.
@@ -9,9 +9,9 @@
    don't accumulate rows."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [evaluation.store     :as store]
-            [resolver-sim.contract-model.store :as ss]
+            [resolver-sim.db.store :as ss]
             [resolver-sim.contract-model.runner    :as runner]
-            [resolver-sim.contract-model.telemetry :as tel])
+            [resolver-sim.db.telemetry :as tel])
   (:import [java.util Date UUID]))
 
 ;; ---------------------------------------------------------------------------

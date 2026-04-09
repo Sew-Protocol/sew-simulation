@@ -1,4 +1,4 @@
-(ns resolver-sim.contract-model.store
+(ns resolver-sim.db.store
   "XTDB persistence for SEW protocol simulation outcomes.
 
    Two tables (auto-created by XTDB on first INSERT):

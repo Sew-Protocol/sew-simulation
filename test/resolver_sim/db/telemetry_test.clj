@@ -1,4 +1,4 @@
-(ns resolver-sim.contract-model.telemetry-test
+(ns resolver-sim.db.telemetry-test
   "Unit tests for the telemetry adapter.
 
    All tests run with ds=nil — no XTDB instance required.
@@ -7,8 +7,8 @@
    on a nil datasource."
   (:require [clojure.test :refer [deftest testing is are]]
             [resolver-sim.contract-model.runner    :as runner]
-            [resolver-sim.contract-model.telemetry :as tel]
-            [resolver-sim.contract-model.store     :as ss]))
+            [resolver-sim.db.telemetry :as tel]
+            [resolver-sim.db.store     :as ss]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixtures

@@ -1,8 +1,8 @@
-(ns resolver-sim.contract-model.telemetry
+(ns resolver-sim.db.telemetry
   "Adapter between the contract-model runner and the eval-engine XTDB store.
 
    Converts run-trial / run-with-divergence-check output into the record
-   format expected by resolver-sim.contract-model.store and writes it to XTDB.
+   format expected by resolver-sim.db.store and writes it to XTDB.
 
    All write functions accept a datasource as their first argument.
    Passing nil is safe: writes become no-ops, enabling offline simulation
@@ -16,7 +16,7 @@
 
      ;; Without XTDB (default, tests):
      (telemetry/record-trial! nil batch-id trial-id params result)"
-  (:require [resolver-sim.contract-model.store :as ss])
+  (:require [resolver-sim.db.store :as ss])
   (:import [java.util Date UUID]))
 
 ;; ---------------------------------------------------------------------------
@@ -33,7 +33,7 @@
 
 (defn trial->outcome-record
   "Convert a run-trial result (plus contextual metadata) into the map
-   expected by resolver-sim.contract-model.store/insert-sew-trial-outcome!.
+   expected by resolver-sim.db.store/insert-sew-trial-outcome!.
 
    Arguments:
      trial-id   — unique string identifier for this trial
@@ -132,7 +132,7 @@
   "Return summary statistics for a stored batch.
 
    Fetches all trial outcomes for batch-id from XTDB and computes
-   aggregate statistics using resolver-sim.contract-model.store/summarise-batch.
+   aggregate statistics using resolver-sim.db.store/summarise-batch.
 
    Returns {} when ds is nil."
   [ds batch-id]
