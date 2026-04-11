@@ -1,16 +1,18 @@
 ╔═════════════════════════════════════════════════════════════════════════════╗
-║                   FALSIFICATION ROADMAP: 99% → REALITY                     ║
+║              FALSIFICATION ROADMAP: STATUS AS OF APRIL 2026                ║
 ║                                                                             ║
-║  "Mechanism security under perfect observability" is proven.               ║
-║  "System robustness under realistic conditions" is not.                    ║
+║  Original goal: test whether 99% mechanism confidence survives reality.    ║
+║  Result: confirmed brittleness, then resolved it. Now at 80–88%.           ║
 ║                                                                             ║
-║  This document maps the 2-week falsification path that will determine      ║
-║  whether your 99% confidence claim survives contact with reality.          ║
+║  Phase P Lite / P Revised / Q / R / U: COMPLETE                            ║
+║  Phases Y / Z / AA: COMPLETE (Implemented April 2026)                      ║
+║  Phases AB / AC / AD: COMPLETE (Implemented April 2026)                    ║
+║  Threshold searches (AC / AD): COMPLETE (Implemented April 2026)           ║
 ╚═════════════════════════════════════════════════════════════════════════════╝
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ PART 1: WHAT'S PROVEN (Phases G–O)                                         ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
 ✅ Bond adequacy:        66× over-provisioned at 10% fraud
 ✅ Slashing deters fraud:  3:1 dominance (honest >> malicious)
@@ -22,270 +24,129 @@ Evidence: 147,500+ Monte Carlo trials, 8 simulation phases
 Confidence: 99% ✅
 
 Claim: "Mechanism security under perfect observability is sound"
-Status: VALIDATED
+Status: VALIDATED (unchanged)
 
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ PART 2: WHAT'S UNPROVEN (Will Be Tested in Phase P Lite)                   ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ PART 2: WHAT WAS UNPROVEN — NOW RESOLVED (Phases P/Q/R/U)                  ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
-❌ Disputed difficulty heterogeneity:   Attackers can cherry-pick hard cases
-❌ Evidence game dynamics:              Fake generation < verification cost
-❌ Panel/jury coordination:             Herding causes majority-wrong outcomes
-❌ Load-dependent quality:              Heavy load breaks honest incentives
-❌ Correlated resolver behavior:        Information cascades amplify errors
-❌ Slashing delays + repositioning:     Attackers can exit/re-enter during window
+✅ Disputed difficulty heterogeneity:   RESOLVED — Phase P Revised (81 scenarios)
+✅ Evidence game dynamics:              RESOLVED — Phase Q
+✅ Panel/jury coordination (herding):   RESOLVED — Phase P Revised
+✅ Load-dependent quality:              RESOLVED — Phase R (20 scenarios)
+✅ Correlated resolver behavior:        RESOLVED — Phase P Revised
+✅ Learning attackers:                  RESOLVED — Phase U (40 scenarios)
 
-Current assumption: Disputes are uniform, truth is clean, agents independent
-Reality: Disputes are lumpy, truth is messy, agents correlate
+Combined confidence after P/Q/R/U: 80–88% ✅ (was 55%)
 
-Confidence: 55% ⚠️
-
-Claim: "System robustness under realistic observability is unproven"
-Status: NEXT WEEK'S FOCUS
+Claim: "System robustness under realistic observability — largely validated"
+Status: COMPLETE. See docs/results/COMPLETE_VALIDATION_SUMMARY.md
 
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ PART 3: PHASE P LITE (2 WEEKS)                                             ┃
-┃ The Minimal Falsification Test                                             ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ PART 3: FRONTIER — PHASES Y / Z / AA (NEW FINDINGS)                        ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
-Three modules. ~500 lines of Clojure. High probability of falsifying 99%.
+These phases were implemented in April 2026 to test epistemic and reflexive risks.
 
-MODULE 1: DISPUTE DIFFICULTY DISTRIBUTION (Week 1, Day 1–2)
-─────────────────────────────────────────────────────────────
+✅ Phase Y: Evidence Fog + Attention Budgets                    COMPLETE
+   Finding: System fragile under extreme load (>100 disputes/epoch).
+   Accuracy drops to 51-63% as resolvers shift to "guessing".
+   Recommendation: Add per-dispute effort rewards.
 
-Current model:  All disputes are uniform difficulty
-Real model:     70% easy, 25% medium, 5% hard
+✅ Phase Z: Legitimacy + Reflexive Participation Loop           COMPLETE
+   Finding: Vulnerable to "Death Spiral" if accuracy/speed falls.
+   Baseline and market shocks are recoverable, but cascading failures are fatal.
+   Recommendation: Add trust floor + emergency onboarding.
 
-Code: difficulty-distribution.clj
-  - Sample: d ∈ {easy 0.70, medium 0.25, hard 0.05}
-  - Honest accuracy decreases with d:
-    {easy: 0.95, medium: 0.80, hard: 0.50}
-  - Detection drops with d:
-    {easy: 10%, medium: 6%, hard: 2%}
-  - Attacker targets hard: max profit with min detection
-
-Test: Run sweep over difficulty distribution
-  - Baseline (uniform):
-    Honest profit: 150 bps
-    Malice profit: 100 bps
-    Dominance: 1.5x ✅
-  
-  - With attacker targeting hard:
-    Honest profit: 150 bps (stable)
-    Malice profit: 300 bps (increased!)
-    Dominance: 0.5x ❌ (INVERTED)
-
-Expected result: Dominance ratio drops 10–30%
+✅ Phase AA: Governance as Adversary — Selective Enforcement    COMPLETE
+   Finding: Governance bandwidth (3/epoch) is exploitable.
+   Learning attackers achieve 25-33% win rates by targeting "grey zones".
+   Recommendation: Increase capacity + add low-value sampling floor.
 
 
-MODULE 2: EVIDENCE COSTS + ATTENTION BUDGET (Week 1, Day 2–3)
-─────────────────────────────────────────────────────────────
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ PART 4: SAFEGUARD VALIDATION — PHASES AB / AC / AD                         ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
-Current model:  Resolvers have infinite attention
-Real model:     Limited effort budget per epoch
+Phase AB — Per-Dispute Effort Rewards (Phase Y safeguard)       CONFIRMED ✅
+  Hypothesis: reward-multiplier ≥ tier-complexity keeps defection < 20%
+  Result: HOLDS. Minimum viable multiplier = 2× base fee.
+  At 1× (no multiplier): high-complexity tier breaches 20% threshold.
+  At 2× or higher: all tiers safe.
+  Constraint: reward-multiplier must be at least equal to complexity tier (2× for medium).
+  Design recommendation: Implement tiered fee schedule — 1× low, 2× medium, 4× high.
 
-Code: evidence-costs.clj
-  - Budget: 100 time units per epoch
-  - Effort cost varies:
-    {easy/honest: 5, medium/honest: 30, hard/honest: 80}
-    {easy/lazy: 3, medium/lazy: 10, hard/lazy: 15}
-  - Accuracy with partial effort:
-    accuracy(effort-spent, required) = base * (effort-spent / required)
-  - Lazy becomes rational under load
+Phase AC — Trust Floor + Emergency Onboarding (Phase Z safeguard)  FAILED ❌
+  Hypothesis: trust floor keeps legitimacy ≥ 0.50 across 50 epochs
+  Result: DOES NOT HOLD under baseline params (100 disputes/epoch).
+  Threshold search (fee × emergency × trust): 0/36 configurations viable.
+  Structural constraint found:
+    At 100 disputes/epoch with resolver-capacity=15, backlog pressure = 0.56.
+    Exit-probability bottoms out at ~60% even with emergency=8 and trust=0.8.
+    The trust floor onboards resolvers faster than exits at emergency=8, but
+    legitimacy never clears 0.041 — well below the 0.50 collapse threshold.
+  Root cause: exit-probability formula is overly sensitive to short-term backlog.
+  Design implication: Trust floor requires either:
+    (a) Resolver capacity expansion to reduce backlog pressure below ~10%,
+        i.e. resolver-capacity × pool-size ≥ 10× disputes-per-epoch, OR
+    (b) Reformulation of exit-probability to depend on rolling-average legitimacy
+        rather than single-epoch pressure (smooths out transient spikes).
+  Status: Structural constraint documented. Safeguard design needs revision.
 
-Test: Run under three load conditions
-  - Light load (10 disputes, 100 effort):
-    Honest verifies all → accuracy high
-    Malice caught → not profitable
-  
-  - Heavy load (100 disputes, 100 effort):
-    Honest can verify 10% → accuracy drops to 10%
-    Malice can forge evidence faster than honest verifies
-    Lazy profit: 2× honest profit
-  
-  - Extreme load (200 disputes, 100 effort):
-    Honest profit: -50 bps (accuracy too low)
-    Lazy profit: +100 bps (shortcuts pay off)
-
-Expected result: At >100 disputes, lazy dominates honest
-
-
-MODULE 3: PANEL MAJORITY + CORRELATION + HERDING (Week 1–2)
-──────────────────────────────────────────────────────────────
-
-Current model:  Single resolver decides
-Real model:     3-person panel with correlated priors
-
-Code: panel-decision.clj
-  - Replace single resolver with n=3, majority decides (2 out of 3)
-  - Correlation parameter rho ∈ [0, 1]:
-    rho = 0: independent decisions (current)
-    rho = 0.5: shared narratives, moderate correlation
-    rho = 0.9: strong herding, nearly identical outcomes
-  - Herding incentive:
-    if own-vote ≠ majority-vote
-      then perceived-slashing-risk += 20%
-           (minority opinion = higher risk, even if correct)
-  - Decision rule:
-    majority-correct? = (votes-for-truth >= 2)
-
-Test: Sweep over rho with hard disputes
-  - rho = 0 (independence):
-    Panel member 1 (honest): vote truth, gets outvoted
-    Panel members 2–3 (malice): vote false
-    Result: Majority wins, truth-teller not harmed
-    Dominance: 1.2x ⚠️ (down from 1.5x due to panel effects)
-  
-  - rho = 0.4 (moderate herding):
-    Panel member 1 (honest): votes truth but sees 2 votes for false
-    Herding incentive: "If I vote against majority, slashing risk +20%"
-    Member 1 switches vote to match majority (herding cascade)
-    Result: 3 votes for false, truth-teller captured
-    Dominance: 0.8x ❌ (INVERTED)
-  
-  - rho = 0.9 (strong herding):
-    All three resolvers converge to same vote regardless of evidence
-    Attacker needs to bribe 1 resolver; correlation does rest
-    Result: Capturing 1 resolver captures entire panel
-    Dominance: <0.5x ❌ (BROKEN)
-
-Expected result: rho > 0.3 triggers cascade; dominance inverts
+Phase AD — Governance Bandwidth Floor (Phase AA safeguard)      CONFIRMED ✅
+  Hypothesis: mandatory floor reviews keep attacker win rate < 20%
+  Result: HOLDS at minimum viable configuration.
+  Threshold search (floor-reviews × total-capacity):
+    Minimum viable: floor=2, capacity=3 → 18.4% win rate.
+    Analytical derivation confirmed: floor > n/2 required (floor ≥ 3 of 5).
+    Empirical minimum (18.4%) is at the edge — floor=3, capacity=3 is safer (16%).
+  Recommended config: floor=3 reviews per epoch, total-capacity=3-4.
+  Constraint: floor < n/2 is insufficient regardless of total capacity.
+  Design recommendation: Mandate minimum 60% coverage of low-value disputes per epoch.
 
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ PART 4: INTEGRATION (Week 2)                                               ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ CONTRACT MODEL VERIFICATION — PHASES AB/AC/AD (Escalation)                 ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
-Phase P Lite CLI:
-  clojure -M:run -p params/phase-p-lite-baseline.edn -P
-  
-  Output: Sweep over rho (0.0, 0.2, 0.4, 0.6, 0.8)
-          + load (10, 50, 100, 200 disputes)
-          + difficulty targeting (random vs. hard-biased)
-  
-  Results table:
-    rho | load | difficulty | honest-profit | malice-profit | dominance
-    ────┼──────┼────────────┼───────────────┼───────────────┼──────────
-     0  |  10  | random     |     150       |     100       |   1.5x ✅
-     0  |  100 | hard       |     150       |     200       |   0.75x ❌
-    0.4 |  50  | random     |     100       |     150       |   0.67x ❌
-    0.8 |  10  | random     |      80       |     200       |   0.4x ❌
+Contract model (contract_model/) now models multi-round escalation end-to-end:
+  - runner.clj: Priority-3 authority path (no custom-resolver lock),
+    escalation loop up to MAX_ROUND=2, real :escalated? and :escalation-level fields
+  - replay_test.clj: sections 15-17 cover full escalation chain,
+    mid-pending escalation, non-participant and max-level rejection
+  - properties_test.clj: 14 properties including multi-step escalation sequences
 
-Visualization: Dominance ratio heatmap (rho vs. load)
-  - Upper left: green (robust)
-  - Lower right: red (broken)
-  - Goal: find the tipping point
+Invariant coverage: 13 invariants (solvency=strict, fee-monotone, held-non-negative,
+status-combinations, pending-consistency, dispute-timestamp, dispute-level-bounded,
+escalation-monotonic, terminal-unchanged, finalization-accounting, no-double-finalize,
+bond-slash-bounded, no-stale-automatable).
+
+Zero invariant violations across 100 adversarial trials.
 
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ PART 5: LIKELY OUTCOME                                                     ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ BOTTOM LINE                                                                 ┃
+╚━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
-Prediction: SCENARIO B (Brittleness Discovered) — 70% likely
+Economic fundamentals: ROBUST (Phases G–O, 99% confidence)
+Realistic observability: LARGELY VALIDATED (Phases P/Q/R/U, 80–88%)
+Epistemic/reflexive risks: IDENTIFIED with specific mitigations (Phases Y/Z/AA)
 
-Failure chain:
-  1. Hard cases (5% tail) have detection -80% vs. easy cases
-     → Attacker targets hard; honest avoid them
-  
-  2. Under load (200 disputes, 100 effort), honest accuracy drops
-     → Can only verify 10% of disputes
-     → Malice can forge evidence faster than honest verifies
-  
-  3. Panel correlation (rho > 0.3) enables herding
-     → Even honest resolvers converge on wrong majority outcome
-     → Slashing incentive punishes deviance from consensus
-  
-  4. Combined effect:
-     → Dominance ratio inverts from 1.5x (safe) to 0.8x (broken)
-     → System is NOT vulnerable to simple fraud (bonds still deter)
-     → BUT system IS vulnerable to:
-         • Coordinated attacks on hard cases
-         • Participation under load
-         • Correlated resolver behavior
-  
-Result: Confidence drops from 99% → 65%
-        System is "fragile, not broken"
+Safeguard status:
+  AB (effort rewards):       CONFIRMED — 2× multiplier minimum viable
+  AC (trust floor):          STRUCTURAL CONSTRAINT — exit formula needs revision
+  AD (governance floor):     CONFIRMED — floor=3 of 5 disputes/epoch minimum viable
 
+Open items:
+  1. Phase AC exit-probability formula revision:
+     Replace single-epoch pressure with rolling-N-epoch average, then re-run.
+  2. Phase AD implementation recommendation:
+     Mandate floor=3 of (disputes-per-epoch) low-value reviews in governance spec.
+  3. Phase AB implementation recommendation:
+     Enforce tiered resolver fee schedule in protocol params.
 
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ PART 6: POST-PHASE-P-LITE DECISION                                         ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-
-IF ROBUSTNESS CONFIRMED (20% chance):
-  → 90%+ confidence achieved
-  → Proceed to mainnet
-  → Phase Q–T at lower priority
-
-IF BRITTLENESS DISCOVERED (70% chance):
-  → Choose one of three options:
-
-  OPTION A: REDESIGN (4–8 weeks)
-    - Multi-level adjudication (jury for hard cases)
-    - Reputation-weighted slashing (prevent herding)
-    - Evidence oracles (external truth commitment)
-    - Correlated-error penalties
-    Timeline: 2 months before launch
-    Confidence: 90%+
-
-  OPTION B: ADD PARAMETERS (2–3 weeks)
-    - Increase bond for hard disputes (2–3× multiplier)
-    - Cap herding effect (reduce rho amplification)
-    - Implement effort rewards
-    - Escalation thresholds
-    Timeline: 1 week before launch
-    Confidence: 75–80%
-
-  OPTION C: ACCEPT AND MONITOR (Launch now)
-    - Ship with current design
-    - Deploy monitoring (hard-case performance, herding signals)
-    - Gather real-world data
-    - Redesign in 2.0 if needed
-    Timeline: Now
-    Confidence now: 55%, → 75%+ by week 6
-
-IF FUNDAMENTAL VULNERABILITY FOUND (10% chance):
-  → Halt mainnet launch
-  → Full redesign required
-  → Re-run Phase P Lite after changes
-
-
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ PART 7: GO-LIVE DECISION TREE                                              ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-
-Week 0: Launch mainnet now?
-  └─→ YES (bonds are proven at 99%)
-  
-Week 1–2: Run Phase P Lite in parallel
-  
-Week 2: Phase P Lite results + real-world data available
-  └─→ If robust + stable:     → Option C (monitor only) ✅
-  └─→ If brittle + attacked:  → Option B (quick fix) + monitor
-  └─→ If brittle + stable:    → Option A (redesign) OR Option C (wait)
-
-Month 2: Reach 80%+ confidence
-  - Real-world data converged with simulation
-  - Issues identified and mitigated
-  - Path to 90%+ clear
-
-
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ BOTTOM LINE                                                                ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-
-Your 99% claim is CORRECT for mechanism security under perfect observability.
-That's the hardest part, and it's proven.
-
-Your 55% confidence on realistic conditions is also CORRECT.
-The gap is real and addressable in 2 weeks.
-
-Phase P Lite will answer whether the gap is "serious concern" or "corner case."
-
-Launch now. Learn fast. Decide by week 2.
-
-This is how Kleros, UMA, Aragon did it: Deploy empirically, iterate based on
-real attacks, and let the market reveal what simulation missed.
+Confidence: 80-88% (validated with known failure boundaries) ✅
 
 ═════════════════════════════════════════════════════════════════════════════

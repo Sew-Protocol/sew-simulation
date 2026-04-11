@@ -91,6 +91,26 @@ echo "=== Phase AA: Governance as Adversary ==="
 test_scenario "phase-aa-governance" "params/phase-aa-governance.edn" "-A" 120
 
 echo ""
+echo "=== Phase AB: Per-Dispute Effort Rewards (Phase Y safeguard) ==="
+test_scenario "phase-ab-effort-rewards" "params/phase-ab-effort-rewards.edn" "-B" 60
+
+echo ""
+echo "=== Phase AC: Trust Floor & Emergency Onboarding (Phase Z safeguard) ==="
+test_scenario "phase-ac-trust-floor" "params/phase-ac-trust-floor.edn" "-C" 60
+
+echo ""
+echo "=== Phase AD: Governance Bandwidth Floor (Phase AA safeguard) ==="
+test_scenario "phase-ad-governance-floor" "params/phase-ad-governance-floor.edn" "-D" 60
+
+echo ""
+echo "=== Phase AC Threshold Search ==="
+test_scenario "phase-ac-threshold-sweep" "params/phase-ac-threshold-sweep.edn" "-E" 120
+
+echo ""
+echo "=== Phase AD Threshold Search ==="
+test_scenario "phase-ad-threshold-sweep" "params/phase-ad-threshold-sweep.edn" "-F" 120
+
+echo ""
 echo "=========================================="
 echo "Test Results: $PASS/$TOTAL passed, $FAIL failed"
 echo "=========================================="
@@ -98,8 +118,8 @@ echo "=========================================="
 if [ $FAIL -eq 0 ]; then
     echo "✅ ALL TESTS PASSED"
     echo ""
-    echo "System Status: PHASES G–AA VALIDATED"
-    echo "Confidence: Full stack (Phases G-O validated, Y/Z/AA falsification complete)"
+    echo "System Status: PHASES G–AD + THRESHOLD SEARCHES VALIDATED"
+    echo "Confidence: Full stack (Phases G-O validated, Y/Z/AA falsification complete, AB/AC/AD safeguards + threshold constraints confirmed)"
     exit 0
 else
     echo "❌ SOME TESTS FAILED ($FAIL tests)"

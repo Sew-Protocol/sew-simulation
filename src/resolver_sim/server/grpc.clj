@@ -1,0 +1,207 @@
+(ns resolver-sim.server.grpc
+  "Phase 2 gRPC server for the SEW Simulation Engine.
+
+   Uses io.grpc with a custom JSON Marshaller — no protoc compilation required.
+   All method descriptors are built programmatically at server start.
+
+   Wire format: UTF-8 JSON.
+     - Python → Clojure: snake_case keys  (parse: snake_case → kebab-case keywords)
+     - Clojure → Python: snake_case keys  (stream: kebab-case keywords → snake_case)
+
+   Service: sew.simulation.SimulationEngine
+     rpc StartSession   (StartRequest)   → StartResponse
+     rpc Step           (StepRequest)    → StepResponse
+     rpc DestroySession (DestroyRequest) → DestroyResponse
+
+   See proto/simulation.proto for the full service contract.
+
+   Layering: server/* may import contract_model/*.  Must NOT import db/* or io/*."
+  (:require [clojure.data.json          :as json]
+            [clojure.string             :as str]
+            [resolver-sim.server.session :as session])
+  (:import [io.grpc ServerBuilder MethodDescriptor MethodDescriptor$MethodType
+                    MethodDescriptor$Marshaller
+                    ServerServiceDefinition ServiceDescriptor Status StatusException]
+           [io.grpc.stub ServerCalls]
+           [java.io ByteArrayInputStream InputStreamReader]
+           [java.nio.charset StandardCharsets]))
+
+;; ---------------------------------------------------------------------------
+;; JSON key normalisation (wire ↔ Clojure)
+;; ---------------------------------------------------------------------------
+
+(defn- snake->kw [s]
+  (keyword (str/replace s "_" "-")))
+
+(defn- kw->snake ^String [k]
+  (if (keyword? k) (str/replace (name k) "-" "_") (str k)))
+
+(defn- val->wire [_k v]
+  (cond
+    (keyword? v) (str/replace (name v) "-" "_")
+    :else        v))
+
+;; ---------------------------------------------------------------------------
+;; JSON Marshaller
+;;
+;; Implements io.grpc.MethodDescriptor$Marshaller for Clojure map ↔ JSON bytes.
+;; parse:  JSON bytes (snake_case) → Clojure map (kebab-case keywords)
+;; stream: Clojure map (kebab-case keywords) → JSON bytes (snake_case)
+;; ---------------------------------------------------------------------------
+
+(defn- json-marshaller []
+  (reify MethodDescriptor$Marshaller
+    (stream [_ m]
+      (-> (json/write-str m :key-fn kw->snake :value-fn val->wire)
+          (.getBytes StandardCharsets/UTF_8)
+          ByteArrayInputStream.))
+    (parse [_ is]
+      (json/read (InputStreamReader. is StandardCharsets/UTF_8)
+                 :key-fn snake->kw))))
+
+;; ---------------------------------------------------------------------------
+;; Method descriptors
+;; ---------------------------------------------------------------------------
+
+(defn- make-method
+  "Build a unary MethodDescriptor<map,map> for the given RPC name."
+  [rpc-name]
+  (let [m (json-marshaller)]
+    (-> (MethodDescriptor/newBuilder m m)
+        (.setType MethodDescriptor$MethodType/UNARY)
+        (.setFullMethodName (str "sew.simulation.SimulationEngine/" rpc-name))
+        (.build))))
+
+;; ---------------------------------------------------------------------------
+;; Handlers
+;; ---------------------------------------------------------------------------
+
+(defn- handle-start
+  "StartSession: allocate a new simulation session.
+   req: {:session-id :agents [{:id :address :type}] :protocol-params {:resolver-fee-bps ...} :initial-block-time}"
+  [req]
+  (let [sid        (:session-id req)
+        agents     (:agents req [])
+        params     (get req :protocol-params {})
+        init-time  (get req :initial-block-time 1000)
+        result     (session/create-session! sid agents params init-time)]
+    {:session-id sid
+     :ok         (boolean (:ok result))
+     :error      (some-> (:error result) name)}))
+
+(defn- handle-step
+  "Step: execute one event against the session's canonical world state.
+   req: {:session-id :event {:seq :time :agent :action :params {...}}}"
+  [req]
+  (let [sid    (:session-id req)
+        event  (:event req)
+        result (session/step-session! sid event)]
+    (if-not (:ok result)
+      {:session-id  sid
+       :result      "error"
+       :world-view  nil
+       :trace-entry nil
+       :halted      false
+       :error       (some-> (:error result) name)}
+      (let [step    (:step result)
+            entry   (:trace-entry step)
+            wv      (:world entry)]
+        {:session-id  sid
+         :result      (some-> (:result entry) name)
+         :world-view  wv
+         :trace-entry (dissoc entry :world)
+         :halted      (boolean (:halted? step))
+         :error       nil}))))
+
+(defn- handle-destroy
+  "DestroySession: free session resources.
+   req: {:session-id}"
+  [req]
+  (let [sid    (:session-id req)
+        result (session/destroy-session! sid)]
+    {:session-id sid
+     :ok         (boolean (:ok result))
+     :error      (some-> (:error result) name)}))
+
+;; ---------------------------------------------------------------------------
+;; Unary call handler wrapper
+;; ---------------------------------------------------------------------------
+
+(defn- unary-handler
+  "Wrap a (req → resp) fn as a gRPC ServerCallHandler.
+   Catches exceptions and converts them to gRPC INTERNAL status."
+  [f]
+  (ServerCalls/asyncUnaryCall
+   (reify io.grpc.stub.ServerCalls$UnaryMethod
+     (^void invoke [_ req ^io.grpc.stub.StreamObserver observer]
+       (try
+         (let [resp (f req)]
+           (.onNext observer resp)
+           (.onCompleted observer))
+         (catch Exception e
+           (.onError observer
+                     (-> (Status/INTERNAL)
+                         (.withDescription (.getMessage e))
+                         (.asRuntimeException)))))))))
+
+;; ---------------------------------------------------------------------------
+;; Service definition
+;; ---------------------------------------------------------------------------
+
+(defn- build-service []
+  (let [start-m   (make-method "StartSession")
+        step-m    (make-method "Step")
+        destroy-m (make-method "DestroySession")
+        svc-desc  (-> (ServiceDescriptor/newBuilder "sew.simulation.SimulationEngine")
+                      (.addMethod start-m)
+                      (.addMethod step-m)
+                      (.addMethod destroy-m)
+                      (.build))]
+    (-> (ServerServiceDefinition/builder svc-desc)
+        (.addMethod start-m   (unary-handler handle-start))
+        (.addMethod step-m    (unary-handler handle-step))
+        (.addMethod destroy-m (unary-handler handle-destroy))
+        (.build))))
+
+;; ---------------------------------------------------------------------------
+;; Server lifecycle
+;; ---------------------------------------------------------------------------
+
+(defonce ^:private ^{:doc "Running gRPC server instance."} server
+  (atom nil))
+
+(defn start!
+  "Start the gRPC server on the given port (default 7070).
+   Returns the started Server instance.
+   Throws if a server is already running."
+  ([]     (start! 7070))
+  ([port]
+   (when @server
+     (throw (ex-info "gRPC server already running" {:port port})))
+   (let [svc (build-service)
+         srv (-> (ServerBuilder/forPort port)
+                 (.addService svc)
+                 (.build)
+                 (.start))]
+     (reset! server srv)
+     (println (str "[grpc] SimulationEngine listening on port " port))
+     srv)))
+
+(defn stop!
+  "Gracefully shut down the running gRPC server.
+   No-op if no server is running."
+  []
+  (when-let [srv @server]
+    (.shutdown srv)
+    (reset! server nil)
+    (println "[grpc] SimulationEngine stopped")))
+
+(defn port
+  "Return the port the running server is bound to, or nil."
+  []
+  (some-> @server .getPort))
+
+(defn await-termination
+  "Block until the server shuts down. Useful for CLI entry points."
+  []
+  (some-> @server .awaitTermination))

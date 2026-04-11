@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+// Service contract documentation for the SEW Simulation Engine.
+//
+// This file is DOCUMENTATION ONLY. The Clojure server uses io.grpc with a
+// JSON Marshaller — no protoc compilation is performed. The Python client
+// uses grpcio channel.unary_unary with custom JSON serializers.
+//
+// Wire format: UTF-8 JSON. All keys are snake_case on the wire.
+// Clojure server converts snake_case → kebab-case internally and back on response.
+//
+// Authority model: Clojure is the SOLE source of truth.
+//   - Python sends events; Clojure executes them against the real state machine.
+//   - All invariant checks are performed in Clojure only.
+//   - Python never holds world state; it receives a world_view snapshot per step.
+
+package sew.simulation;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Service
+// ─────────────────────────────────────────────────────────────────────────────
+
+service SimulationEngine {
+  // Allocate a new session: build world0, index agents, set block-time.
+  rpc StartSession (StartRequest)   returns (StartResponse);
+
+  // Execute one event against the session's canonical world state.
+  // Returns the updated world_view, a full trace entry, and halted flag.
+  rpc Step         (StepRequest)    returns (StepResponse);
+
+  // Destroy a session and free its resources.
+  rpc DestroySession (DestroyRequest) returns (DestroyResponse);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StartSession
+// ─────────────────────────────────────────────────────────────────────────────
+
+message StartRequest {
+  string session_id         = 1;
+  repeated Agent agents     = 2;
+  ProtocolParams protocol_params = 3;
+  int64 initial_block_time  = 4;  // block timestamp for world0
+}
+
+message Agent {
+  string id      = 1;  // logical name used in events ("buyer1")
+  string address = 2;  // Ethereum address ("0x...")
+  string type    = 3;  // "honest" | "attacker" | "resolver" etc.
+}
+
+message ProtocolParams {
+  int32 resolver_fee_bps            = 1;  // default 50
+  int64 appeal_window_duration      = 2;  // seconds, default 0
+  int64 max_dispute_duration        = 3;  // seconds, default 2592000
+  int32 appeal_bond_protocol_fee_bps = 4; // default 0
+}
+
+message StartResponse {
+  string session_id = 1;
+  bool   ok         = 2;
+  string error      = 3;  // null on success
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step
+// ─────────────────────────────────────────────────────────────────────────────
+
+message StepRequest {
+  string session_id = 1;
+  Event  event      = 2;
+}
+
+message Event {
+  int32  seq    = 1;   // monotonically increasing per session (0-based)
+  int64  time   = 2;   // absolute block timestamp
+  string agent  = 3;   // agent id (must be in session's agent list)
+  string action = 4;   // see ActionName enum
+  // params is an open map; fields vary by action.
+  // Sent as a nested JSON object on the wire.
+  google.protobuf.Struct params = 5;
+}
+
+// Supported action names (informational — enforced in Clojure apply-action multimethod)
+enum ActionName {
+  UNKNOWN                   = 0;
+  CREATE_ESCROW             = 1;
+  RAISE_DISPUTE             = 2;
+  EXECUTE_RESOLUTION        = 3;
+  EXECUTE_PENDING_SETTLEMENT = 4;
+  AUTOMATE_TIMED_ACTIONS    = 5;
+  RELEASE                   = 6;
+  SENDER_CANCEL             = 7;
+  RECIPIENT_CANCEL          = 8;
+  AUTO_CANCEL_DISPUTED      = 9;
+  ADVANCE_TIME              = 10;
+}
+
+message StepResponse {
+  string session_id = 1;
+
+  // "ok" | "rejected" | "invariant_violated" | "error"
+  string result      = 2;
+
+  // Lean snapshot of world state after this step (nil on halt)
+  WorldView world_view = 3;
+
+  // Full step trace entry from Clojure process-step (mirrors replay trace)
+  TraceEntry trace_entry = 4;
+
+  // true when the simulation has halted due to an invariant violation
+  bool   halted = 5;
+
+  // non-null only when result == "error" (server-level error, not a revert)
+  string error  = 6;
+}
+
+message WorldView {
+  int64 block_time    = 1;
+  int32 escrow_count  = 2;
+  // total_held and total_fees are token→amount maps sent as nested JSON objects
+  // int64 total_held = 3;  (object on wire)
+  // int64 total_fees = 4;  (object on wire)
+  int32 pending_count = 5;
+  // live_states is a workflowId→state map sent as nested JSON object
+  // map<string,string> live_states = 6;
+}
+
+message TraceEntry {
+  int32  seq            = 1;
+  int64  time           = 2;
+  string agent          = 3;
+  string action         = 4;
+  string result         = 5;  // "ok" | "rejected" | "invariant_violated"
+  string error          = 6;  // null when result == "ok"
+  bool   invariants_ok  = 7;
+  // extra is an open map (e.g. {workflow_id: 0} for create_escrow)
+  // violations is a nested map of invariant results when invariants_ok == false
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DestroySession
+// ─────────────────────────────────────────────────────────────────────────────
+
+message DestroyRequest {
+  string session_id = 1;
+}
+
+message DestroyResponse {
+  string session_id = 1;
+  bool   ok         = 2;
+  string error      = 3;
+}

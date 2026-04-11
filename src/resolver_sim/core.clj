@@ -12,6 +12,9 @@
             [resolver-sim.sim.phase-y :as phase-y]
             [resolver-sim.sim.phase-z :as phase-z]
             [resolver-sim.sim.phase-aa :as phase-aa]
+            [resolver-sim.sim.phase-ab :as phase-ab]
+            [resolver-sim.sim.phase-ac :as phase-ac]
+            [resolver-sim.sim.phase-ad :as phase-ad]
             [resolver-sim.sim.adversarial :as adversarial]
             [resolver-sim.model.rng :as rng]
             [clojure.tools.cli :refer [parse-opts]])
@@ -31,6 +34,11 @@
    ["-Y" "--phase-y" "Run Phase Y: evidence fog and attention budget constraint"]
    ["-Z" "--phase-z" "Run Phase Z: legitimacy and reflexive participation loop"]
    ["-A" "--phase-aa" "Run Phase AA: governance as adversary / selective enforcement gaming"]
+   ["-B" "--phase-ab" "Run Phase AB: per-dispute effort rewards (Phase Y safeguard)"]
+   ["-C" "--phase-ac" "Run Phase AC: trust floor and emergency onboarding (Phase Z safeguard)"]
+   ["-D" "--phase-ad" "Run Phase AD: governance bandwidth floor (Phase AA safeguard)"]
+   ["-E" "--phase-ac-sweep" "Run Phase AC threshold search: min viable trust-floor config"]
+   ["-F" "--phase-ad-sweep" "Run Phase AD threshold search: min viable governance floor config"]
    ["-a" "--adversarial" "Run adversarial parameter search (falsification)"]
    ["-h" "--help" "Show this help"]])
 
@@ -337,6 +345,26 @@
             (:phase-aa options)
             (do (println "\n🏛️  Running Phase AA: Governance as Adversary")
                (phase-aa/run-phase-aa-sweep params))
+
+            (:phase-ab options)
+            (do (println "\n📊 Running Phase AB: Per-Dispute Effort Rewards")
+               (phase-ab/run-phase-ab-sweep params))
+
+            (:phase-ac options)
+            (do (println "\n🔄 Running Phase AC: Trust Floor & Emergency Onboarding")
+               (phase-ac/run-phase-ac-sweep params))
+
+            (:phase-ad options)
+            (do (println "\n🏛️  Running Phase AD: Governance Bandwidth Floor")
+               (phase-ad/run-phase-ad-sweep params))
+
+            (:phase-ac-sweep options)
+            (do (println "\n🔬 Running Phase AC Threshold Search")
+               (phase-ac/run-phase-ac-threshold-sweep params))
+
+            (:phase-ad-sweep options)
+            (do (println "\n🔬 Running Phase AD Threshold Search")
+               (phase-ad/run-phase-ad-threshold-sweep params))
             
             (:governance-impact options)
             (run-governance-impact-simulation params (:output options))
