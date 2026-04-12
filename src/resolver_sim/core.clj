@@ -15,6 +15,7 @@
             [resolver-sim.sim.phase-ab :as phase-ab]
             [resolver-sim.sim.phase-ac :as phase-ac]
             [resolver-sim.sim.phase-ad :as phase-ad]
+            [resolver-sim.sim.phase-t  :as phase-t]
             [resolver-sim.sim.adversarial :as adversarial]
             [resolver-sim.model.rng :as rng]
             [clojure.tools.cli :refer [parse-opts]])
@@ -40,6 +41,7 @@
    ["-E" "--phase-ac-sweep" "Run Phase AC threshold search: min viable trust-floor config"]
    ["-F" "--phase-ad-sweep" "Run Phase AD threshold search: min viable governance floor config"]
    ["-G" "--phase-ac-cap"  "Run Phase AC capacity expansion: validate the 10× capacity rule"]
+   ["-H" "--phase-t"       "Run Phase T: governance capture via rule drift"]
    ["-a" "--adversarial" "Run adversarial parameter search (falsification)"]
    ["-h" "--help" "Show this help"]])
 
@@ -370,6 +372,10 @@
             (:phase-ac-cap options)
             (do (println "\n🔬 Running Phase AC Capacity Expansion")
                (phase-ac/run-phase-ac-capacity-expansion params))
+
+            (:phase-t options)
+            (do (println "\n🏛️  Running Phase T: Governance Capture via Rule Drift")
+               (phase-t/run-phase-t-sweep params))
             
             (:governance-impact options)
             (run-governance-impact-simulation params (:output options))

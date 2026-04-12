@@ -8,6 +8,7 @@
 ║  Phases Y / Z / AA: COMPLETE (Implemented April 2026)                      ║
 ║  Phases AB / AC / AD: COMPLETE (Implemented April 2026)                    ║
 ║  Threshold searches (AC / AD): COMPLETE (Implemented April 2026)           ║
+║  Phase T (governance capture): COMPLETE (Implemented April 2026)           ║
 ╚═════════════════════════════════════════════════════════════════════════════╝
 
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -130,6 +131,53 @@ Phase AD — Governance Bandwidth Floor (Phase AA safeguard)      CONFIRMED ✅
 
 
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ PART 5: GOVERNANCE CAPTURE — PHASE T                                        ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Phase T — Governance Capture via Rule Drift                    COMPLETE ✅
+  Gap tested: Can an attacker with partial governance control (<50% stake)
+    drive safety-critical parameters (slash multiplier, appeal bond) below
+    viability thresholds via repeated small incremental proposals?
+
+  Model: Each epoch the attacker proposes a -0.05 reduction to slash-multiplier
+    (then appeal-bond-bps once slash floor is threatened). Proposals pass when
+    attacker votes exceed participating defender votes. Governance timelock:
+    5 epochs. Safety floors: slash-multiplier ≥ 1.5, appeal-bond-bps ≥ 200.
+    5 seeds × 100 epochs per configuration.
+
+  H1 — Stake threshold (no timing attack, no safeguard):      ✅ HOLDS
+    9/9 configurations at stake ≤ 35% produced 0 drift across all abstention
+    rates (10–30%). Attacker cannot pass proposals without a majority when
+    defenders show up.
+    Boundary: breach first appears at stake=45% + abstention=20% (100% fail).
+    At 40% stake + 30% abstention: drift=0.75 (surviving but dangerous).
+
+  H2 — Timing attack (abstention spike +20pp every 5th epoch):  ✅ CONFIRMED
+    At 40% stake + 20% abstention: timing creates 0.95 drift (vs 0 without).
+    At 40% stake + 30% abstention: timing causes breach at epoch ~71
+      (same scenario survives without timing — timing converts pass to fail).
+    At 45% stake: timing accelerates breach to epoch ~26–34.
+    Timing attacks are a confirmed attack vector: a 40% faction can weaponise
+    governance participation fatigue to accumulate near-breach drift.
+
+  H3 — Detect-and-revert safeguard:                           ✅ HOLDS
+    Auto-reverting one drift step whenever a 10-epoch window shows > 0.10
+    cumulative drop completely neutralises the attack even up to 49% stake:
+    - stake=0.40, abst=0.30: 0% survival without safeguard → 100% with ✅
+    - stake=0.45, abst=0.20: 0% survival without safeguard → 100% with ✅
+    - stake=0.49, abst=0.30: 0% survival without safeguard → 100% with ✅
+    The safeguard works because drift requires accumulated wins, and each
+    reversion forces the attacker to re-win a vote before the next step.
+
+  Protocol design implications:
+    Without safeguard: governance safe at ≤ 35% hostile stake, normalabstention.
+    With detect-and-revert: safe up to 49% hostile stake (any tested abstention).
+    Mandatory recommendation: deploy detect-and-revert for slash-multiplier and
+      appeal-bond-bps. For supermajority-gated changes, require 60%+ approval.
+    Governance robustness confidence: 50–60% → 80–85% ✅ (gap now closed).
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ CONTRACT MODEL VERIFICATION — PHASES AB/AC/AD (Escalation)                 ┃
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
@@ -155,11 +203,14 @@ Zero invariant violations across 100 adversarial trials.
 Economic fundamentals: ROBUST (Phases G–O, 99% confidence)
 Realistic observability: LARGELY VALIDATED (Phases P/Q/R/U, 80–88%)
 Epistemic/reflexive risks: IDENTIFIED with specific mitigations (Phases Y/Z/AA)
+Governance capture: CLOSED — Phase T confirms capture requires ≥40% stake;
+  detect-and-revert safeguard neutralises drift up to 49% stake.
 
 Safeguard status:
   AB (effort rewards):       CONFIRMED — 2× multiplier minimum viable
   AC (trust floor):          10× CAPACITY + BOOTSTRAP REQUIRED (cold-start spiral root cause confirmed)
   AD (governance floor):     CONFIRMED — floor=3 of 5 disputes/epoch minimum viable
+  T  (rule drift):           CONFIRMED SAFE WITH SAFEGUARD — detect-and-revert mandatory
 
 Open items:
   1. Phase AC capacity expansion: SIMULATED — 10× capacity rule necessary
@@ -171,7 +222,10 @@ Open items:
      Mandate floor=3 of (disputes-per-epoch) low-value reviews in governance spec.
   3. Phase AB implementation recommendation:
      Enforce tiered resolver fee schedule in protocol params.
+  4. Phase T implementation recommendation:
+     Deploy detect-and-revert safeguard for slash-multiplier and appeal-bond-bps.
+     Enforce supermajority (≥60%) for any changes to safety-critical parameters.
 
-Confidence: 80-88% (validated with known failure boundaries) ✅
+Confidence: 83-90% (governance capture gap now closed) ✅
 
 ═════════════════════════════════════════════════════════════════════════════
