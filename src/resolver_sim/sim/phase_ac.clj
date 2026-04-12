@@ -34,13 +34,24 @@
     0.0
     (/ (reduce + (map :experience resolvers)) (count resolvers))))
 
+(defn compute-pressure
+  "Instantaneous backlog pressure = disputes / (capacity × resolvers), capped at 1.0."
+  [disputes-per-epoch resolver-capacity n-resolvers]
+  (min 1.0 (/ disputes-per-epoch (max 1.0 (* resolver-capacity (double n-resolvers))))))
+
+(defn rolling-avg-pressure
+  "Average of the last rolling-window pressure samples.
+   Uses all available history when fewer than rolling-window samples have been recorded."
+  [pressure-history current-pressure rolling-window]
+  (let [window (take-last rolling-window (conj pressure-history current-pressure))]
+    (/ (reduce + window) (count window))))
+
 (defn legitimacy
-  "Legitimacy = trust-score × (1 − backlog-pressure).
-   backlog-pressure = (disputes / resolver-capacity) capped at 1.0"
-  [resolvers disputes-per-epoch resolver-capacity]
-  (let [ts       (trust-score resolvers)
-        pressure (min 1.0 (/ disputes-per-epoch (max 1.0 (* resolver-capacity (count resolvers)))))]
-    (* ts (- 1.0 pressure))))
+  "Legitimacy = trust-score × (1 − effective-pressure).
+   effective-pressure is the rolling-window average of backlog pressure,
+   smoothing transient spikes to prevent premature collapse detection."
+  [resolvers effective-pressure]
+  (* (trust-score resolvers) (- 1.0 effective-pressure)))
 
 (defn exit-probability
   "Probability a resolver exits this epoch.
@@ -59,11 +70,18 @@
 (defn step-epoch
   "Advance the resolver pool by one epoch.
 
+   Uses a rolling-window average of backlog pressure (rather than a single-epoch
+   snapshot) to compute legitimacy, smoothing transient spikes.
+
    Returns updated resolver list with exits removed, experiences incremented,
-   and new emergency onboarding entrants added if below floor."
+   and new emergency onboarding entrants added if below floor.
+   Also returns :pressure-history (updated window) for threading."
   [resolvers disputes-per-epoch resolver-capacity fee-per-dispute
-   min-resolvers onboarding-trust emergency-per-epoch d-rng floor-active?]
-  (let [leg          (legitimacy resolvers disputes-per-epoch resolver-capacity)
+   min-resolvers onboarding-trust emergency-per-epoch d-rng floor-active?
+   pressure-history rolling-window]
+  (let [instant-p    (compute-pressure disputes-per-epoch resolver-capacity (count resolvers))
+        eff-p        (rolling-avg-pressure pressure-history instant-p rolling-window)
+        leg          (legitimacy resolvers eff-p)
         exit-p       (exit-probability leg fee-per-dispute)
         ;; Apply exits
         surviving    (filter (fn [r] (>= (rng/next-double d-rng) exit-p)) resolvers)
@@ -73,12 +91,16 @@
         below-floor? (and floor-active? (< (count matured) min-resolvers))
         n-to-onboard (if below-floor? emergency-per-epoch 0)
         new-batch    (repeatedly n-to-onboard #(hash-map :experience onboarding-trust))
-        final        (into matured new-batch)]
-    {:resolvers   final
-     :legitimacy  leg
-     :exit-count  (- (count resolvers) (count surviving))
-     :onboarded   n-to-onboard
-     :below-floor below-floor?}))
+        final        (into matured new-batch)
+        new-history  (vec (take-last rolling-window (conj pressure-history instant-p)))]
+    {:resolvers        final
+     :legitimacy       leg
+     :instant-pressure instant-p
+     :eff-pressure     eff-p
+     :exit-count       (- (count resolvers) (count surviving))
+     :onboarded        n-to-onboard
+     :below-floor      below-floor?
+     :pressure-history new-history}))
 
 ;; ---------------------------------------------------------------------------
 ;; Single scenario simulation
@@ -87,25 +109,30 @@
 (defn run-trust-floor-scenario
   "Simulate n-epochs with the given trust floor configuration.
 
+   Uses a 5-epoch rolling average for backlog pressure (see step-epoch).
    Returns {:epoch-results [...] :min-legitimacy f :legitimacy-collapsed? bool}."
   [n-epochs n-resolvers-initial disputes-per-epoch resolver-capacity fee-per-dispute
    min-resolvers onboarding-trust emergency-per-epoch floor-active? seed]
-  (let [d-rng            (rng/make-rng seed)
+  (let [d-rng             (rng/make-rng seed)
+        rolling-window    5
         initial-resolvers (vec (repeatedly n-resolvers-initial
                                            #(hash-map :experience (+ 0.3 (* 0.4 (rng/next-double d-rng))))))
         epoch-results
-        (loop [resolvers initial-resolvers
-               epoch     1
-               results   []]
+        (loop [resolvers        initial-resolvers
+               epoch            1
+               results          []
+               pressure-history []]
           (if (> epoch n-epochs)
             results
             (let [step (step-epoch resolvers disputes-per-epoch resolver-capacity
                                    fee-per-dispute min-resolvers onboarding-trust
-                                   emergency-per-epoch d-rng floor-active?)]
+                                   emergency-per-epoch d-rng floor-active?
+                                   pressure-history rolling-window)]
               (recur (:resolvers step)
                      (inc epoch)
                      (conj results (assoc step :epoch epoch
-                                              :resolver-count (count (:resolvers step))))))))]
+                                              :resolver-count (count (:resolvers step))))
+                     (:pressure-history step)))))]
     {:epoch-results        epoch-results
      :min-legitimacy       (apply min (map :legitimacy epoch-results))
      :final-resolver-count (:resolver-count (last epoch-results))

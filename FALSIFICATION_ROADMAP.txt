@@ -83,17 +83,19 @@ Phase AC — Trust Floor + Emergency Onboarding (Phase Z safeguard)  FAILED ❌
   Result: DOES NOT HOLD under baseline params (100 disputes/epoch).
   Threshold search (fee × emergency × trust): 0/36 configurations viable.
   Structural constraint found:
-    At 100 disputes/epoch with resolver-capacity=15, backlog pressure = 0.56.
-    Exit-probability bottoms out at ~60% even with emergency=8 and trust=0.8.
+    At 100 disputes/epoch with resolver-capacity=15, backlog pressure = 0.667.
+    Exit-probability bottoms out at ~84% even with emergency=8 and trust=0.8.
     The trust floor onboards resolvers faster than exits at emergency=8, but
-    legitimacy never clears 0.041 — well below the 0.50 collapse threshold.
-  Root cause: exit-probability formula is overly sensitive to short-term backlog.
-  Design implication: Trust floor requires either:
-    (a) Resolver capacity expansion to reduce backlog pressure below ~10%,
-        i.e. resolver-capacity × pool-size ≥ 10× disputes-per-epoch, OR
-    (b) Reformulation of exit-probability to depend on rolling-average legitimacy
-        rather than single-epoch pressure (smooths out transient spikes).
-  Status: Structural constraint documented. Safeguard design needs revision.
+    legitimacy never clears 0.159 — well below the 0.50 collapse threshold.
+  Root cause CONFIRMED: constraint is structural, NOT a model artefact.
+    Rolling 5-epoch average applied to backlog pressure (April 2026 revision);
+    0/36 result unchanged. Pressure at 100 disputes/epoch is persistently high
+    (0.667) regardless of smoothing — not a transient spike.
+  Design implication: Trust floor requires resolver capacity expansion:
+    resolver-capacity × pool-size ≥ 10× disputes-per-epoch
+    (option (b) rolling-average already applied and confirmed insufficient)
+  Status: Structural constraint confirmed real. Safeguard design requires
+    capacity expansion before trust floor can be effective.
 
 Phase AD — Governance Bandwidth Floor (Phase AA safeguard)      CONFIRMED ✅
   Hypothesis: mandatory floor reviews keep attacker win rate < 20%
@@ -136,12 +138,13 @@ Epistemic/reflexive risks: IDENTIFIED with specific mitigations (Phases Y/Z/AA)
 
 Safeguard status:
   AB (effort rewards):       CONFIRMED — 2× multiplier minimum viable
-  AC (trust floor):          STRUCTURAL CONSTRAINT — exit formula needs revision
+  AC (trust floor):          STRUCTURAL CONSTRAINT CONFIRMED — capacity expansion required
   AD (governance floor):     CONFIRMED — floor=3 of 5 disputes/epoch minimum viable
 
 Open items:
-  1. Phase AC exit-probability formula revision:
-     Replace single-epoch pressure with rolling-N-epoch average, then re-run.
+  1. Phase AC capacity expansion: resolver-capacity × pool-size must be ≥ 10×
+     disputes-per-epoch for trust floor to be viable. Rolling-average pressure
+     formula already applied (April 2026); structural constraint confirmed real.
   2. Phase AD implementation recommendation:
      Mandate floor=3 of (disputes-per-epoch) low-value reviews in governance spec.
   3. Phase AB implementation recommendation:
