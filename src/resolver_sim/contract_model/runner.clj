@@ -241,12 +241,12 @@
   "Compare an idealised trial result with a contract-model trial result.
 
    Both maps must have :profit-honest, :profit-malice, :slashed?,
-   :dispute-correct?, :appeal-triggered?.
+   :dispute-correct?, :appeal-triggered?, :escalation-level.
 
    Returns {:divergence? bool :diffs [...]} where each diff is a map:
      {:field kw :idealized val :contract-model val}"
   [idealized cm-result]
-  (let [fields [:profit-honest :profit-malice :slashed? :dispute-correct? :appeal-triggered?]
+  (let [fields [:profit-honest :profit-malice :slashed? :dispute-correct? :appeal-triggered? :escalation-level]
         diffs  (for [f fields
                      :let [iv (get idealized f)
                            cv (get cm-result f)]

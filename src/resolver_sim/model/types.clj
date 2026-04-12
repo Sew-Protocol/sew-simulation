@@ -101,6 +101,6 @@
                                     :appeal-window-days :detection-type :timeout-detection-probability
                                     :reversal-detection-probability :fraud-detection-probability :fraud-slash-bps
                                     :reversal-slash-bps :timeout-slash-bps
-                                    :ring-spec :l2-detection-prob :senior-resolver-skill :escalation-fee-bps]))
+                                    :ring-spec :l2-detection-prob :senior-resolver-skill]))
         (throw (ex-info (format "Missing required param %s" k) {:param k})))))
   scenario)

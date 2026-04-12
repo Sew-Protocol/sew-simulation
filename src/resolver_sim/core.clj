@@ -39,6 +39,7 @@
    ["-D" "--phase-ad" "Run Phase AD: governance bandwidth floor (Phase AA safeguard)"]
    ["-E" "--phase-ac-sweep" "Run Phase AC threshold search: min viable trust-floor config"]
    ["-F" "--phase-ad-sweep" "Run Phase AD threshold search: min viable governance floor config"]
+   ["-G" "--phase-ac-cap"  "Run Phase AC capacity expansion: validate the 10× capacity rule"]
    ["-a" "--adversarial" "Run adversarial parameter search (falsification)"]
    ["-h" "--help" "Show this help"]])
 
@@ -365,6 +366,10 @@
             (:phase-ad-sweep options)
             (do (println "\n🔬 Running Phase AD Threshold Search")
                (phase-ad/run-phase-ad-threshold-sweep params))
+
+            (:phase-ac-cap options)
+            (do (println "\n🔬 Running Phase AC Capacity Expansion")
+               (phase-ac/run-phase-ac-capacity-expansion params))
             
             (:governance-impact options)
             (run-governance-impact-simulation params (:output options))

@@ -10,7 +10,8 @@
    All functions return {:ok bool :world world' :error keyword}."
   (:require [resolver-sim.contract-model.types         :as t]
             [resolver-sim.contract-model.state-machine :as sm]
-            [resolver-sim.contract-model.authority     :as auth]))
+            [resolver-sim.contract-model.authority     :as auth]
+            [resolver-sim.contract-model.accounting    :as acct]))
 
 ;; ---------------------------------------------------------------------------
 ;; Internal: finalize helpers (no accounting — see lifecycle for that)
@@ -21,7 +22,7 @@
         token (:token et)
         amt   (:amount-after-fee et)]
     (-> world
-        (update-in [:total-held token] (fnil - 0) amt)
+        (acct/sub-held token amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :released))))
 
@@ -30,7 +31,7 @@
         token (:token et)
         amt   (:amount-after-fee et)]
     (-> world
-        (update-in [:total-held token] (fnil - 0) amt)
+        (acct/sub-held token amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :refunded))))
 

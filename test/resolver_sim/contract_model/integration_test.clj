@@ -51,11 +51,11 @@
 
 (deftest run-trial-malicious-detected
   "Malicious resolver: forced wrong verdict + high detection => loss."
-  (let [;; rng vals: [verdict?, appeal?, detection?]
+  (let [;; rng vals: [verdict?, detection?]
         ;; verdict: malicious judges correctly if val < 0.3 — use 0.99 → wrong
-        ;; appeal: 0.99 > appeal-prob-wrong (0.3) → no appeal
+        ;; no appeal-window (=0) so no escalation RNG consumed
         ;; detection: 0.01 < 0.9 → detected
-        r (runner/run-trial (seq-rng 0.99 0.99 0.01)
+        r (runner/run-trial (seq-rng 0.99 0.01)
                             (assoc base-params :strategy :malicious))]
     (is (false? (:dispute-correct? r)))
     (is (true?  (:slashed? r)))

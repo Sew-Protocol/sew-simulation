@@ -97,6 +97,26 @@ Phase AC — Trust Floor + Emergency Onboarding (Phase Z safeguard)  FAILED ❌
   Status: Structural constraint confirmed real. Safeguard design requires
     capacity expansion before trust floor can be effective.
 
+Phase AC — Capacity Expansion Simulation                    COMPLETED ✅
+  Hypothesis: 10× capacity rule (resolver-capacity × pool-size ≥ 10×
+    disputes-per-epoch) makes trust floor viable.
+  Result: 10× rule is NECESSARY BUT NOT SUFFICIENT.
+  Primary sweep: 0/15 configs viable even at 10× capacity (pressure ≤ 0.10).
+  Root cause: cold-start exit spiral.
+    Initial resolvers enter with experience ≈ 0.5 (uniform 0.3–0.7).
+    trust_score ≈ 0.5 → legitimacy ≈ 0.45 → exit-p ≈ 0.52/epoch.
+    Half the pool exits in epoch 1; pressure rises; cascading exits follow.
+    Emergency onboarding only triggers after pool has already collapsed.
+  Diagnostic results:
+    A. Mature pool alone (exp 0.8–1.0) at 10× capacity:  100% pass rate ✅
+    B. High trust floor alone (no capacity expansion):    FAILS
+    C. Mature pool + high trust floor at 10× capacity:   100% pass rate ✅
+  Both conditions required: 10× capacity AND bootstrapped resolver pool.
+  Protocol design implication:
+    Add a bootstrapping phase before full deployment: operate at light load
+    while resolvers accumulate experience (exp ≥ 0.8) before going live at
+    full dispute capacity. Trust floor only activates after bootstrapping.
+
 Phase AD — Governance Bandwidth Floor (Phase AA safeguard)      CONFIRMED ✅
   Hypothesis: mandatory floor reviews keep attacker win rate < 20%
   Result: HOLDS at minimum viable configuration.
@@ -138,13 +158,15 @@ Epistemic/reflexive risks: IDENTIFIED with specific mitigations (Phases Y/Z/AA)
 
 Safeguard status:
   AB (effort rewards):       CONFIRMED — 2× multiplier minimum viable
-  AC (trust floor):          STRUCTURAL CONSTRAINT CONFIRMED — capacity expansion required
+  AC (trust floor):          10× CAPACITY + BOOTSTRAP REQUIRED (cold-start spiral root cause confirmed)
   AD (governance floor):     CONFIRMED — floor=3 of 5 disputes/epoch minimum viable
 
 Open items:
-  1. Phase AC capacity expansion: resolver-capacity × pool-size must be ≥ 10×
-     disputes-per-epoch for trust floor to be viable. Rolling-average pressure
-     formula already applied (April 2026); structural constraint confirmed real.
+  1. Phase AC capacity expansion: SIMULATED — 10× capacity rule necessary
+     but not sufficient. Cold-start exit spiral is the true constraint.
+     Fix: bootstrapping phase (light load, exp ≥ 0.8) before full deployment.
+     Both bootstrapping AND 10× capacity required for 100% pass rate.
+     Mature pool + 10× capacity confirmed viable (3/3 seeds, best effort).
   2. Phase AD implementation recommendation:
      Mandate floor=3 of (disputes-per-epoch) low-value reviews in governance spec.
   3. Phase AB implementation recommendation:

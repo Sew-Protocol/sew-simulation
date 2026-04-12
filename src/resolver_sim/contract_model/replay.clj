@@ -38,6 +38,7 @@
   (:require [clojure.data.json                      :as json]
             [clojure.java.io                        :as io]
             [clojure.string                         :as str]
+            [resolver-sim.contract-model.diff       :as diff]
             [resolver-sim.contract-model.types      :as t]
             [resolver-sim.contract-model.lifecycle  :as lc]
             [resolver-sim.contract-model.resolution :as res]
@@ -392,7 +393,9 @@
                      :extra          nil
                      :invariants-ok? true
                      :violations     nil
-                     :world          (world-snapshot world)}
+                     :world          (world-snapshot world)
+                      :projection     (diff/projection world)
+                      :projection-hash (diff/projection-hash world)}
        :halted? false}
 
       (let [;; Advance block-time
@@ -437,7 +440,9 @@
           ;; The snapshot shown to the client must match the canonical world
           ;; that will be retained — showing the violated world-next would
           ;; give observers a false picture of the engine's internal state.
-          :world          (world-snapshot (if violated? world-t world-next))}
+          :world          (world-snapshot (if violated? world-t world-next))
+           :projection     (diff/projection (if violated? world-t world-next))
+           :projection-hash (diff/projection-hash (if violated? world-t world-next))}
          :halted? violated?}))))
 
 ;; ---------------------------------------------------------------------------

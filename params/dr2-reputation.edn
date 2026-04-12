@@ -44,9 +44,6 @@
  :freeze-duration-days 3
  :appeal-window-days 7
 
- ;; DR2: No progressive slashing (comes in DR3)
- :progressive-slashing? false
-
  ;; Simulation config
  :n-trials 10000
  :n-seeds 50
