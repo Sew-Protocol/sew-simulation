@@ -15,7 +15,14 @@
             [resolver-sim.sim.phase-ab :as phase-ab]
             [resolver-sim.sim.phase-ac :as phase-ac]
             [resolver-sim.sim.phase-ad :as phase-ad]
-            [resolver-sim.sim.phase-t  :as phase-t]
+            [resolver-sim.sim.phase-t          :as phase-t]
+            [resolver-sim.sim.phase-p-revised  :as phase-p-revised]
+            [resolver-sim.sim.phase-q          :as phase-q]
+            [resolver-sim.sim.phase-r          :as phase-r]
+            [resolver-sim.sim.phase-u          :as phase-u]
+            [resolver-sim.sim.phase-v          :as phase-v]
+            [resolver-sim.sim.phase-w          :as phase-w]
+            [resolver-sim.sim.phase-x          :as phase-x]
             [resolver-sim.sim.adversarial :as adversarial]
             [resolver-sim.model.rng :as rng]
             [clojure.tools.cli :refer [parse-opts]])
@@ -41,7 +48,14 @@
    ["-E" "--phase-ac-sweep" "Run Phase AC threshold search: min viable trust-floor config"]
    ["-F" "--phase-ad-sweep" "Run Phase AD threshold search: min viable governance floor config"]
    ["-G" "--phase-ac-cap"  "Run Phase AC capacity expansion: validate the 10× capacity rule"]
-   ["-H" "--phase-t"       "Run Phase T: governance capture via rule drift"]
+   ["-H" "--phase-t"            "Run Phase T: governance capture via rule drift"]
+   ["-I" "--phase-p-revised"   "Run Phase P Revised: sequential appeal falsification"]
+   ["-J" "--phase-q"           "Run Phase Q: advanced vulnerability (bribery, evidence spoofing, correlated failures)"]
+   ["-K" "--phase-r"           "Run Phase R: liveness & participation failure"]
+   ["-L" "--phase-u"           "Run Phase U: adaptive attacker learning"]
+   ["-M" "--phase-v"           "Run Phase V: correlated belief cascades"]
+   ["-N" "--phase-w"           "Run Phase W: dispute type clustering (adversarial category targeting)"]
+   ["-X" "--phase-x"           "Run Phase X: burst concurrency exploit"]
    ["-a" "--adversarial" "Run adversarial parameter search (falsification)"]
    ["-h" "--help" "Show this help"]])
 
@@ -376,6 +390,34 @@
             (:phase-t options)
             (do (println "\n🏛️  Running Phase T: Governance Capture via Rule Drift")
                (phase-t/run-phase-t-sweep params))
+
+            (:phase-p-revised options)
+            (do (println "\n📊 Running Phase P Revised: Sequential Appeal Falsification")
+               (phase-p-revised/run-phase-p-revised-sweep))
+
+            (:phase-q options)
+            (do (println "\n🔬 Running Phase Q: Advanced Vulnerability")
+               (phase-q/run-phase-q-sweep))
+
+            (:phase-r options)
+            (do (println "\n🔬 Running Phase R: Liveness & Participation Failure")
+               (phase-r/run-phase-r-sweep))
+
+            (:phase-u options)
+            (do (println "\n🎯 Running Phase U: Adaptive Attacker Learning")
+               (phase-u/run-phase-u-sweep))
+
+            (:phase-v options)
+            (do (println "\n🌊 Running Phase V: Correlated Belief Cascades")
+               (phase-v/run-phase-v-sweep))
+
+            (:phase-w options)
+            (do (println "\n🎯 Running Phase W: Dispute Type Clustering")
+               (phase-w/run-phase-w-sweep))
+
+            (:phase-x options)
+            (do (println "\n💥 Running Phase X: Burst Concurrency Exploit")
+               (phase-x/run-phase-x-sweep))
             
             (:governance-impact options)
             (run-governance-impact-simulation params (:output options))

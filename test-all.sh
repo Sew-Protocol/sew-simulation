@@ -18,7 +18,7 @@ test_scenario() {
     ((TOTAL++))
     echo -n "[$TOTAL] Testing $name... "
     if timeout $timeout_sec clojure -M:run -- -p "$params" $flags > /tmp/test-$name.log 2>&1; then
-        if grep -qE "Results saved|Phase.*complete|Sweep complete|Simulation complete|results saved|waterfall results saved|Exit Cascade Results|PHASE [A-Z]+ SUMMARY" /tmp/test-$name.log; then
+        if grep -qE "Results saved|Phase.*complete|Sweep complete|Simulation complete|results saved|waterfall results saved|Exit Cascade Results|PHASE [A-Z]+ SUMMARY|PHASE [A-Z]+ ASSESSMENT|Risk level:|Results: [0-9]+ vulnerable" /tmp/test-$name.log; then
             echo "✓ PASS"
             ((PASS++))
         else
@@ -111,6 +111,42 @@ echo "=== Phase AD Threshold Search ==="
 test_scenario "phase-ad-threshold-sweep" "params/phase-ad-threshold-sweep.edn" "-F" 120
 
 echo ""
+echo "=== Phase P Lite: Falsification Test ==="
+test_scenario "phase-p-lite-baseline" "params/phase-p-lite-baseline.edn" "-P" 120
+
+echo ""
+echo "=== Phase P Revised: Sequential Appeal Falsification ==="
+test_scenario "phase-p-revised" "params/baseline.edn" "-I" 120
+
+echo ""
+echo "=== Phase Q: Advanced Vulnerability ==="
+test_scenario "phase-q" "params/baseline.edn" "-J" 120
+
+echo ""
+echo "=== Phase R: Liveness & Participation Failure ==="
+test_scenario "phase-r" "params/baseline.edn" "-K" 120
+
+echo ""
+echo "=== Phase T: Governance Capture via Rule Drift ==="
+test_scenario "phase-t" "params/phase-t-governance-capture.edn" "-H" 120
+
+echo ""
+echo "=== Phase U: Adaptive Attacker Learning ==="
+test_scenario "phase-u" "params/baseline.edn" "-L" 120
+
+echo ""
+echo "=== Phase V: Correlated Belief Cascades ==="
+test_scenario "phase-v" "params/baseline.edn" "-M" 120
+
+echo ""
+echo "=== Phase W: Dispute Type Clustering ==="
+test_scenario "phase-w" "params/baseline.edn" "-N" 120
+
+echo ""
+echo "=== Phase X: Burst Concurrency Exploit ==="
+test_scenario "phase-x" "params/baseline.edn" "-X" 120
+
+echo ""
 echo "=========================================="
 echo "Test Results: $PASS/$TOTAL passed, $FAIL failed"
 echo "=========================================="
@@ -118,8 +154,8 @@ echo "=========================================="
 if [ $FAIL -eq 0 ]; then
     echo "✅ ALL TESTS PASSED"
     echo ""
-    echo "System Status: PHASES G–AD + THRESHOLD SEARCHES VALIDATED"
-    echo "Confidence: Full stack (Phases G-O validated, Y/Z/AA falsification complete, AB/AC/AD safeguards + threshold constraints confirmed)"
+    echo "System Status: PHASES G–AD + P-REVISED/Q/R/T/U/V/W/X VALIDATED"
+    echo "Confidence: Full stack (statistical, adversarial, governance, liveness, cascade, burst-concurrency)"
     exit 0
 else
     echo "❌ SOME TESTS FAILED ($FAIL tests)"
