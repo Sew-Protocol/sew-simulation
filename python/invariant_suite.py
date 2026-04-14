@@ -49,13 +49,18 @@ from sew_sim.live_runner import LiveRunner, RunResult
 
 
 class DisputingBuyerLive(LiveAgent):
-    """Creates one escrow (with custom_resolver) then immediately raises a dispute."""
+    """Creates one escrow then immediately raises a dispute.
+
+    When resolver_address is provided the escrow is created with custom_resolver
+    (Priority 1 authorization).  Omit it when the session uses a resolution
+    module (Priority 2) so that the module's address is consulted instead.
+    """
 
     def __init__(
         self,
         agent_id: str,
         recipient_address: str,
-        resolver_address: str,
+        resolver_address: str | None = None,
         token: str = "USDC",
         amount: int = 3000,
     ):
@@ -70,15 +75,14 @@ class DisputingBuyerLive(LiveAgent):
 
     def decide(self, world_view: WorldView | None, seq: int, block_time: int) -> Optional[dict]:
         if not self._created:
-            return {
-                "action": "create_escrow",
-                "params": {
-                    "token": self.token,
-                    "to": self.recipient_address,
-                    "amount": self.amount,
-                    "custom_resolver": self.resolver_address,
-                },
+            params: dict = {
+                "token": self.token,
+                "to": self.recipient_address,
+                "amount": self.amount,
             }
+            if self.resolver_address:
+                params["custom_resolver"] = self.resolver_address
+            return {"action": "create_escrow", "params": params}
         if self._workflow_id is not None and not self._disputed:
             return {"action": "raise_dispute", "params": {"workflow_id": self._workflow_id}}
         return None
@@ -309,6 +313,16 @@ class ScriptedSequenceLive(LiveAgent):
 
 DR3_PARAMS = {
     "resolver_fee_bps": 150,
+    "appeal_window_duration": 0,
+    "max_dispute_duration": 2592000,
+}
+
+# DR3 via resolution module (Priority 2).
+# The resolution_module address is the single address the module will authorize.
+# Escrows must be created WITHOUT custom_resolver so Priority 2 fires.
+DR3_MODULE_PARAMS = {
+    "resolver_fee_bps": 150,
+    "resolution_module": "0xresolver",  # module authorizes only this address
     "appeal_window_duration": 0,
     "max_dispute_duration": 2592000,
 }
@@ -684,24 +698,82 @@ def s13_pending_settlement_refund() -> RunResult:
     )
 
 
+def s14_dr3_module_authorized_resolver() -> RunResult:
+    """DR3 resolution module (Priority 2): authorized resolver succeeds.
+
+    Escrow is created WITHOUT custom_resolver so that authority falls through
+    to Priority 2 (resolution module).  The session's protocol_params carry
+    resolution_module="0xresolver", which makes build-context wire a
+    make-default-resolution-module fn that authorizes only that address.
+    The resolver at "0xresolver" calls execute_resolution and must succeed.
+
+    This is the canonical DR3 live-contract test: resolution module active,
+    correct resolver authorized, dispute resolves cleanly.
+    """
+    return run_scenario(
+        "S14",
+        agents_meta=[
+            {"id": "buyer",    "address": "0xbuyer",    "type": "honest"},
+            {"id": "seller",   "address": "0xseller",   "type": "honest"},
+            {"id": "resolver", "address": "0xresolver", "type": "resolver"},
+        ],
+        live_agents=[
+            DisputingBuyerLive("buyer", "0xseller", amount=5000),  # no custom_resolver
+            HonestResolverLive("resolver"),
+        ],
+        protocol_params=DR3_MODULE_PARAMS,
+    )
+
+
+def s15_dr3_module_unauthorized_resolver_rejected() -> RunResult:
+    """DR3 resolution module (Priority 2): wrong resolver is rejected.
+
+    Same setup as S14 but a bad actor at "0xbadresolver" races to call
+    execute_resolution first.  The module returns authorized?=false for that
+    address, and there is no custom_resolver or matching dispute-resolver
+    fallback, so the call reverts.  The correct resolver at "0xresolver"
+    then resolves successfully.
+
+    Asserts: wrong-resolver attempt produces a revert (not a violation), and
+    the final escrow state is clean.
+    """
+    return run_scenario(
+        "S15",
+        agents_meta=[
+            {"id": "buyer",       "address": "0xbuyer",       "type": "honest"},
+            {"id": "seller",      "address": "0xseller",      "type": "honest"},
+            {"id": "badresolver", "address": "0xbadresolver", "type": "attacker"},
+            {"id": "resolver",    "address": "0xresolver",    "type": "resolver"},
+        ],
+        live_agents=[
+            DisputingBuyerLive("buyer", "0xseller", amount=5000),  # no custom_resolver
+            WrongResolverLive("badresolver"),   # Priority 2 rejects 0xbadresolver
+            HonestResolverLive("resolver"),     # Priority 2 authorizes 0xresolver
+        ],
+        protocol_params=DR3_MODULE_PARAMS,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 SCENARIOS = [
-    ("S01  baseline-happy-path",             s01_baseline_happy_path),
-    ("S02  dr3-dispute-release",             s02_dr3_dispute_release),
-    ("S03  dr3-dispute-refund",              s03_dr3_dispute_refund),
-    ("S04  dispute-timeout-autocancel",      s04_dispute_timeout_autocancel),
-    ("S05  pending-settlement-execute",      s05_pending_settlement_execute),
-    ("S06  mutual-cancel",                   s06_mutual_cancel),
-    ("S07  unauthorized-resolver-rejected",  s07_unauthorized_resolver_rejected),
-    ("S08  state-machine-attack-gauntlet",   s08_state_machine_attack_gauntlet),
-    ("S09  multi-escrow-solvency",           s09_multi_escrow_solvency),
-    ("S10  double-finalize-rejected",        s10_double_finalize_rejected),
-    ("S11  zero-fee-edge-case",              s11_zero_fee_edge_case),
-    ("S12  governance-snapshot-isolation",   s12_governance_snapshot_isolation),
-    ("S13  pending-settlement-refund",       s13_pending_settlement_refund),
+    ("S01  baseline-happy-path",                      s01_baseline_happy_path),
+    ("S02  dr3-dispute-release",                      s02_dr3_dispute_release),
+    ("S03  dr3-dispute-refund",                       s03_dr3_dispute_refund),
+    ("S04  dispute-timeout-autocancel",               s04_dispute_timeout_autocancel),
+    ("S05  pending-settlement-execute",               s05_pending_settlement_execute),
+    ("S06  mutual-cancel",                            s06_mutual_cancel),
+    ("S07  unauthorized-resolver-rejected",           s07_unauthorized_resolver_rejected),
+    ("S08  state-machine-attack-gauntlet",            s08_state_machine_attack_gauntlet),
+    ("S09  multi-escrow-solvency",                    s09_multi_escrow_solvency),
+    ("S10  double-finalize-rejected",                 s10_double_finalize_rejected),
+    ("S11  zero-fee-edge-case",                       s11_zero_fee_edge_case),
+    ("S12  governance-snapshot-isolation",            s12_governance_snapshot_isolation),
+    ("S13  pending-settlement-refund",                s13_pending_settlement_refund),
+    ("S14  dr3-module-authorized",                    s14_dr3_module_authorized_resolver),
+    ("S15  dr3-module-unauthorized-rejected",         s15_dr3_module_unauthorized_resolver_rejected),
 ]
 
 

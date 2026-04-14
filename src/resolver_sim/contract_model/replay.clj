@@ -42,6 +42,7 @@
             [resolver-sim.contract-model.types      :as t]
             [resolver-sim.contract-model.lifecycle  :as lc]
             [resolver-sim.contract-model.resolution :as res]
+            [resolver-sim.contract-model.authority  :as auth]
             [resolver-sim.contract-model.invariants :as inv]))
 
 ;; ---------------------------------------------------------------------------
@@ -89,6 +90,7 @@
 (defn- build-snapshot [pp]
   (t/make-module-snapshot
    {:escrow-fee-bps               (get pp :resolver-fee-bps 50)
+    :resolution-module            (get pp :resolution-module nil)
     :appeal-window-duration       (get pp :appeal-window-duration 0)
     :max-dispute-duration         (get pp :max-dispute-duration 2592000)
     :appeal-bond-protocol-fee-bps (get pp :appeal-bond-protocol-fee-bps 0)}))
@@ -136,9 +138,13 @@
    in the agent-index."
   ([agents protocol-params] (build-context agents protocol-params nil))
   ([agents protocol-params escalation-fn]
-   {:agent-index   (agents-by-id agents)
-    :snapshot      (build-snapshot protocol-params)
-    :escalation-fn escalation-fn}))
+   (let [rm-addr (get protocol-params :resolution-module nil)
+         rm-fn   (when (and rm-addr (not= rm-addr ""))
+                   (auth/make-default-resolution-module rm-addr))]
+     {:agent-index          (agents-by-id agents)
+      :snapshot             (build-snapshot protocol-params)
+      :escalation-fn        escalation-fn
+      :resolution-module-fn rm-fn})))
 
 ;; ---------------------------------------------------------------------------
 ;; Input validation — Clojure-side, applied before entering the event loop
@@ -254,7 +260,7 @@
       (lc/raise-dispute world (get-in event [:params :workflow-id]) (:address ar)))))
 
 (defmethod apply-action "execute_resolution"
-  [{:keys [agent-index]} world event]
+  [{:keys [agent-index resolution-module-fn]} world event]
   (let [ar (resolve-address agent-index (:agent event))]
     (if-not (:ok ar)
       ar
@@ -262,9 +268,8 @@
             workflow-id     (:workflow-id p)
             is-release      (get p :is-release true)
             resolution-hash (get p :resolution-hash "0xsimhash")]
-        ;; nil resolution-module-fn → falls back to custom-resolver / direct resolver
         (res/execute-resolution world workflow-id (:address ar)
-                                is-release resolution-hash nil)))))
+                                is-release resolution-hash resolution-module-fn)))))
 
 (defmethod apply-action "execute_pending_settlement"
   [_ctx world event]
