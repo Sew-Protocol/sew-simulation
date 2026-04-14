@@ -612,21 +612,67 @@ def s10_double_finalize_rejected() -> RunResult:
     )
 
 
+def s11_zero_fee_edge_case() -> RunResult:
+    """fee_bps=0: no protocol fee deducted; amount_after_fee == amount throughout."""
+    return run_scenario(
+        "S11",
+        agents_meta=[
+            {"id": "buyer",    "address": "0xbuyer",    "type": "honest"},
+            {"id": "seller",   "address": "0xseller",   "type": "honest"},
+            {"id": "resolver", "address": "0xresolver", "type": "resolver"},
+        ],
+        live_agents=[
+            DisputingBuyerLive("buyer", "0xseller", resolver_address="0xresolver", amount=1),
+            HonestResolverLive("resolver"),
+        ],
+        protocol_params={"resolver_fee_bps": 0, "appeal_window_duration": 0, "max_dispute_duration": 2592000},
+    )
+
+
+def s12_governance_snapshot_isolation() -> RunResult:
+    """Two sessions with different fee_bps must not cross-contaminate.
+
+    Runs session A (fee_bps=0) and session B (fee_bps=500) sequentially.
+    Both must complete without invariant violations; if snapshot isolation is
+    broken, one session will see the other's params and likely corrupt state.
+    """
+    for fee_bps, label in [(0, "A fee=0"), (500, "B fee=500")]:
+        with SimulationClient() as client:
+            runner = LiveRunner(
+                client,
+                agents_meta=[
+                    {"id": "buyer",  "address": "0xbuyer",  "type": "honest"},
+                    {"id": "seller", "address": "0xseller", "type": "honest"},
+                ],
+                live_agents=[HonestBuyerLive("buyer", recipient_address="0xseller", amount=10_000)],
+                protocol_params={"resolver_fee_bps": fee_bps},
+            )
+            r = runner.run(max_steps=10, max_ticks=5)
+            if r.outcome == "halted" or r.metrics.get("invariant_violations", 0):
+                # Fabricate a failed RunResult so assert_scenario can report it
+                return r
+
+    # Both sessions clean — return the last result (pass)
+    return r  # type: ignore[return-value]
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 SCENARIOS = [
-    ("S01  baseline-happy-path",           s01_baseline_happy_path),
-    ("S02  dr3-dispute-release",           s02_dr3_dispute_release),
-    ("S03  dr3-dispute-refund",            s03_dr3_dispute_refund),
-    ("S04  dispute-timeout-autocancel",    s04_dispute_timeout_autocancel),
-    ("S05  pending-settlement-execute",    s05_pending_settlement_execute),
-    ("S06  mutual-cancel",                 s06_mutual_cancel),
-    ("S07  unauthorized-resolver-rejected",s07_unauthorized_resolver_rejected),
-    ("S08  state-machine-attack-gauntlet", s08_state_machine_attack_gauntlet),
-    ("S09  multi-escrow-solvency",         s09_multi_escrow_solvency),
-    ("S10  double-finalize-rejected",      s10_double_finalize_rejected),
+    ("S01  baseline-happy-path",             s01_baseline_happy_path),
+    ("S02  dr3-dispute-release",             s02_dr3_dispute_release),
+    ("S03  dr3-dispute-refund",              s03_dr3_dispute_refund),
+    ("S04  dispute-timeout-autocancel",      s04_dispute_timeout_autocancel),
+    ("S05  pending-settlement-execute",      s05_pending_settlement_execute),
+    ("S06  mutual-cancel",                   s06_mutual_cancel),
+    ("S07  unauthorized-resolver-rejected",  s07_unauthorized_resolver_rejected),
+    ("S08  state-machine-attack-gauntlet",   s08_state_machine_attack_gauntlet),
+    ("S09  multi-escrow-solvency",           s09_multi_escrow_solvency),
+    ("S10  double-finalize-rejected",        s10_double_finalize_rejected),
+    ("S11  zero-fee-edge-case",              s11_zero_fee_edge_case),
+    ("S12  governance-snapshot-isolation",   s12_governance_snapshot_isolation),
 ]
 
 
