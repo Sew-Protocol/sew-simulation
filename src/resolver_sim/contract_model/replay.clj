@@ -128,23 +128,58 @@
 (defn build-context
   "Build an execution context from a list of agent maps and a protocol-params map.
    Agents must already be keywordized ({:id :address :type ...}).
-   Returns {:agent-index {id→agent} :snapshot ModuleSnapshot :escalation-fn fn-or-nil}.
+   Returns a context map with keys:
+     :agent-index          — {agent-id → agent}
+     :snapshot             — ModuleSnapshot (frozen at session start)
+     :escalation-fn        — fn or nil
+     :resolution-module-fn — fn or nil (single-resolver / DR1 mode)
+     :resolution-level-map — map or nil (Kleros multi-level / DR3 mode)
 
-   escalation-fn — optional (fn [world workflow-id caller level] → {:ok bool :new-resolver addr})
-     Models DisputeOps.computeEscalation + DRM.executeEscalation.
-     When nil, escalate_dispute actions revert with :escalation-not-configured.
+   Resolution module modes (mutually exclusive):
+
+   Single-resolver (DR1/DR2):
+     protocol-params contains :resolution-module — an address string.
+     :resolution-module-fn is set; :resolution-level-map is nil.
+
+   Kleros multi-level (DR3):
+     protocol-params contains :escalation-resolvers — {level-kw → addr} map,
+     e.g. {:0 addr0 :1 addr1 :2 addr2} (keywordized from JSON string keys).
+     :resolution-level-map is set; :resolution-module-fn is nil.
+     A derived escalation-fn is wired automatically (override with explicit arg).
+     apply-action 'execute_resolution' builds the module fn per-step using the
+     live world dispute level, so it always reads the correct escalation round.
+     Callers must also pass :resolution-module (any non-empty string) in
+     protocol-params to activate Priority 2 in the module snapshot.
+
+   Direct (no module):
+     Neither key present. escalation-fn is nil unless passed explicitly.
 
    Callers must run validate-agents first — duplicate IDs are silently overwritten
    in the agent-index."
   ([agents protocol-params] (build-context agents protocol-params nil))
-  ([agents protocol-params escalation-fn]
-   (let [rm-addr (get protocol-params :resolution-module nil)
-         rm-fn   (when (and rm-addr (not= rm-addr ""))
-                   (auth/make-default-resolution-module rm-addr))]
+  ([agents protocol-params external-escalation-fn]
+   (let [rm-addr   (get protocol-params :resolution-module nil)
+         esc-map   (get protocol-params :escalation-resolvers nil)
+         ;; Convert {:0 addr0 :1 addr1} → {0 addr0 1 addr1}
+         level-map (when esc-map
+                     (into {} (map (fn [[k v]] [(parse-long (name k)) v]) esc-map)))
+         ;; Single-resolver mode only when no level-map (Kleros takes precedence)
+         rm-fn     (when (and rm-addr (not= rm-addr "") (nil? level-map))
+                     (auth/make-default-resolution-module rm-addr))
+         ;; Kleros escalation-fn: given current-level, returns next resolver or error
+         esc-fn    (or external-escalation-fn
+                       (when level-map
+                         (fn [_world _wf-id _caller current-level]
+                           (let [next-level   (inc current-level)
+                                 new-resolver (get level-map next-level)]
+                             (if new-resolver
+                               {:ok true :new-resolver new-resolver}
+                               {:ok false :error :escalation-not-allowed})))))]
      {:agent-index          (agents-by-id agents)
       :snapshot             (build-snapshot protocol-params)
-      :escalation-fn        escalation-fn
-      :resolution-module-fn rm-fn})))
+      :escalation-fn        esc-fn
+      :resolution-module-fn rm-fn
+      :resolution-level-map level-map})))
 
 ;; ---------------------------------------------------------------------------
 ;; Input validation — Clojure-side, applied before entering the event loop
@@ -260,16 +295,23 @@
       (lc/raise-dispute world (get-in event [:params :workflow-id]) (:address ar)))))
 
 (defmethod apply-action "execute_resolution"
-  [{:keys [agent-index resolution-module-fn]} world event]
+  [{:keys [agent-index resolution-module-fn resolution-level-map]} world event]
   (let [ar (resolve-address agent-index (:agent event))]
     (if-not (:ok ar)
       ar
       (let [p               (:params event)
             workflow-id     (:workflow-id p)
             is-release      (get p :is-release true)
-            resolution-hash (get p :resolution-hash "0xsimhash")]
+            resolution-hash (get p :resolution-hash "0xsimhash")
+            ;; Kleros mode: build module fn per-step so it reads the live dispute level
+            ;; from world (level changes after each escalation).
+            effective-rm-fn (or (when resolution-level-map
+                                  (auth/make-kleros-module
+                                   resolution-level-map
+                                   #(t/dispute-level world %)))
+                                resolution-module-fn)]
         (res/execute-resolution world workflow-id (:address ar)
-                                is-release resolution-hash resolution-module-fn)))))
+                                is-release resolution-hash effective-rm-fn)))))
 
 (defmethod apply-action "execute_pending_settlement"
   [_ctx world event]

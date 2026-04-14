@@ -254,6 +254,72 @@ class PendingSettlementExecutorLive(LiveAgent):
                 self._executed.add(int(wf))
 
 
+class EscalatingBuyerLive(LiveAgent):
+    """Creates an escrow (no custom_resolver), raises a dispute, then escalates
+    up to max_escalations times.
+
+    ALL escalation attempts are counted (including rejected ones) to prevent
+    an infinite loop when the escalation guard blocks at max-dispute-level.
+    """
+
+    def __init__(
+        self,
+        agent_id: str,
+        recipient_address: str,
+        amount: int = 5000,
+        max_escalations: int = 1,
+    ):
+        super().__init__(agent_id)
+        self.recipient_address = recipient_address
+        self.amount = amount
+        self.max_escalations = max_escalations
+        self._workflow_id: Optional[int] = None
+        self._created = False
+        self._disputed = False
+        self._escalation_attempts = 0
+
+    def decide(self, world_view: WorldView | None, seq: int, block_time: int) -> Optional[dict]:
+        if not self._created:
+            return {
+                "action": "create_escrow",
+                "params": {"token": "USDC", "to": self.recipient_address, "amount": self.amount},
+            }
+        if self._workflow_id is not None and not self._disputed:
+            return {"action": "raise_dispute", "params": {"workflow_id": self._workflow_id}}
+        if self._disputed and self._escalation_attempts < self.max_escalations:
+            return {"action": "escalate_dispute", "params": {"workflow_id": self._workflow_id}}
+        return None
+
+    def update_from_response(self, response: StepResponse) -> None:
+        super().update_from_response(response)
+        entry = response.get("trace_entry") or {}
+        action = entry.get("action")
+        if action == "create_escrow" and entry.get("result") == "ok":
+            self._workflow_id = (entry.get("extra") or {}).get("workflow_id")
+            self._created = True
+        if action == "raise_dispute" and entry.get("result") == "ok":
+            self._disputed = True
+        if action == "escalate_dispute":
+            # Count ALL attempts (ok and rejected) to bound loop at max-level guard
+            self._escalation_attempts += 1
+
+
+class AutomateTimedActionsLive(LiveAgent):
+    """Calls automate_timed_actions for every active escrow every tick.
+
+    Handles both appeal-window-expired pending settlements and dispute
+    max-duration timeouts without needing external time tracking.
+    """
+
+    def decide(self, world_view: WorldView | None, seq: int, block_time: int) -> Optional[dict]:
+        if world_view is None:
+            return None
+        for wf_id_str, state in (world_view.get("live_states") or {}).items():
+            if state in ("disputed", "pending"):
+                return {"action": "automate_timed_actions", "params": {"workflow_id": int(wf_id_str)}}
+        return None
+
+
 class ScriptedSequenceLive(LiveAgent):
     """Executes a predetermined sequence of actions one per tick.
 
@@ -324,6 +390,49 @@ DR3_MODULE_PARAMS = {
     "resolver_fee_bps": 150,
     "resolution_module": "0xresolver",  # module authorizes only this address
     "appeal_window_duration": 0,
+    "max_dispute_duration": 2592000,
+}
+
+# IEO base release: no resolver module, zero fee.
+IEO_PARAMS = {
+    "resolver_fee_bps": 0,
+    "appeal_window_duration": 0,
+    "max_dispute_duration": 2592000,
+}
+
+# IEO with short dispute window for timeout testing.
+IEO_TIMEOUT_PARAMS = {
+    "resolver_fee_bps": 0,
+    "appeal_window_duration": 0,
+    "max_dispute_duration": 300,  # 5 min → expires after 3 ticks @ 120s
+}
+
+# DR3 Kleros multi-level escalation (no appeal window — immediate finality).
+# resolution_module activates Priority 2 in module snapshot.
+# escalation_resolvers maps level → resolver address.
+DR3_KLEROS_PARAMS = {
+    "resolver_fee_bps": 150,
+    "resolution_module": "0xkleros-proxy",
+    "escalation_resolvers": {
+        "0": "0xl0",
+        "1": "0xl1",
+        "2": "0xl2",
+    },
+    "appeal_window_duration": 0,
+    "max_dispute_duration": 2592000,
+}
+
+# DR3 Kleros with appeal window — resolution deferred until window expires.
+# Used to test pending-settlement-cleared-on-escalation invariant.
+DR3_KLEROS_APPEAL_PARAMS = {
+    "resolver_fee_bps": 150,
+    "resolution_module": "0xkleros-proxy",
+    "escalation_resolvers": {
+        "0": "0xl0",
+        "1": "0xl1",
+        "2": "0xl2",
+    },
+    "appeal_window_duration": 60,   # 1 tick @ 60s — cleared by escalation
     "max_dispute_duration": 2592000,
 }
 
@@ -755,6 +864,198 @@ def s15_dr3_module_unauthorized_resolver_rejected() -> RunResult:
 
 
 # ---------------------------------------------------------------------------
+# IEO base-release scenarios (S16–S17)
+# ---------------------------------------------------------------------------
+
+
+def s16_ieo_create_release() -> RunResult:
+    """IEO base: escrow created and released by sender — no module, zero fee.
+
+    Validates the simplest lifecycle path: create → release.  Confirms
+    that the contract functions correctly before any resolver module is
+    deployed (IEO state of the protocol).
+
+    Asserts: no violations, clean terminal state (released).
+    """
+    return run_scenario(
+        "S16",
+        agents_meta=[
+            {"id": "buyer",  "address": "0xbuyer",  "type": "honest"},
+            {"id": "seller", "address": "0xseller", "type": "honest"},
+        ],
+        live_agents=[
+            ScriptedSequenceLive("buyer", script=[
+                {
+                    "action": "create_escrow",
+                    "params": {"token": "USDC", "to": "0xseller", "amount": 2000},
+                    "save_wf_as": "wf0",
+                },
+                {"action": "release", "params": {"workflow_id": "wf0"}},
+            ]),
+        ],
+        protocol_params=IEO_PARAMS,
+    )
+
+
+def s17_ieo_dispute_no_resolver_timeout() -> RunResult:
+    """IEO base: buyer disputes with no resolver configured → auto-cancel on timeout.
+
+    Verifies the unresolvable-dispute path in the IEO contract state: no
+    module, no custom_resolver.  The dispute sits open until
+    max_dispute_duration (300 s) elapses.  TimeoutKeeperLive retries
+    auto_cancel_disputed each tick until it succeeds.
+
+    Asserts: dispute auto-cancelled (refunded), no violations.
+    """
+    return run_scenario(
+        "S17",
+        agents_meta=[
+            {"id": "buyer",  "address": "0xbuyer",  "type": "honest"},
+            {"id": "seller", "address": "0xseller", "type": "honest"},
+            {"id": "keeper", "address": "0xkeeper", "type": "resolver"},
+        ],
+        live_agents=[
+            DisputingBuyerLive("buyer", "0xseller", amount=1000),  # no custom_resolver
+            TimeoutKeeperLive("keeper"),
+        ],
+        protocol_params=IEO_TIMEOUT_PARAMS,
+        max_steps=40,
+        max_ticks=20,
+        time_step_secs=120,
+    )
+
+
+# ---------------------------------------------------------------------------
+# DR3 Kleros escalation scenarios (S18–S21)
+# ---------------------------------------------------------------------------
+
+
+def s18_dr3_kleros_l0_resolves() -> RunResult:
+    """DR3 Kleros (Priority 2): L0 resolver resolves at level 0, no escalation.
+
+    Escrow created without custom_resolver so Priority 2 (Kleros module) fires.
+    The module reads dispute-level=0 and authorizes only "0xl0".
+    L0 resolver calls execute_resolution → authorized → finalizes immediately
+    (no appeal window).
+
+    Asserts: Kleros module correctly authorizes level-0 resolver, no violations.
+    """
+    return run_scenario(
+        "S18",
+        agents_meta=[
+            {"id": "buyer",      "address": "0xbuyer", "type": "honest"},
+            {"id": "seller",     "address": "0xseller", "type": "honest"},
+            {"id": "l0resolver", "address": "0xl0",    "type": "resolver"},
+        ],
+        live_agents=[
+            EscalatingBuyerLive("buyer", "0xseller", max_escalations=0),
+            HonestResolverLive("l0resolver"),
+        ],
+        protocol_params=DR3_KLEROS_PARAMS,
+    )
+
+
+def s19_dr3_kleros_escalate_l1_resolves() -> RunResult:
+    """DR3 Kleros: buyer escalates L0→L1; L1 resolver resolves.
+
+    Buyer escalates once after dispute, advancing dispute-level to 1.
+    escalation-fn returns {ok=true, new-resolver="0xl1"}.
+    Kleros module now reads level=1 and authorizes only "0xl1".
+    L0 resolver retries but is rejected (level-1 expects "0xl1" not "0xl0").
+    L1 resolver succeeds.
+
+    Asserts: escalation increments level correctly; module authorizes new
+    resolver; old resolver cannot resolve after escalation; no violations.
+    """
+    return run_scenario(
+        "S19",
+        agents_meta=[
+            {"id": "buyer",      "address": "0xbuyer", "type": "honest"},
+            {"id": "seller",     "address": "0xseller", "type": "honest"},
+            {"id": "l0resolver", "address": "0xl0",    "type": "resolver"},
+            {"id": "l1resolver", "address": "0xl1",    "type": "resolver"},
+        ],
+        live_agents=[
+            EscalatingBuyerLive("buyer", "0xseller", max_escalations=1),
+            HonestResolverLive("l0resolver"),   # unauthorized after escalation → reverts
+            HonestResolverLive("l1resolver"),   # authorized at level 1 → succeeds
+        ],
+        protocol_params=DR3_KLEROS_PARAMS,
+    )
+
+
+def s20_dr3_kleros_max_escalation_guard() -> RunResult:
+    """DR3 Kleros: escalate twice to level 2 (max); third escalation reverts.
+
+    Buyer attempts three escalations:
+      attempt 1 — level 0→1  (ok)
+      attempt 2 — level 1→2  (ok)
+      attempt 3 — final-round? = true → :escalation-not-allowed (revert, not violation)
+    L2 resolver (only authorized at level 2) then resolves.
+
+    Asserts: max-dispute-level guard fires correctly; reverts are logged, not
+    violations; L2 resolver is authorised in the final round; no violations.
+    """
+    return run_scenario(
+        "S20",
+        agents_meta=[
+            {"id": "buyer",      "address": "0xbuyer", "type": "honest"},
+            {"id": "seller",     "address": "0xseller", "type": "honest"},
+            {"id": "l2resolver", "address": "0xl2",    "type": "resolver"},
+        ],
+        live_agents=[
+            EscalatingBuyerLive("buyer", "0xseller", max_escalations=3),  # 3rd reverts
+            HonestResolverLive("l2resolver"),   # only authorized at level 2
+        ],
+        protocol_params=DR3_KLEROS_PARAMS,
+    )
+
+
+def s21_dr3_kleros_pending_cleared_on_escalation() -> RunResult:
+    """DR3 Kleros: pending settlement is cleared when escalation fires.
+
+    With appeal_window_duration=60, execute_resolution defers the decision
+    into a PendingSettlement instead of finalising immediately (level < 2).
+
+    Sequence:
+      1. Buyer creates escrow (no custom_resolver), raises dispute
+      2. L0 resolver calls execute_resolution → pending settlement created
+         (level=0, not final round, appeal_window=60)
+      3. Buyer escalates → pending cleared, level advances to 1,
+         new dispute-resolver set to "0xl1"
+      4. L1 resolver calls execute_resolution → new pending settlement (level=1)
+      5. AutomateTimedActionsLive triggers execute_pending_settlement after the
+         appeal window expires
+
+    Key invariant: step 4 must NOT return :resolution-already-pending
+    (proof that step 3 cleared the pending settlement).
+
+    Asserts: pending cleared on escalation; fresh resolution accepted by L1;
+    eventual settlement executed; no violations.
+    """
+    return run_scenario(
+        "S21",
+        agents_meta=[
+            {"id": "buyer",      "address": "0xbuyer", "type": "honest"},
+            {"id": "seller",     "address": "0xseller", "type": "honest"},
+            {"id": "l0resolver", "address": "0xl0",    "type": "resolver"},
+            {"id": "l1resolver", "address": "0xl1",    "type": "resolver"},
+            {"id": "keeper",     "address": "0xkeeper", "type": "resolver"},
+        ],
+        live_agents=[
+            EscalatingBuyerLive("buyer", "0xseller", max_escalations=1),
+            HonestResolverLive("l0resolver"),         # creates pending at level 0
+            HonestResolverLive("l1resolver"),         # creates fresh pending at level 1
+            AutomateTimedActionsLive("keeper"),       # executes pending after window expires
+        ],
+        protocol_params=DR3_KLEROS_APPEAL_PARAMS,
+        max_steps=60,
+        max_ticks=30,
+        time_step_secs=60,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -774,6 +1075,12 @@ SCENARIOS = [
     ("S13  pending-settlement-refund",                s13_pending_settlement_refund),
     ("S14  dr3-module-authorized",                    s14_dr3_module_authorized_resolver),
     ("S15  dr3-module-unauthorized-rejected",         s15_dr3_module_unauthorized_resolver_rejected),
+    ("S16  ieo-create-release",                       s16_ieo_create_release),
+    ("S17  ieo-dispute-no-resolver-timeout",          s17_ieo_dispute_no_resolver_timeout),
+    ("S18  dr3-kleros-l0-resolves",                   s18_dr3_kleros_l0_resolves),
+    ("S19  dr3-kleros-escalate-l1-resolves",          s19_dr3_kleros_escalate_l1_resolves),
+    ("S20  dr3-kleros-max-escalation-guard",          s20_dr3_kleros_max_escalation_guard),
+    ("S21  dr3-kleros-pending-cleared-on-escalation", s21_dr3_kleros_pending_cleared_on_escalation),
 ]
 
 
