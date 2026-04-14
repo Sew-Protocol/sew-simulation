@@ -656,6 +656,34 @@ def s12_governance_snapshot_isolation() -> RunResult:
     return r  # type: ignore[return-value]
 
 
+def s13_pending_settlement_refund() -> RunResult:
+    """Pending-settlement → refunded path.
+
+    Like S05 but the resolver votes is_release=False.  The appeal window
+    creates a :pending-settlement escrow; once the window expires,
+    execute_pending_settlement must finalize it as :refunded (not :released).
+    Tests the second branch of the pending-settlement state machine that
+    S05 leaves uncovered.
+    """
+    return run_scenario(
+        "S13",
+        agents_meta=[
+            {"id": "buyer",    "address": "0xbuyer",    "type": "honest"},
+            {"id": "seller",   "address": "0xseller",   "type": "honest"},
+            {"id": "resolver", "address": "0xresolver", "type": "resolver"},
+            {"id": "executor", "address": "0xexecutor", "type": "keeper"},
+        ],
+        live_agents=[
+            DisputingBuyerLive("buyer", "0xseller", resolver_address="0xresolver", amount=6000),
+            RefundingResolverLive("resolver"),       # is_release=False → pending-settlement(refund)
+            PendingSettlementExecutorLive("executor"),  # executes after appeal window
+        ],
+        protocol_params=APPEAL_PARAMS,
+        max_ticks=20,
+        time_step_secs=30,  # 5 ticks × 30 s = 150 s > 120 s appeal window
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -673,6 +701,7 @@ SCENARIOS = [
     ("S10  double-finalize-rejected",        s10_double_finalize_rejected),
     ("S11  zero-fee-edge-case",              s11_zero_fee_edge_case),
     ("S12  governance-snapshot-isolation",   s12_governance_snapshot_isolation),
+    ("S13  pending-settlement-refund",       s13_pending_settlement_refund),
 ]
 
 
