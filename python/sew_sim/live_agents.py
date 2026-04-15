@@ -612,3 +612,236 @@ class MaliciousGovernanceResolver(LiveAgent):
         ):
             self._resolved.add(self._pending_wf)
         self._pending_wf = None
+
+
+# ---------------------------------------------------------------------------
+# General-purpose agents (also used by eth_failure_modes_2)
+# ---------------------------------------------------------------------------
+
+
+class EscalatingBuyerLive(LiveAgent):
+    """Creates an escrow (no custom_resolver), raises a dispute, then escalates
+    up to max_escalations times.
+
+    ALL escalation attempts are counted (including rejected ones) to prevent
+    an infinite loop when the escalation guard blocks at max-dispute-level.
+    """
+
+    def __init__(
+        self,
+        agent_id: str,
+        recipient_address: str,
+        amount: int = 5000,
+        max_escalations: int = 1,
+    ):
+        super().__init__(agent_id)
+        self.recipient_address = recipient_address
+        self.amount = amount
+        self.max_escalations = max_escalations
+        self._workflow_id: Optional[int] = None
+        self._created = False
+        self._disputed = False
+        self._escalation_attempts = 0
+
+    def decide(self, world_view: WorldView | None, seq: int, block_time: int) -> Optional[dict]:
+        if not self._created:
+            return {
+                "action": "create_escrow",
+                "params": {"token": "USDC", "to": self.recipient_address, "amount": self.amount},
+            }
+        if self._workflow_id is not None and not self._disputed:
+            return {"action": "raise_dispute", "params": {"workflow_id": self._workflow_id}}
+        if self._disputed and self._escalation_attempts < self.max_escalations:
+            return {"action": "escalate_dispute", "params": {"workflow_id": self._workflow_id}}
+        return None
+
+    def update_from_response(self, response: StepResponse) -> None:
+        super().update_from_response(response)
+        entry = response.get("trace_entry") or {}
+        action = entry.get("action")
+        if action == "create_escrow" and entry.get("result") == "ok":
+            self._workflow_id = (entry.get("extra") or {}).get("workflow_id")
+            self._created = True
+        if action == "raise_dispute" and entry.get("result") == "ok":
+            self._disputed = True
+        if action == "escalate_dispute":
+            # Count ALL attempts (ok and rejected) to bound loop at max-level guard
+            self._escalation_attempts += 1
+
+
+class AutomateTimedActionsLive(LiveAgent):
+    """Calls automate_timed_actions for every active escrow every tick.
+
+    Handles both appeal-window-expired pending settlements and dispute
+    max-duration timeouts without needing external time tracking.
+    """
+
+    def decide(self, world_view: WorldView | None, seq: int, block_time: int) -> Optional[dict]:
+        if world_view is None:
+            return None
+        for wf_id_str, state in (world_view.get("live_states") or {}).items():
+            if state in ("disputed", "pending"):
+                return {"action": "automate_timed_actions", "params": {"workflow_id": int(wf_id_str)}}
+        return None
+
+
+class ColludingResolverLive(LiveAgent):
+    """
+    F6 / F9 — Colluding resolver.
+
+    Resolves all disputed escrows in a fixed direction (favour_release=True/False),
+    regardless of the actual dispute merits. Models a resolver cartel or a
+    sub-threshold misresolution attack where the resolver's payout exceeds the
+    slashing penalty for a fraudulent outcome.
+    """
+
+    def __init__(
+        self,
+        agent_id: str,
+        favour_release: bool = True,
+        rng: random.Random | None = None,
+    ):
+        super().__init__(agent_id, rng)
+        self.favour_release = favour_release
+        self._resolved: set[int] = set()
+        self._pending_wf: int | None = None
+        self.resolutions = 0
+
+    def decide(
+        self, world_view: WorldView | None, seq: int, block_time: int
+    ) -> Optional[dict]:
+        if world_view is None:
+            return None
+        live = world_view.get("live_states") or {}
+        for wf_id_str, state in live.items():
+            wf_id = int(wf_id_str)
+            if state == "disputed" and wf_id not in self._resolved:
+                self._pending_wf = wf_id
+                return {
+                    "action": "execute_resolution",
+                    "params": {
+                        "workflow_id": wf_id,
+                        "is_release": self.favour_release,
+                        "resolution_hash": "0xcollude",
+                    },
+                }
+        return None
+
+    def update_from_response(self, response: StepResponse) -> None:
+        super().update_from_response(response)
+        entry = response.get("trace_entry") or {}
+        if (
+            entry.get("action") == "execute_resolution"
+            and entry.get("result") == "ok"
+            and self._pending_wf is not None
+        ):
+            self._resolved.add(self._pending_wf)
+            self.resolutions += 1
+        self._pending_wf = None
+
+
+class ProfitThresholdResolver(LiveAgent):
+    """
+    F7 — Profit-threshold strike.
+
+    Refuses to resolve any dispute where the estimated fee revenue falls below
+    min_profit_abs. Models rational-but-griefing resolver behaviour where small
+    escrows are unprofitable and therefore silently ignored — leaving disputes
+    permanently unresolved.
+
+    Requires :escrow-amounts in world-snapshot (added to replay.clj).
+    """
+
+    def __init__(
+        self,
+        agent_id: str,
+        fee_bps: int,
+        min_profit_abs: int,
+        rng: random.Random | None = None,
+    ):
+        super().__init__(agent_id, rng)
+        self.fee_bps = fee_bps
+        self.min_profit_abs = min_profit_abs
+        self._refused: set[int] = set()
+        self.refusals = 0
+
+    def decide(
+        self, world_view: WorldView | None, seq: int, block_time: int
+    ) -> Optional[dict]:
+        if world_view is None:
+            return None
+        live = world_view.get("live_states") or {}
+        escrow_amounts = world_view.get("escrow_amounts") or {}
+        for wf_id_str, state in live.items():
+            wf_id = int(wf_id_str)
+            if state != "disputed" or wf_id in self._refused:
+                continue
+            amount = escrow_amounts.get(wf_id_str) or escrow_amounts.get(str(wf_id)) or 0
+            fee = amount * self.fee_bps // 10000
+            if fee < self.min_profit_abs:
+                self._refused.add(wf_id)
+                self.refusals += 1
+        return None  # never resolves — silently withholds service
+
+    def update_from_response(self, response: StepResponse) -> None:
+        super().update_from_response(response)
+
+
+class CapacityLimitedArbitrator(LiveAgent):
+    """
+    F10 — Capacity-limited arbitrator.
+
+    Acts as an honest resolver but enforces a hard cap on total resolutions.
+    Once the cap is reached it stops acting entirely. Models an arbitration
+    layer with finite throughput — e.g. a Kleros court with limited jurors,
+    an on-chain arbitrator with a gas budget, or a slow DAO vote queue.
+
+    When more disputes are escalated than the arbitrator can handle, the
+    excess disputes remain permanently unresolved.
+    """
+
+    def __init__(
+        self,
+        agent_id: str,
+        capacity: int,
+        rng: random.Random | None = None,
+    ):
+        super().__init__(agent_id, rng)
+        self.capacity = capacity
+        self._resolved: set[int] = set()
+        self._pending_wf: int | None = None
+        self.resolutions = 0
+
+    def decide(
+        self, world_view: WorldView | None, seq: int, block_time: int
+    ) -> Optional[dict]:
+        if world_view is None:
+            return None
+        if self.resolutions >= self.capacity:
+            return None
+        live = world_view.get("live_states") or {}
+        for wf_id_str, state in live.items():
+            wf_id = int(wf_id_str)
+            if state == "disputed" and wf_id not in self._resolved:
+                self._pending_wf = wf_id
+                return {
+                    "action": "execute_resolution",
+                    "params": {
+                        "workflow_id": wf_id,
+                        "is_release": False,
+                        "resolution_hash": "0xcapacity",
+                    },
+                }
+        return None
+
+    def update_from_response(self, response: StepResponse) -> None:
+        super().update_from_response(response)
+        entry = response.get("trace_entry") or {}
+        if (
+            entry.get("action") == "execute_resolution"
+            and entry.get("result") == "ok"
+            and self._pending_wf is not None
+        ):
+            self._resolved.add(self._pending_wf)
+            self.resolutions += 1
+        self._pending_wf = None

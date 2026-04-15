@@ -52,6 +52,8 @@ from sew_sim.live_agents import (
     HonestBuyerLive,
     HonestResolverLive,
     GriefingBuyerLive,
+    EscalatingBuyerLive,
+    AutomateTimedActionsLive,
 )
 from sew_sim.live_runner import LiveRunner, RunResult
 from eth_failure_modes import (
@@ -60,6 +62,13 @@ from eth_failure_modes import (
     s26_f3_governance_sandwich,
     s27_f4_escalation_loop_amplification,
     s28_f5_concurrent_status_desync,
+)
+from eth_failure_modes_2 import (
+    s29_f6_resolver_cartel,
+    s30_f7_profit_threshold_strike,
+    s31_f8_appeal_fee_amplification,
+    s32_f9_subthreshold_misresolution,
+    s33_f10_cascade_escalation_drain,
 )
 
 
@@ -272,72 +281,6 @@ class PendingSettlementExecutorLive(LiveAgent):
             wf = (entry.get("params") or {}).get("workflow_id")
             if wf is not None:
                 self._executed.add(int(wf))
-
-
-class EscalatingBuyerLive(LiveAgent):
-    """Creates an escrow (no custom_resolver), raises a dispute, then escalates
-    up to max_escalations times.
-
-    ALL escalation attempts are counted (including rejected ones) to prevent
-    an infinite loop when the escalation guard blocks at max-dispute-level.
-    """
-
-    def __init__(
-        self,
-        agent_id: str,
-        recipient_address: str,
-        amount: int = 5000,
-        max_escalations: int = 1,
-    ):
-        super().__init__(agent_id)
-        self.recipient_address = recipient_address
-        self.amount = amount
-        self.max_escalations = max_escalations
-        self._workflow_id: Optional[int] = None
-        self._created = False
-        self._disputed = False
-        self._escalation_attempts = 0
-
-    def decide(self, world_view: WorldView | None, seq: int, block_time: int) -> Optional[dict]:
-        if not self._created:
-            return {
-                "action": "create_escrow",
-                "params": {"token": "USDC", "to": self.recipient_address, "amount": self.amount},
-            }
-        if self._workflow_id is not None and not self._disputed:
-            return {"action": "raise_dispute", "params": {"workflow_id": self._workflow_id}}
-        if self._disputed and self._escalation_attempts < self.max_escalations:
-            return {"action": "escalate_dispute", "params": {"workflow_id": self._workflow_id}}
-        return None
-
-    def update_from_response(self, response: StepResponse) -> None:
-        super().update_from_response(response)
-        entry = response.get("trace_entry") or {}
-        action = entry.get("action")
-        if action == "create_escrow" and entry.get("result") == "ok":
-            self._workflow_id = (entry.get("extra") or {}).get("workflow_id")
-            self._created = True
-        if action == "raise_dispute" and entry.get("result") == "ok":
-            self._disputed = True
-        if action == "escalate_dispute":
-            # Count ALL attempts (ok and rejected) to bound loop at max-level guard
-            self._escalation_attempts += 1
-
-
-class AutomateTimedActionsLive(LiveAgent):
-    """Calls automate_timed_actions for every active escrow every tick.
-
-    Handles both appeal-window-expired pending settlements and dispute
-    max-duration timeouts without needing external time tracking.
-    """
-
-    def decide(self, world_view: WorldView | None, seq: int, block_time: int) -> Optional[dict]:
-        if world_view is None:
-            return None
-        for wf_id_str, state in (world_view.get("live_states") or {}).items():
-            if state in ("disputed", "pending"):
-                return {"action": "automate_timed_actions", "params": {"workflow_id": int(wf_id_str)}}
-        return None
 
 
 class SellerGriefingLive(LiveAgent):
@@ -1215,6 +1158,12 @@ SCENARIOS = [
     ("S26  f3-governance-sandwich",        lambda: s26_f3_governance_sandwich()[0]),
     ("S27  f4-escalation-loop-amplified",  lambda: s27_f4_escalation_loop_amplification()[0]),
     ("S28  f5-concurrent-status-desync",   lambda: s28_f5_concurrent_status_desync()[0]),
+    # Ethereum failure-mode scenarios (F6–F10)
+    ("S29  f6-resolver-cartel",            lambda: s29_f6_resolver_cartel()[0]),
+    ("S30  f7-profit-threshold-strike",    lambda: s30_f7_profit_threshold_strike()[0]),
+    ("S31  f8-appeal-fee-amplification",   lambda: s31_f8_appeal_fee_amplification()[0]),
+    ("S32  f9-subthreshold-misresolution", lambda: s32_f9_subthreshold_misresolution()[0]),
+    ("S33  f10-cascade-escalation-drain",  lambda: s33_f10_cascade_escalation_drain()[0]),
 ]
 
 

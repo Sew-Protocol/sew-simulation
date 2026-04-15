@@ -93,7 +93,8 @@
     :resolution-module            (get pp :resolution-module nil)
     :appeal-window-duration       (get pp :appeal-window-duration 0)
     :max-dispute-duration         (get pp :max-dispute-duration 2592000)
-    :appeal-bond-protocol-fee-bps (get pp :appeal-bond-protocol-fee-bps 0)}))
+    :appeal-bond-protocol-fee-bps (get pp :appeal-bond-protocol-fee-bps 0)
+    :dispute-resolver             (get pp :dispute-resolver nil)}))
 
 ;; ---------------------------------------------------------------------------
 ;; Release strategy: only sender (:from) may release in simulation mode
@@ -417,7 +418,9 @@
    :dispute-levels     (into {} (:dispute-levels world))
    :dispute-resolvers  (into {} (map (fn [[id et]] [id (:dispute-resolver et)])
                                      (:escrow-transfers world)))
-   :resolver-rotations (into {} (:resolver-rotations world))})
+   :resolver-rotations (into {} (:resolver-rotations world))
+   :escrow-amounts     (into {} (map (fn [[id et]] [id (:amount-after-fee et)])
+                                     (:escrow-transfers world)))})
 
 ;; ---------------------------------------------------------------------------
 ;; Single-step processor — public for gRPC server use
