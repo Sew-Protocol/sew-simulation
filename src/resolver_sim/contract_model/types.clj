@@ -103,7 +103,7 @@
            yield-generation-module yield-distribution-module incentive-module
            yield-protocol-fee-bps appeal-bond-protocol-fee-bps escrow-fee-bps
            default-auto-release-delay default-auto-cancel-delay
-           max-dispute-duration appeal-window-duration]}]
+           max-dispute-duration appeal-window-duration dispute-resolver]}]
   {:resolution-module           resolution-module
    :release-strategy            release-strategy
    :cancellation-strategy       cancellation-strategy
@@ -116,7 +116,8 @@
    :default-auto-release-delay  (or default-auto-release-delay 0)
    :default-auto-cancel-delay   (or default-auto-cancel-delay 0)
    :max-dispute-duration        (or max-dispute-duration 0)
-   :appeal-window-duration      (or appeal-window-duration 0)})
+   :appeal-window-duration      (or appeal-window-duration 0)
+   :dispute-resolver            dispute-resolver})
 
 (defn make-pending-settlement
   "Construct a PendingSettlement map.

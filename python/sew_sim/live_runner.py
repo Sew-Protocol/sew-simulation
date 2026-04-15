@@ -160,12 +160,15 @@ class LiveRunner:
                 seq += 1
 
                 if resp.get("halted"):
+                    halt_reason = resp.get("error") or _format_violations(
+                        (resp.get("trace_entry") or {}).get("violations")
+                    )
                     return RunResult(
                         session_id=sid,
                         outcome="halted",
                         steps_executed=seq,
                         halted_at_seq=seq - 1,
-                        halt_reason=resp.get("error") or "invariant_violation",
+                        halt_reason=halt_reason,
                         trace=trace,
                         metrics=metrics,
                         final_world_view=world_view,
@@ -230,3 +233,21 @@ def _accum_metrics(
         metrics["reverts"] += 1
     if result == "invariant_violated":
         metrics["invariant_violations"] += 1
+
+
+def _format_violations(violations: dict | None) -> str:
+    """Format Clojure invariant violations map into a readable string.
+
+    violations is a map of invariant-name → {:holds? bool :violations [...]}
+    Keys with holds?=false are the violated invariants.
+    """
+    if not violations:
+        return "invariant_violation"
+    failed = [
+        name
+        for name, v in violations.items()
+        if isinstance(v, dict) and not v.get("holds?", True)
+    ]
+    if not failed:
+        return "invariant_violation"
+    return "invariant_violated: " + ", ".join(failed)
