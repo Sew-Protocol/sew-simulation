@@ -1,5 +1,7 @@
 # SEW Dispute Resolution Simulator
 
+> When funds move through an Ethereum protocol, you're trusting that disputes will be resolved fairly. This project tests whether that trust holds — and finds the failure modes no existing tool can detect.
+
 > **Adversarial security testing for Ethereum escrow and dispute-resolution protocols.**
 > Finds failures that Slither, Echidna, and Foundry fuzzing cannot — because they only emerge from the interaction of multiple valid transactions across multiple actors.
 
@@ -56,6 +58,16 @@ A resolver with a minimum profit threshold refuses to service escrows where the 
 Four buyers simultaneously raise disputes against a single arbitrator capped at two resolutions. Two escrows resolve; two are permanently stuck in `disputed` state. No invariant is violated — capacity exhaustion is not a protocol bug. But the funds are inaccessible.
 
 **Result:** A coordinated dispute flood locks user funds at negligible attacker cost. The failure only manifests under concurrent load simulation.
+
+---
+
+## 🔍 Evidence
+
+See **[Adversarial Simulation Evidence](docs/evidence/summary.md)** — reproducible outputs for all 10 Ethereum failure mode scenarios, with raw JSON.
+
+- [F3 — Governance Sandwich](docs/evidence/detailed/F3-governance-sandwich.md): retroactive outcome manipulation via resolver rotation
+- [F7 — Profit-Threshold Strike](docs/evidence/detailed/F7-profit-threshold-strike.md): economic liveness failure from rational resolver withdrawal  
+- [F10 — Cascade Escalation Drain](docs/evidence/detailed/F10-cascade-escalation.md): system-level DoS from capacity exhaustion
 
 ---
 
