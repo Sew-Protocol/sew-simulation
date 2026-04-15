@@ -186,10 +186,15 @@
           (let [is-sender? (= caller (:from et))
                 world'     (-> world
                                (set-escrow-state workflow-id :disputed)
+                               ;; Set caller's status to :raise-dispute and clear the
+                               ;; counterparty's status — mirrors the Solidity invariant
+                               ;; that :agree-to-cancel cannot persist once disputed.
                                (update-transfer workflow-id
                                                (if is-sender?
-                                                 #(assoc % :sender-status :raise-dispute)
-                                                 #(assoc % :recipient-status :raise-dispute)))
+                                                 #(assoc % :sender-status    :raise-dispute
+                                                           :recipient-status  :none)
+                                                 #(assoc % :recipient-status :raise-dispute
+                                                           :sender-status     :none)))
                                (assoc-in [:dispute-timestamps workflow-id]
                                          (:block-time world)))]
             (t/ok world'))))))

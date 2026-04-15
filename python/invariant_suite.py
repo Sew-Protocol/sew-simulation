@@ -334,14 +334,13 @@ class AutomateTimedActionsLive(LiveAgent):
 
 
 class SellerGriefingLive(LiveAgent):
-    """Seller who double-escalates as soon as a dispute appears in world_view.
+    """Seller who attempts to escalate as soon as a dispute appears in world_view.
 
-    This bypasses L0 and L1 resolvers before they can act — a griefing vector
-    that exhausts all escalation levels without any resolver decision.  After two
-    escalations the dispute is at the final round (level=2) and only the L2
-    resolver can act.
+    Previously this was a griefing vector: the seller could double-escalate
+    (L0→L1→L2) before any resolver acted, bypassing all lower-level resolvers.
 
-    Used by S23 to document that the protocol permits this behaviour.
+    After fix (S23): escalate_dispute now requires a pending settlement to exist.
+    Preemptive escalation attempts are rejected with :no-resolution-to-appeal.
     """
 
     def __init__(self, agent_id: str, max_escalations: int = 2):
@@ -1097,56 +1096,25 @@ def s21_dr3_kleros_pending_cleared_on_escalation() -> RunResult:
     )
 
 
-def assert_scenario_expect_fail(name: str, result: RunResult) -> bool:
-    """Assert that a scenario correctly triggers an invariant violation.
-
-    Returns True (suite-pass) when the scenario halted or recorded a violation —
-    i.e. when the BUG is confirmed.  Returns False if the bug was NOT triggered
-    (meaning the protocol unexpectedly defended itself, or the test is wrong).
-    """
-    violations = result.metrics.get("invariant_violations", 0)
-    halted = result.outcome == "halted"
-    bug_confirmed = halted or violations > 0
-    status = "✓ BUG✓" if bug_confirmed else "✗ BUG?"
-    reason = ""
-    if halted:
-        reason = f" halt_reason={result.halt_reason}"
-    if violations:
-        reason += f" invariant_violations={violations}"
-    if not bug_confirmed:
-        reason = " (expected halt/violation — bug not triggered)"
-    print(
-        f"  {status}  {name:<45}"
-        f"steps={result.steps_executed:<4}"
-        f"reverts={result.metrics.get('reverts', 0):<4}"
-        f"{reason}"
-    )
-    return bug_confirmed
-
-
 def s22_status_leak_agree_cancel_over_dispute() -> RunResult:
-    """BUG: transition-to-disputed does not clear counterparty agree-to-cancel.
+    """REGRESSION: transition-to-disputed clears counterparty agree-to-cancel.
 
-    Root cause: state_machine/transition-to-disputed sets the caller's status to
-    :raise-dispute but never clears the other party's :agree-to-cancel flag if it
-    was already set.  This leaves the escrow in a state that the protocol spec
-    declares invalid: {:disputed :raise-dispute :agree-to-cancel}.
+    Previously broken: state_machine/transition-to-disputed set the caller's
+    status to :raise-dispute but never cleared the other party's :agree-to-cancel
+    flag, leaving {:disputed :raise-dispute :agree-to-cancel} — invalid per Inv 7.
+
+    Fix: transition-to-disputed now resets the counterparty's status to :none.
 
     Sequence:
       1. Buyer creates escrow (buyer=:from, seller=:to)
-      2. Seller calls recipient_cancel (no strategy → sets :recipient-status
-         :agree-to-cancel, escrow stays :pending)
+      2. Seller calls recipient_cancel → :recipient-status :agree-to-cancel
+         (escrow stays :pending — no mutual consent yet)
       3. Buyer calls raise_dispute → transition-to-disputed:
            sets :sender-status :raise-dispute
-           does NOT clear :recipient-status            ← BUG
-         Result: {:disputed :raise-dispute :agree-to-cancel}
+           clears :recipient-status → :none        ← FIX
+         Result: {:disputed :raise-dispute :none} — valid
 
-    Expected outcome: HALTED — Invariant 7 (all-status-combinations-valid?)
-    fires immediately after step 3.
-
-    Fix: transition-to-disputed must reset the counterparty's status to :none.
-    In Solidity this means clearing recipientStatus (or senderStatus) when the
-    other party calls raiseDispute.
+    Expected outcome: PASS (no invariant violation).
     """
     buyer = ScriptedSequenceLive("buyer", [
         {
@@ -1170,50 +1138,38 @@ def s22_status_leak_agree_cancel_over_dispute() -> RunResult:
     )
 
 
-def s23_seller_preemptive_double_escalation() -> RunResult:
-    """DESIGN GAP: seller bypasses L0/L1 resolvers via immediate double-escalation.
+def s23_seller_preemptive_escalation_blocked() -> RunResult:
+    """REGRESSION: preemptive escalation rejected when no resolution has been submitted.
 
-    The protocol allows EITHER participant to call escalate_dispute with no
-    requirement that a resolution was attempted first.  A malicious seller can:
+    Previously broken: escalate_dispute had no guard requiring a prior resolution
+    attempt.  A malicious seller could immediately double-escalate (L0→L1→L2)
+    after a dispute was raised, bypassing cheaper/faster lower-level resolvers.
 
-      1. Wait for buyer to raise a dispute (level=0)
-      2. Immediately call escalate_dispute → level 1 (L0 resolver bypassed)
-      3. Immediately call escalate_dispute → level 2 (L1 resolver bypassed, final round)
+    Fix: escalate_dispute now requires a pending settlement to exist.  Escalation
+    is an appeal of an existing resolver decision, not a unilateral level-skip.
 
-    Now only the L2 (Kleros) resolver can act.  If L2 is slow or unresponsive
-    the dispute is stuck until max_dispute_duration elapses (timeout fallback).
+    Sequence (with DR3_KLEROS_PARAMS, appeal_window=0):
+      1. Buyer creates escrow, raises dispute (level=0)
+      2. Seller immediately tries to escalate → REVERT :no-resolution-to-appeal
+         (no pending settlement; l0 resolver hasn't acted yet)
+      3. L0 resolver calls execute_resolution → resolves immediately
+         (appeal_window=0 → direct finalization, no pending settlement needed)
+      4. Seller tries again → REVERT :transfer-not-in-dispute (already resolved)
 
-    This is a GRIEFING vector:
-      - Seller destroys buyer's access to faster / cheaper L0/L1 resolution
-      - Protocol cost for buyer increases (L2 is typically more expensive)
-      - Seller pays no bond for the escalations in this model
-
-    No current invariant fires — this is a DESIGN GAP, not a code invariant
-    violation.  The scenario PASSES but the trace shows:
-      - L0 resolver rejected (:not-authorized-resolver)
-      - L1 resolver rejected (:not-authorized-resolver)
-      - L2 resolver succeeds (final round)
-
-    Mitigation ideas (not implemented):
-      - Require a resolution attempt before escalation is permitted
-      - Require the appellant to post a bond that is slashed if the escalation
-        is deemed frivolous
+    Asserts: both seller escalations are rejected; L0 resolver resolves normally;
+    no invariant violations.
     """
-    buyer = EscalatingBuyerLive("buyer", "0xseller", max_escalations=0)  # no escalations
-    seller = SellerGriefingLive("seller", max_escalations=2)              # double-escalates
+    buyer = EscalatingBuyerLive("buyer", "0xseller", max_escalations=0)
+    seller = SellerGriefingLive("seller", max_escalations=2)
     return run_scenario(
         "S23",
         agents_meta=[
             {"id": "buyer",      "address": "0xbuyer",  "type": "honest"},
             {"id": "seller",     "address": "0xseller", "type": "honest"},
             {"id": "l0resolver", "address": "0xl0",     "type": "resolver"},
-            {"id": "l1resolver", "address": "0xl1",     "type": "resolver"},
-            {"id": "l2resolver", "address": "0xl2",     "type": "resolver"},
         ],
         live_agents=[buyer, seller,
-                     HonestResolverLive("l0resolver"),
-                     HonestResolverLive("l1resolver"),
-                     HonestResolverLive("l2resolver")],
+                     HonestResolverLive("l0resolver")],
         protocol_params=DR3_KLEROS_PARAMS,
     )
 
@@ -1244,18 +1200,8 @@ SCENARIOS = [
     ("S19  dr3-kleros-escalate-l1-resolves",          s19_dr3_kleros_escalate_l1_resolves),
     ("S20  dr3-kleros-max-escalation-guard",          s20_dr3_kleros_max_escalation_guard),
     ("S21  dr3-kleros-pending-cleared-on-escalation", s21_dr3_kleros_pending_cleared_on_escalation),
-]
-
-# Bug-finding scenarios: expected to fail (demonstrate known protocol bugs).
-# S22 is expected to HALT (invariant violation — real code bug).
-# S23 is expected to PASS but documents a design gap (no invariant fires).
-BUG_SCENARIOS = [
-    ("S22  status-leak-agree-cancel-over-dispute",
-     s22_status_leak_agree_cancel_over_dispute,
-     True),    # True = expect failure (halt)
-    ("S23  seller-preemptive-double-escalation",
-     s23_seller_preemptive_double_escalation,
-     False),   # False = expect pass (design gap, not invariant violation)
+    ("S22  status-leak-agree-cancel-over-dispute",    s22_status_leak_agree_cancel_over_dispute),
+    ("S23  preemptive-escalation-blocked",            s23_seller_preemptive_escalation_blocked),
 ]
 
 
@@ -1275,37 +1221,13 @@ def main() -> None:
     passed = sum(1 for _, ok in results if ok)
     total  = len(results)
 
-    print(f"\n{'─' * 72}")
-    print("  Bug-finding scenarios")
-    print(f"{'─' * 72}")
-
-    bug_results = []
-    for name, fn, expect_halt in BUG_SCENARIOS:
-        result = fn()
-        if expect_halt:
-            ok = assert_scenario_expect_fail(name, result)
-        else:
-            # Design gap: passes the suite, but we verify the griefing trace
-            ok = assert_scenario(name, result)
-            if ok:
-                reverts = result.metrics.get("reverts", 0)
-                print(f"         ^ griefing confirmed: {reverts} resolver rejection(s)")
-        bug_results.append((name, ok))
-
     print(f"\n{'═' * 72}")
-    print(f"  {passed}/{total} invariant scenarios passed")
+    print(f"  {passed}/{total} scenarios passed")
     if passed < total:
         failed = [n for n, ok in results if not ok]
         print(f"  FAILED: {', '.join(failed)}")
-
-    bug_confirmed = sum(1 for _, ok in bug_results if ok)
-    print(f"  {bug_confirmed}/{len(bug_results)} bug scenarios confirmed")
-    for name, ok in bug_results:
-        marker = "✓" if ok else "✗"
-        print(f"    {marker} {name}")
     print(f"{'═' * 72}\n")
 
-    # Exit non-zero only if invariant scenarios fail (bugs are expected findings)
     sys.exit(0 if passed == total else 1)
 
 

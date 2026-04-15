@@ -216,7 +216,10 @@
 ;;   2. state must be :disputed
 ;;   3. caller must be :from or :to (participant only can appeal)
 ;;   4. current level must be < max-dispute-level (cannot escalate beyond MAX_ROUND)
-;;   5. escalation-fn must return {:ok true :new-resolver addr}
+;;   5. a pending settlement must exist — escalation is an appeal of a resolver's
+;;      decision, not a pre-emptive jump to the next level.  Without this guard
+;;      a malicious party can bypass all lower-level resolvers immediately.
+;;   6. escalation-fn must return {:ok true :new-resolver addr}
 ;;
 ;; Effects (in order, matching Solidity):
 ;;   a. Clear pending-settlement (_validateAndPrepareEscalation)
@@ -234,6 +237,9 @@
 (defn escalate-dispute
   "Escalate a :disputed escrow to the next resolution round.
 
+   Requires a pending settlement to exist: escalation is an appeal of an
+   existing resolver decision, not a unilateral level-skip.
+
    escalation-fn — (fn [world workflow-id caller level] → {:ok bool :new-resolver addr})
                    Pass nil to simulate 'escalation not configured'."
   [world workflow-id caller escalation-fn]
@@ -250,6 +256,11 @@
 
     (t/final-round? world workflow-id)
     (t/fail :escalation-not-allowed)
+
+    ;; Escalation is an appeal: a resolver must have already submitted a
+    ;; resolution (creating a pending settlement) before a party may escalate.
+    (not (:exists (t/get-pending world workflow-id)))
+    (t/fail :no-resolution-to-appeal)
 
     (nil? escalation-fn)
     (t/fail :escalation-not-configured)
