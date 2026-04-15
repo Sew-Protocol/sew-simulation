@@ -1,8 +1,7 @@
 # SEW Dispute Resolution Simulator
 
-Adversarial simulation infrastructure for the SEW escrow and dispute-resolution protocol.
-
-The system operates at three distinct layers, each testing a different class of failure. Together they form a complete security testing stack: economic incentive correctness, contract state machine integrity, and on-chain EVM behaviour.
+> **Adversarial security testing for Ethereum escrow and dispute-resolution protocols.**
+> Finds failures that Slither, Echidna, and Foundry fuzzing cannot — because they only emerge from the interaction of multiple valid transactions across multiple actors.
 
 ---
 
