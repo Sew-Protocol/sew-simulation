@@ -24,6 +24,7 @@
             [resolver-sim.sim.phase-w          :as phase-w]
             [resolver-sim.sim.phase-x          :as phase-x]
             [resolver-sim.sim.adversarial :as adversarial]
+            [resolver-sim.server.grpc          :as grpc]
             [resolver-sim.model.rng :as rng]
             [clojure.tools.cli :refer [parse-opts]])
   (:gen-class))
@@ -57,6 +58,10 @@
    ["-N" "--phase-w"           "Run Phase W: dispute type clustering (adversarial category targeting)"]
    ["-X" "--phase-x"           "Run Phase X: burst concurrency exploit"]
    ["-a" "--adversarial" "Run adversarial parameter search (falsification)"]
+   ["-S" "--serve" "Start gRPC simulation server (Phase 2 live mode)"]
+   [nil  "--port PORT" "gRPC server port (used with --serve, default: 7070)"
+    :default 7070
+    :parse-fn #(Integer/parseInt %)]
    ["-h" "--help" "Show this help"]])
 
 (defn usage [options-summary]
@@ -69,7 +74,9 @@
         ""
         "Examples:"
         "  clojure -M:run -p params/baseline.edn"
-        "  clojure -M:run -p params/cartel.edn -s  # sweep strategies"]
+        "  clojure -M:run -p params/cartel.edn -s  # sweep strategies"
+        "  clojure -M:run -S                        # start gRPC server on port 7070"
+        "  clojure -M:run -S --port 9090            # start gRPC server on port 9090"]
        (clojure.string/join "\n")))
 
 (defn error-msg [errors]
@@ -335,9 +342,18 @@
     (if exit-message
       (do (println exit-message)
           (System/exit (if ok? 0 1)))
-      
-      (try
-        (println "Loading params from:" (:params options))
+
+      (if (:serve options)
+        ;; --serve: start gRPC server; does not load params
+        (let [port (:port options)]
+          (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable grpc/stop!))
+          (grpc/start! port)
+          (println "[grpc] Press Ctrl+C to stop.")
+          (grpc/await-termination)
+          (System/exit 0))
+
+        (try
+          (println "Loading params from:" (:params options))
         (let [params (params/validate-and-merge (:params options))]
           (cond
             (:ring-spec params)
@@ -441,4 +457,4 @@
         (catch Exception e
           (println "Error:" (.getMessage e))
           (.printStackTrace e)
-          (System/exit 1))))))
+          (System/exit 1)))))))

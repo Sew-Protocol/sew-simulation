@@ -18,7 +18,7 @@ test_scenario() {
     ((TOTAL++))
     echo -n "[$TOTAL] Testing $name... "
     if timeout $timeout_sec clojure -M:run -- -p "$params" $flags > /tmp/test-$name.log 2>&1; then
-        if grep -qE "Results saved|Phase.*complete|Sweep complete|Simulation complete|results saved|waterfall results saved|Exit Cascade Results|PHASE [A-Z]+ SUMMARY|PHASE [A-Z]+ ASSESSMENT|Risk level:|Results: [0-9]+ vulnerable" /tmp/test-$name.log; then
+        if grep -qE "Results saved|Phase.*complete|Sweep complete|Simulation complete|results saved|waterfall results saved|Exit Cascade Results|PHASE [A-Z].* SUMMARY|PHASE [A-Z]+ ASSESSMENT|Risk level:|Results: [0-9]+ vulnerable" /tmp/test-$name.log; then
             echo "✓ PASS"
             ((PASS++))
         else

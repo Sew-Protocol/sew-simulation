@@ -1,0 +1,9 @@
+nohup: ignoring input
+WARNING: Implicit use of clojure.main with options is deprecated, use -M
+OpenJDK 64-Bit Server VM warning: Insufficient space for shared memory file:
+   3120968
+Try using the -Djava.io.tmpdir= option to select an alternate temp location.
+
+[grpc] SimulationEngine listening on port 7070
+[grpc] Press Ctrl+C to stop.
+[grpc] SimulationEngine stopped

@@ -360,6 +360,19 @@
                                 :new-resolver (:new-resolver result)})
           result)))))
 
+(defmethod apply-action "rotate_dispute_resolver"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (let [workflow-id   (get-in event [:params :workflow-id])
+            new-resolver  (get-in event [:params :new-resolver])
+            result        (res/rotate-dispute-resolver world workflow-id new-resolver)]
+        (if (:ok result)
+          (assoc result :extra {:old-resolver (:old-resolver result)
+                                :new-resolver (:new-resolver result)})
+          result)))))
+
 (defmethod apply-action "advance_time"
   [_ctx world _event]
   ;; Time is already advanced before dispatch — this is a pure no-op.
@@ -394,13 +407,17 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- world-snapshot [world]
-  {:block-time    (:block-time world)
-   :escrow-count  (count (:escrow-transfers world))
-   :total-held    (:total-held world)
-   :total-fees    (:total-fees world)
-   :pending-count (count (filter #(:exists (val %)) (:pending-settlements world)))
-   :live-states   (into {} (map (fn [[id et]] [id (:escrow-state et)])
-                                (:escrow-transfers world)))})
+  {:block-time         (:block-time world)
+   :escrow-count       (count (:escrow-transfers world))
+   :total-held         (:total-held world)
+   :total-fees         (:total-fees world)
+   :pending-count      (count (filter #(:exists (val %)) (:pending-settlements world)))
+   :live-states        (into {} (map (fn [[id et]] [id (:escrow-state et)])
+                                     (:escrow-transfers world)))
+   :dispute-levels     (into {} (:dispute-levels world))
+   :dispute-resolvers  (into {} (map (fn [[id et]] [id (:dispute-resolver et)])
+                                     (:escrow-transfers world)))
+   :resolver-rotations (into {} (:resolver-rotations world))})
 
 ;; ---------------------------------------------------------------------------
 ;; Single-step processor — public for gRPC server use

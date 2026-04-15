@@ -54,6 +54,13 @@ from sew_sim.live_agents import (
     GriefingBuyerLive,
 )
 from sew_sim.live_runner import LiveRunner, RunResult
+from eth_failure_modes import (
+    s24_f1_liveness_extraction,
+    s25_f2_appeal_window_race,
+    s26_f3_governance_sandwich,
+    s27_f4_escalation_loop_amplification,
+    s28_f5_concurrent_status_desync,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1202,6 +1209,12 @@ SCENARIOS = [
     ("S21  dr3-kleros-pending-cleared-on-escalation", s21_dr3_kleros_pending_cleared_on_escalation),
     ("S22  status-leak-agree-cancel-over-dispute",    s22_status_leak_agree_cancel_over_dispute),
     ("S23  preemptive-escalation-blocked",            s23_seller_preemptive_escalation_blocked),
+    # Ethereum failure-mode scenarios (F1–F5)
+    ("S24  f1-liveness-extraction",        lambda: s24_f1_liveness_extraction()[0]),
+    ("S25  f2-appeal-window-race",         lambda: s25_f2_appeal_window_race()[0]),
+    ("S26  f3-governance-sandwich",        lambda: s26_f3_governance_sandwich()[0]),
+    ("S27  f4-escalation-loop-amplified",  lambda: s27_f4_escalation_loop_amplification()[0]),
+    ("S28  f5-concurrent-status-desync",   lambda: s28_f5_concurrent_status_desync()[0]),
 ]
 
 

@@ -280,3 +280,37 @@
           (assoc (t/ok world')
                  :new-level    new-level
                  :new-resolver new-resolver))))))
+
+;; ---------------------------------------------------------------------------
+;; rotate-dispute-resolver
+;;
+;; Models a governance-triggered resolver rotation on an in-flight dispute.
+;; Guards: workflow must exist + be in :disputed state; new-resolver non-nil.
+;; Effects:
+;;   - Updates et.dispute-resolver to new-resolver
+;;   - Appends to world :resolver-rotations {workflow-id [{:from :to :at}]}
+;; ---------------------------------------------------------------------------
+
+(defn rotate-dispute-resolver
+  "Governance-triggered resolver rotation for an in-flight dispute.
+   Records the rotation so invariants and scenarios can detect governance attacks."
+  [world workflow-id new-resolver]
+  (cond
+    (not (t/valid-workflow-id? world workflow-id))
+    (t/fail :invalid-workflow-id)
+
+    (not= :disputed (t/escrow-state world workflow-id))
+    (t/fail :transfer-not-in-dispute)
+
+    (or (nil? new-resolver) (= "" new-resolver))
+    (t/fail :invalid-new-resolver)
+
+    :else
+    (let [old-resolver (get-in world [:escrow-transfers workflow-id :dispute-resolver])
+          rotation     {:from old-resolver :to new-resolver :at (:block-time world)}
+          world'       (-> world
+                           (assoc-in [:escrow-transfers workflow-id :dispute-resolver]
+                                     new-resolver)
+                           (update-in [:resolver-rotations workflow-id]
+                                      (fnil conj []) rotation))]
+      (assoc (t/ok world') :old-resolver old-resolver :new-resolver new-resolver))))
