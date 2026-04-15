@@ -1,7 +1,103 @@
 nohup: ignoring input
 OpenJDK 64-Bit Server VM warning: Insufficient space for shared memory file:
-   3379899
+   3535227
 Try using the -Djava.io.tmpdir= option to select an alternate temp location.
 
-[grpc] SimulationEngine listening on port 7070
-[grpc] Press Ctrl+C to stop.
+{:clojure.main/message
+ "Execution error (BindException) at sun.nio.ch.Net/bind0 (Net.java:-2).\nAddress already in use\n",
+ :clojure.main/triage
+ {:clojure.error/class java.net.BindException,
+  :clojure.error/line -2,
+  :clojure.error/cause "Address already in use",
+  :clojure.error/symbol sun.nio.ch.Net/bind0,
+  :clojure.error/source "Net.java",
+  :clojure.error/phase :execution},
+ :clojure.main/trace
+ {:via
+  [{:type java.io.IOException,
+    :message "Failed to bind to address 0.0.0.0/0.0.0.0:7070",
+    :at
+    [io.grpc.netty.shaded.io.grpc.netty.NettyServer
+     start
+     "NettyServer.java"
+     333]}
+   {:type java.net.BindException,
+    :message "Address already in use",
+    :at [sun.nio.ch.Net bind0 "Net.java" -2]}],
+  :trace
+  [[sun.nio.ch.Net bind0 "Net.java" -2]
+   [sun.nio.ch.Net bind "Net.java" 577]
+   [sun.nio.ch.ServerSocketChannelImpl
+    netBind
+    "ServerSocketChannelImpl.java"
+    344]
+   [sun.nio.ch.ServerSocketChannelImpl
+    bind
+    "ServerSocketChannelImpl.java"
+    301]
+   [io.grpc.netty.shaded.io.netty.channel.socket.nio.NioServerSocketChannel
+    doBind
+    "NioServerSocketChannel.java"
+    141]
+   [io.grpc.netty.shaded.io.netty.channel.AbstractChannel$AbstractUnsafe
+    bind
+    "AbstractChannel.java"
+    562]
+   [io.grpc.netty.shaded.io.netty.channel.DefaultChannelPipeline$HeadContext
+    bind
+    "DefaultChannelPipeline.java"
+    1334]
+   [io.grpc.netty.shaded.io.netty.channel.AbstractChannelHandlerContext
+    invokeBind
+    "AbstractChannelHandlerContext.java"
+    600]
+   [io.grpc.netty.shaded.io.netty.channel.AbstractChannelHandlerContext
+    bind
+    "AbstractChannelHandlerContext.java"
+    579]
+   [io.grpc.netty.shaded.io.netty.channel.DefaultChannelPipeline
+    bind
+    "DefaultChannelPipeline.java"
+    973]
+   [io.grpc.netty.shaded.io.netty.channel.AbstractChannel
+    bind
+    "AbstractChannel.java"
+    260]
+   [io.grpc.netty.shaded.io.netty.bootstrap.AbstractBootstrap$2
+    run
+    "AbstractBootstrap.java"
+    356]
+   [io.grpc.netty.shaded.io.netty.util.concurrent.AbstractEventExecutor
+    runTask
+    "AbstractEventExecutor.java"
+    173]
+   [io.grpc.netty.shaded.io.netty.util.concurrent.AbstractEventExecutor
+    safeExecute
+    "AbstractEventExecutor.java"
+    166]
+   [io.grpc.netty.shaded.io.netty.util.concurrent.SingleThreadEventExecutor
+    runAllTasks
+    "SingleThreadEventExecutor.java"
+    470]
+   [io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop
+    run
+    "NioEventLoop.java"
+    569]
+   [io.grpc.netty.shaded.io.netty.util.concurrent.SingleThreadEventExecutor$4
+    run
+    "SingleThreadEventExecutor.java"
+    997]
+   [io.grpc.netty.shaded.io.netty.util.internal.ThreadExecutorMap$2
+    run
+    "ThreadExecutorMap.java"
+    74]
+   [io.grpc.netty.shaded.io.netty.util.concurrent.FastThreadLocalRunnable
+    run
+    "FastThreadLocalRunnable.java"
+    30]
+   [java.lang.Thread run "Thread.java" 1583]],
+  :cause "Address already in use"}}
+
+Execution error (BindException) at sun.nio.ch.Net/bind0 (Net.java:-2).
+Address already in use
+

@@ -188,7 +188,10 @@ When eval-engine moves `xtdb.clj` → `evaluation/db/xtdb.clj`, update:
 
 ## Testing
 
-- Unit tests: `clojure -M:test -e "(require '...)(clojure.test/run-tests '...)"`
-- All phases: `./test-all.sh` (currently 27 tests, phases G–AA)
+- **Adversarial invariant suite** (33 scenarios): `cd python && python invariant_suite.py` (requires gRPC server on :7070)
+- **gRPC server**: `nohup clojure -M:run -- -S --port 7070 > grpc-server.log 2>&1 &`
+- **Monte Carlo phases** (G–AD): `scripts/monte-carlo/test-all.sh`
+- **Single phase**: `clojure -M:run -- -p params/<phase>.edn <flags>`
+- **Unit tests**: `clojure -M:test -e "(require '...)(clojure.test/run-tests '...)"`
 - Integration tests (`db/telemetry_integration_test.clj`) require XTDB on localhost:5432
 - Pass threshold for most hypotheses: **≥80% across all scenarios in a sweep**

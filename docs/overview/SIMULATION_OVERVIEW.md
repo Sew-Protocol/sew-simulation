@@ -1,14 +1,22 @@
-# Dispute Resolver Incentive Simulation
+# SEW Simulation — System Overview
 
-**Status**: Production-ready, MVP complete
-**Location**: `~/Code/sew-simulation/`
-**Language**: Clojure/JVM
-**Tests**: 10 unit tests, all passing
-**Key Result**: Honest resolver incentives are **4.58× better** than malicious strategies
+**Status**: Active development; adversarial suite complete, Foundry differential testing in progress
+**Languages**: Python (adversarial layer), Clojure/JVM (contract model + Monte Carlo)
+**Adversarial scenarios**: 33 passing (S01–S23 + F1–F10 Ethereum failure modes)
+**Monte Carlo phases**: 30+ (G–AD)
 
 ## What This Is
 
-A reproducible Monte Carlo simulation proving that Sew's dispute resolution economics correctly align resolver behavior with honest participation. Core claim: **honest resolver strategies dominate malicious ones across all tested scenarios**.
+A four-layer security simulation stack for the SEW escrow and dispute-resolution protocol.
+
+Each layer tests a different class of failure:
+
+| Layer | What it tests | Technology |
+|-------|--------------|------------|
+| 1 — Adversarial invariant suite | Multi-actor, time-ordered attack scenarios | Python + Clojure gRPC |
+| 2 — Contract model | State machine correctness, invariants, DR1/DR2/DR3 escalation | Clojure |
+| 3 — Foundry differential testing | EVM vs model divergence | Python + Forge/Anvil (in progress) |
+| 4 — Monte Carlo simulation | Resolver incentive economics, parameter sweeps | Clojure |
 
 ## Key Results
 
