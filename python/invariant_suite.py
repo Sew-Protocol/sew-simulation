@@ -41,7 +41,14 @@ Requires the Clojure gRPC server:
 
 from __future__ import annotations
 
+import argparse
+import datetime
+import json
+import os
+import platform
+import subprocess
 import sys
+import time
 from typing import Any, Optional
 
 from sew_sim.grpc_client import SimulationClient
@@ -460,7 +467,7 @@ def run_scenario(
         return runner.run(max_steps=max_steps, max_ticks=max_ticks)
 
 
-def assert_scenario(name: str, result: RunResult) -> bool:
+def assert_scenario(name: str, result: RunResult, elapsed: float = 0.0) -> bool:
     violations = result.metrics.get("invariant_violations", 0)
     halted = result.outcome == "halted"
     ok = not halted and violations == 0
@@ -472,8 +479,9 @@ def assert_scenario(name: str, result: RunResult) -> bool:
         reason += f" invariant_violations={violations}"
     print(
         f"  {status}  {name:<45}"
-        f"steps={result.steps_executed:<4}"
-        f"reverts={result.metrics.get('reverts', 0):<4}"
+        f" {elapsed:>4.1f}s"
+        f"  steps={result.steps_executed:<4}"
+        f"  reverts={result.metrics.get('reverts', 0):<4}"
         f"{reason}"
     )
     return ok
@@ -1153,42 +1161,167 @@ SCENARIOS = [
     ("S22  status-leak-agree-cancel-over-dispute",    s22_status_leak_agree_cancel_over_dispute),
     ("S23  preemptive-escalation-blocked",            s23_seller_preemptive_escalation_blocked),
     # Ethereum failure-mode scenarios (F1–F5)
-    ("S24  f1-liveness-extraction",        lambda: s24_f1_liveness_extraction()[0]),
-    ("S25  f2-appeal-window-race",         lambda: s25_f2_appeal_window_race()[0]),
-    ("S26  f3-governance-sandwich",        lambda: s26_f3_governance_sandwich()[0]),
-    ("S27  f4-escalation-loop-amplified",  lambda: s27_f4_escalation_loop_amplification()[0]),
-    ("S28  f5-concurrent-status-desync",   lambda: s28_f5_concurrent_status_desync()[0]),
+    ("S24  f1-liveness-extraction",        s24_f1_liveness_extraction),
+    ("S25  f2-appeal-window-race",         s25_f2_appeal_window_race),
+    ("S26  f3-governance-sandwich",        s26_f3_governance_sandwich),
+    ("S27  f4-escalation-loop-amplified",  s27_f4_escalation_loop_amplification),
+    ("S28  f5-concurrent-status-desync",   s28_f5_concurrent_status_desync),
     # Ethereum failure-mode scenarios (F6–F10)
-    ("S29  f6-resolver-cartel",            lambda: s29_f6_resolver_cartel()[0]),
-    ("S30  f7-profit-threshold-strike",    lambda: s30_f7_profit_threshold_strike()[0]),
-    ("S31  f8-appeal-fee-amplification",   lambda: s31_f8_appeal_fee_amplification()[0]),
-    ("S32  f9-subthreshold-misresolution", lambda: s32_f9_subthreshold_misresolution()[0]),
-    ("S33  f10-cascade-escalation-drain",  lambda: s33_f10_cascade_escalation_drain()[0]),
+    ("S29  f6-resolver-cartel",            s29_f6_resolver_cartel),
+    ("S30  f7-profit-threshold-strike",    s30_f7_profit_threshold_strike),
+    ("S31  f8-appeal-fee-amplification",   s31_f8_appeal_fee_amplification),
+    ("S32  f9-subthreshold-misresolution", s32_f9_subthreshold_misresolution),
+    ("S33  f10-cascade-escalation-drain",  s33_f10_cascade_escalation_drain),
 ]
 
 
+def _git_info() -> tuple[str, str]:
+    try:
+        sha    = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
+                                         text=True, stderr=subprocess.DEVNULL).strip()
+        branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                                         text=True, stderr=subprocess.DEVNULL).strip()
+        return sha, branch
+    except Exception:
+        return "unknown", "unknown"
+
+
+def _sum_metrics(all_results: list[dict]) -> dict:
+    """Aggregate RunResult.metrics across all scenarios."""
+    keys = [
+        "total_escrows", "total_volume", "disputes_triggered",
+        "resolutions_executed", "pending_settlements_executed",
+        "attack_attempts", "attack_successes", "reverts", "invariant_violations",
+    ]
+    totals: dict[str, Any] = {k: 0 for k in keys}
+    for r in all_results:
+        m = r.get("metrics", {})
+        for k in keys:
+            totals[k] += m.get(k, 0)
+    # total_transactions = all accepted + all reverts
+    totals["total_transactions"] = sum(
+        r.get("steps", 0) for r in all_results
+    )
+    return totals
+
+
 def main() -> None:
-    print(f"\n{'═' * 72}")
-    print("  SEW Invariant Suite")
-    print(f"{'═' * 72}")
-    print(f"  {'Scenario':<47}{'steps':<7}{'reverts':<9}status")
-    print(f"  {'-' * 68}")
+    parser = argparse.ArgumentParser(description="SEW Invariant Suite")
+    parser.add_argument(
+        "--scenario", "-s",
+        metavar="FILTER",
+        help="Run only scenarios whose name contains FILTER (case-insensitive)",
+    )
+    parser.add_argument(
+        "--json",
+        metavar="PATH",
+        nargs="?",
+        const="auto",
+        help="Write JSON report to PATH (default: results/invariant-suite-<ts>.json)",
+    )
+    args = parser.parse_args()
 
-    results = []
-    for name, fn in SCENARIOS:
-        result = fn()
-        ok = assert_scenario(name, result)
-        results.append((name, ok))
+    git_sha, git_branch = _git_info()
+    run_at    = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    python_ver = platform.python_version()
 
-    passed = sum(1 for _, ok in results if ok)
-    total  = len(results)
+    W = 72
+    print(f"\n{'═' * W}")
+    print("  SEW Invariant Suite — Adversarial Security Scenarios")
+    print(f"{'═' * W}")
+    print(f"  git:     {git_sha}  ({git_branch})")
+    print(f"  python:  {python_ver}")
+    print(f"  run at:  {run_at}")
+    print(f"  mode:    deterministic (no randomness; seed: n/a)")
+    print(f"{'─' * W}")
+    print(f"  {'Scenario':<45} {'time':>5}  {'steps':>5}  {'reverts':>7}  status")
+    print(f"  {'─' * (W - 2)}")
 
-    print(f"\n{'═' * 72}")
-    print(f"  {passed}/{total} scenarios passed")
+    scenarios_to_run = [
+        (name, fn) for name, fn in SCENARIOS
+        if not args.scenario or args.scenario.lower() in name.lower()
+    ]
+
+    results_data: list[dict] = []
+    suite_start = time.perf_counter()
+
+    for name, fn in scenarios_to_run:
+        t0  = time.perf_counter()
+        ret = fn()
+        elapsed = time.perf_counter() - t0
+
+        # F-scenarios return (RunResult, ok) and have already printed their own
+        # detail line.  S01–S23 return a bare RunResult.
+        if isinstance(ret, tuple):
+            result, ok = ret
+        else:
+            result = ret
+            ok = assert_scenario(name, result, elapsed=elapsed)
+
+        results_data.append({
+            "name":    name,
+            "ok":      ok,
+            "elapsed": round(elapsed, 2),
+            "steps":   result.steps_executed,
+            "outcome": result.outcome,
+            "halt_reason": result.halt_reason,
+            "metrics": result.metrics,
+        })
+
+    suite_elapsed = time.perf_counter() - suite_start
+
+    passed = sum(1 for r in results_data if r["ok"])
+    total  = len(results_data)
+    totals = _sum_metrics(results_data)
+
+    rejection_pct = (
+        100.0 * totals["reverts"] / totals["total_transactions"]
+        if totals["total_transactions"] else 0.0
+    )
+    attack_success_pct = (
+        100.0 * totals["attack_successes"] / totals["attack_attempts"]
+        if totals["attack_attempts"] else 0.0
+    )
+
+    print(f"\n{'═' * W}")
+    print(f"  {passed}/{total} scenarios passed  ({suite_elapsed:.1f}s total)")
     if passed < total:
-        failed = [n for n, ok in results if not ok]
+        failed = [r["name"] for r in results_data if not r["ok"]]
         print(f"  FAILED: {', '.join(failed)}")
-    print(f"{'═' * 72}\n")
+
+    print(f"{'─' * W}")
+    print(f"  Summary statistics")
+    print(f"  {'Total transactions processed:':<40} {totals['total_transactions']:>6}")
+    print(f"  {'Rejected (reverts):':<40} {totals['reverts']:>6}  ({rejection_pct:.1f}%)")
+    print(f"  {'Escrows created:':<40} {totals['total_escrows']:>6}")
+    print(f"  {'Total escrow volume simulated:':<40} {totals['total_volume']:>6}")
+    print(f"  {'Disputes triggered:':<40} {totals['disputes_triggered']:>6}")
+    print(f"  {'Resolutions executed:':<40} {totals['resolutions_executed']:>6}")
+    print(f"  {'Attack attempts logged:':<40} {totals['attack_attempts']:>6}")
+    print(f"  {'Attack successes:':<40} {totals['attack_successes']:>6}  ({attack_success_pct:.1f}%)")
+    print(f"  {'Invariant violations:':<40} {totals['invariant_violations']:>6}")
+    print(f"{'═' * W}\n")
+
+    if args.json is not None:
+        json_path = args.json if args.json != "auto" else None
+        if json_path is None:
+            ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            os.makedirs("results", exist_ok=True)
+            json_path = f"results/invariant-suite-{ts}.json"
+        report = {
+            "run_at":        run_at,
+            "git_sha":       git_sha,
+            "git_branch":    git_branch,
+            "python_version": python_ver,
+            "passed":        passed,
+            "total":         total,
+            "suite_elapsed_s": round(suite_elapsed, 2),
+            "summary":       totals,
+            "scenarios":     results_data,
+        }
+        with open(json_path, "w") as f:
+            json.dump(report, f, indent=2)
+        print(f"  JSON report: {json_path}\n")
 
     sys.exit(0 if passed == total else 1)
 
