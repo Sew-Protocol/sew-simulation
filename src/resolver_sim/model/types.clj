@@ -88,6 +88,30 @@
    :detection-type :fraud                 ; Phase H: :fraud (explicit), :timeout (automatic), :reversal (on appeal)
    :timeout-detection-probability 0.0})  ; Phase H: detection on appeal (separate from fraud)
 
+;; Schema keys that are optional — present in default-params or phase-specific EDN files,
+;; but not required in every scenario map. Add new optional keys here rather than inline.
+(def optional-schema-keys
+  #{:sweep-params
+    :attacker-extra-capital-multiplier
+    :resolver-bond-bps
+    :slashing-detection-delay-weeks
+    :force-strategy
+    :allow-slashing?
+    :unstaking-delay-days
+    :freeze-on-detection?
+    :freeze-duration-days
+    :appeal-window-days
+    :detection-type
+    :timeout-detection-probability
+    :reversal-detection-probability
+    :fraud-detection-probability
+    :fraud-slash-bps
+    :reversal-slash-bps
+    :timeout-slash-bps
+    :ring-spec
+    :l2-detection-prob
+    :senior-resolver-skill})
+
 (defn validate-scenario
   "Validate scenario params against schema. Throws if invalid."
   [scenario]
@@ -95,12 +119,6 @@
     (if-let [v (get scenario k)]
       (when-not (validator v)
         (throw (ex-info (format "Invalid param %s: %s" k v) {:param k :value v})))
-      (when (not (some #(= k %) [:sweep-params :attacker-extra-capital-multiplier :resolver-bond-bps
-                                    :slashing-detection-delay-weeks :force-strategy :allow-slashing?
-                                    :unstaking-delay-days :freeze-on-detection? :freeze-duration-days
-                                    :appeal-window-days :detection-type :timeout-detection-probability
-                                    :reversal-detection-probability :fraud-detection-probability :fraud-slash-bps
-                                    :reversal-slash-bps :timeout-slash-bps
-                                    :ring-spec :l2-detection-prob :senior-resolver-skill]))
+      (when-not (optional-schema-keys k)
         (throw (ex-info (format "Missing required param %s" k) {:param k})))))
   scenario)

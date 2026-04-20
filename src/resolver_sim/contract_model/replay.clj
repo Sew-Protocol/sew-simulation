@@ -34,9 +34,10 @@
      2. check-transition — terminal state irreversibility
 
    ## Layering
-   replay.clj is part of contract_model/ and must NOT import db/* or io/*."
+   replay.clj is part of contract_model/ and must NOT import db/*, io/*, or
+   clojure.java.io.  File loading lives in io/scenarios.clj; callers chain
+   (io.scenarios/load-scenario-file path) with replay-scenario themselves."
   (:require [clojure.data.json                      :as json]
-            [clojure.java.io                        :as io]
             [clojure.string                         :as str]
             [resolver-sim.contract-model.diff       :as diff]
             [resolver-sim.contract-model.types      :as t]
@@ -56,11 +57,8 @@
 (def ^:private max-safe-amount 922337203685477)
 
 ;; ---------------------------------------------------------------------------
-;; JSON key normalisation
+;; JSON serialisation helpers (output only — key loading lives in io/scenarios.clj)
 ;; ---------------------------------------------------------------------------
-
-(defn- json-key->kw [s]
-  (keyword (str/replace s "_" "-")))
 
 (defn- kw->json-key [k]
   (if (keyword? k) (name k) (str k)))
@@ -621,25 +619,6 @@
                  :trace            new-trace
                  :metrics          (update new-metrics :invariant-violations inc)}
                 (recur (:world step) (rest events) new-trace new-metrics)))))))))
-
-;; ---------------------------------------------------------------------------
-;; Public: load-scenario-file
-;; ---------------------------------------------------------------------------
-
-(defn load-scenario-file
-  "Load and parse a scenario JSON file.  Converts snake_case keys to kebab-case."
-  [path]
-  (with-open [r (io/reader path)]
-    (json/read r :key-fn json-key->kw)))
-
-;; ---------------------------------------------------------------------------
-;; Public: replay-file
-;; ---------------------------------------------------------------------------
-
-(defn replay-file
-  "Load scenario from path and replay it."
-  [path]
-  (-> path load-scenario-file replay-scenario))
 
 ;; ---------------------------------------------------------------------------
 ;; Public: result->json-str

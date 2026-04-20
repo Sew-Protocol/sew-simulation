@@ -7,19 +7,21 @@
 
 (defn calculate-fee
   "Calculate resolver fee based on escrow and fee rate (bps).
-   
+   Uses integer division (quot) to match contract_model/types compute-fee.
+
    Example:
    (calculate-fee 1000 150) ; 1000 wei escrow, 1.5% = 15 wei"
   [escrow-wei fee-bps]
-  (/ (* escrow-wei fee-bps) 10000))
+  (quot (* escrow-wei fee-bps) 10000))
 
 (defn calculate-bond
   "Calculate appeal bond based on escrow and bond rate (bps).
-   
+   Uses integer division (quot) to match contract_model/types compute-fee.
+
    Example:
    (calculate-bond 1000 700) ; 1000 wei escrow, 7% = 70 wei"
   [escrow-wei bond-bps]
-  (/ (* escrow-wei bond-bps) 10000))
+  (quot (* escrow-wei bond-bps) 10000))
 
 (defn calculate-slashing-loss
   "Calculate slashing loss if resolver is caught and slashed.

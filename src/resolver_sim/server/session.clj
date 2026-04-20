@@ -23,6 +23,10 @@
 ;; Session store
 ;; ---------------------------------------------------------------------------
 
+;; Intentional mutable singleton — the server is stateful by design.
+;; defonce ensures a live REPL reload does not drop active sessions.
+;; Tests that create sessions must clean up via destroy-session! or
+;; reset the atom directly: (reset! #'resolver-sim.server.session/sessions {})
 (defonce ^{:private true :doc "Atom: {session-id → {:world :context :lock :step-count}}"}
   sessions
   (atom {}))

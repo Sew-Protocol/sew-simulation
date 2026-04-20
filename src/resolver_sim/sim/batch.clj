@@ -17,8 +17,9 @@
 (defn std-dev [vals mean-val]
   (Math/sqrt (variance vals mean-val)))
 
-(defn quantile [sorted-vals q]
-  "Calculate q-quantile (0-1) from sorted sequence."
+(defn quantile
+  "Linear-interpolation quantile. q in [0,1]; sorted-vals must be pre-sorted."
+  [sorted-vals q]
   (if (empty? sorted-vals)
     0
     (let [idx (* q (dec (count sorted-vals)))]

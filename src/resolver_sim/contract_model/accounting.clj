@@ -23,9 +23,12 @@
 
 (defn sub-held
   "Decrease total-held for token by amount. Called on release/refund.
-   Does NOT guard against underflow — callers must have validated state."
+   Callers must have validated state. Asserts no underflow as a trip-wire."
   [world token amount]
-  (update-in world [:total-held token] (fnil - 0) amount))
+  (let [current (get-in world [:total-held token] 0)]
+    (assert (>= current amount)
+            (format "sub-held underflow: token=%s held=%d amount=%d" token current amount))
+    (update-in world [:total-held token] - amount)))
 
 ;; ---------------------------------------------------------------------------
 ;; total-fees tracking

@@ -94,19 +94,19 @@
   (let [scenario-id (:scenario-id params "unnamed")
         run-dir (results/create-run-directory output-dir scenario-id)
         rng (rng/make-rng (:rng-seed params))
-        
+
         _ (println (format "\n📊 Running simulation: %s" scenario-id))
         _ (println (format "   Seed: %d" (:rng-seed params)))
         _ (println (format "   Trials: %d" (:n-trials params)))
-        
+
         ; Run batch
         batch-result (batch/run-batch rng (:n-trials params) params)
-        
+
         _ (println "\n✓ Simulation complete. Results:")
         _ (println (format "   Honest avg profit: %.2f" (:honest-mean batch-result)))
         _ (println (format "   Malice avg profit: %.2f" (:malice-mean batch-result)))
         _ (println (format "   Dominance ratio: %.2f" (:dominance-ratio batch-result)))]
-    
+
     ; Write outputs
     (results/write-edn (format "%s/summary.edn" run-dir) batch-result)
     (results/write-csv (format "%s/results.csv" run-dir) batch-result)
@@ -114,28 +114,28 @@
                                {:scenario-id scenario-id
                                 :params params
                                 :batch-result batch-result})
-    
+
     (println (format "\n💾 Results saved to: %s" run-dir))
     batch-result))
 
 (defn run-sweep [params output-dir]
   (let [scenario-id (:scenario-id params "unnamed")
         run-dir (results/create-run-directory output-dir (str scenario-id "-sweep"))
-        
+
         ; Check if this is a custom sweep (2D+) or strategy sweep
         custom-sweep-params (:sweep-params params)
-        
+
         _ (if custom-sweep-params
             (println (format "\n📊 Running parameter sweep: %s" scenario-id))
             (println (format "\n📊 Running strategy sweep: %s" scenario-id)))
         _ (println (format "   Seed: %d" (:rng-seed params)))
         _ (println (format "   Trials per combo: %d" (:n-trials params)))
-        
+
         ; Run appropriate sweep
         results-list (if custom-sweep-params
                       (sweep/run-parameter-sweep params (:rng-seed params) custom-sweep-params)
                       (sweep/run-strategy-sweep params (:rng-seed params)))]
-    
+
     (println (format "\n✓ Sweep complete. %d results:" (count results-list)))
     (if custom-sweep-params
       ; For multi-D sweeps, show parameter values
@@ -152,7 +152,7 @@
         (println (format "   %s: honest=%.2f, malice=%.2f, ratio=%.2f"
                         (:strategy result) (:honest-mean result) (:malice-mean result)
                         (:dominance-ratio result)))))
-    
+
     ; Write outputs
     (results/write-edn (format "%s/summary.edn" run-dir) results-list)
     (results/write-csv (format "%s/results.csv" run-dir) results-list)
@@ -161,7 +161,7 @@
                                 :sweep-type (if custom-sweep-params :parameter :strategy)
                                 :params params
                                 :results results-list})
-    
+
     (println (format "\n💾 Sweep results saved to: %s" run-dir))
     results-list))
 
@@ -170,7 +170,7 @@
         run-dir (results/create-run-directory output-dir (str scenario-id "-ring"))
         rng (rng/make-rng (:rng-seed params))
         ring-spec (:ring-spec params)
-        
+
         _ (when-not ring-spec (throw (Exception. "ring-spec not found in params")))
         _ (println (format "\n📊 Running ring simulation: %s" scenario-id))
         _ (println (format "   Seed: %d" (:rng-seed params)))
@@ -179,17 +179,17 @@
                 juniors (:juniors ring-spec)]
             (println (format "   Ring: 1 senior ($%d bond) + %d juniors"
                             (:bond senior) (count juniors))))
-        
+
         ; Run ring batch
         ring-result (batch/run-ring-batch rng (:n-trials params) params ring-spec)
-        
+
         _ (println "\n✓ Ring simulation complete. Results:")
         _ (println (format "   Total ring profit: %.2f" (:ring-total-profit ring-result)))
         _ (println (format "   Avg profit/dispute: %.2f" (:ring-avg-profit-per-dispute ring-result)))
         _ (println (format "   Catch rate: %.4f" (:ring-catch-rate ring-result)))
         _ (println (format "   Ring viable: %s" (:ring-viable? ring-result)))
         _ (println (format "   Senior exhausted: %s" (:ring-senior-exhausted? ring-result)))]
-    
+
     ; Write outputs (skip CSV for now since format is different for ring vs strategy sweep)
     (results/write-edn (format "%s/summary.edn" run-dir) ring-result)
     (results/write-run-metadata (format "%s/metadata.edn" run-dir)
@@ -197,7 +197,7 @@
                                 :type :ring
                                 :params params
                                 :ring-result ring-result})
-    
+
     (println (format "\n💾 Ring results saved to: %s" run-dir))
     ring-result))
 
@@ -207,10 +207,10 @@
         rng (rng/make-rng (:rng-seed params))
         n-epochs (get params :n-epochs 10)
         n-trials-per-epoch (get params :n-trials-per-epoch 500)
-        
+
         ; Run Phase J multi-epoch simulation
         result (multi-epoch/run-multi-epoch rng n-epochs n-trials-per-epoch params)]
-    
+
     ; Write outputs
     (results/write-edn (format "%s/summary.edn" run-dir) result)
     (results/write-run-metadata (format "%s/metadata.edn" run-dir)
@@ -220,7 +220,7 @@
                                 :n-trials-per-epoch n-trials-per-epoch
                                 :params params
                                 :result result})
-    
+
     (println (format "\n💾 Multi-epoch results saved to: %s" run-dir))
     result))
 
@@ -228,23 +228,23 @@
   (let [scenario-id (:scenario-id params "unnamed")
         scenario-name (:scenario-name params scenario-id)
         run-dir (results/create-run-directory output-dir (str scenario-name "-waterfall"))
-        
+
         ; Initialize pools
         pool (waterfall/initialize-waterfall-pool params)
-        
+
         ; Simulate waterfall stress
         _ (println (format "\n🌊 Running waterfall stress test: %s" scenario-name))
-        _ (println (format "   Seniors: %d | Juniors: %d" 
+        _ (println (format "   Seniors: %d | Juniors: %d"
                           (:n-seniors params 5)
                           (* (:n-seniors params 5) (:n-juniors-per-senior params 10))))
         _ (println (format "   Fraud rate: %.1f%% | Coverage multiplier: %.1f×"
                           (* 100 (:fraud-rate params 0.10))
                           (:coverage-multiplier params 3.0)))
-        
+
         ; Generate slash events based on fraud rate
         n-trials (get params :n-trials 1000)
         n-fraud-events (int (* n-trials (:fraud-rate params 0.10)))
-        
+
         ; Create synthetic slash events (simplified)
         slash-events (mapv (fn [i]
                             (let [n-juniors (* (:n-seniors params 5) (:n-juniors-per-senior params 10))
@@ -252,13 +252,13 @@
                                   senior-idx (int (/ junior-idx (:n-juniors-per-senior params 10)))]
                               {:resolver-id (str "j" senior-idx "_" (mod junior-idx (:n-juniors-per-senior params 10)))
                                :senior-id (str "s" senior-idx)
-                               :slash-amount (waterfall/calculate-slash-amount 
+                               :slash-amount (waterfall/calculate-slash-amount
                                             (:junior-bond-amount params 500)
                                             (:fraud-slash-bps params 50))
                                :reason :fraud
                                :epoch (int (/ i 10))}))
                           (range n-fraud-events))
-        
+
         ; Process all slash events
         result (reduce (fn [state event]
                         (waterfall/process-slash-event event (:resolvers state) (:seniors state)))
@@ -266,14 +266,14 @@
                        :seniors (:seniors pool)
                        :events []}
                       slash-events)
-        
+
         ; Aggregate metrics
-        metrics (waterfall/aggregate-waterfall-metrics 
+        metrics (waterfall/aggregate-waterfall-metrics
                 (:resolvers result)
                 (:seniors result)
                 (mapv :event-result (map (fn [e] (waterfall/process-slash-event e (:juniors pool) (:seniors pool)))
                                         slash-events)))
-        
+
         summary {:scenario-id scenario-id
                 :scenario-name scenario-name
                 :type :waterfall
@@ -281,12 +281,12 @@
                                            :n-seniors :n-juniors-per-senior
                                            :senior-bond-amount :junior-bond-amount])
                 :results metrics}]
-    
+
     ; Print key findings
     (println (format "   Juniors exhausted: %.1f%%" (:juniors-exhausted-pct metrics)))
     (println (format "   Coverage used: %.1f%%" (:seniors-coverage-used-avg-pct metrics)))
     (println (format "   Adequacy score: %.1f%%" (:coverage-adequacy-score metrics)))
-    
+
     ; Write outputs
     (results/write-edn (format "%s/summary.edn" run-dir) summary)
     (results/write-run-metadata (format "%s/metadata.edn" run-dir)
@@ -294,7 +294,7 @@
                                 :type :waterfall
                                 :params params
                                 :results metrics})
-    
+
     (println (format "\n💾 Waterfall results saved to: %s" run-dir))
     summary))
 
@@ -302,30 +302,30 @@
   (let [scenario-id (:scenario-id params "unnamed")
         scenario-name (:scenario-name params scenario-id)
         run-dir (results/create-run-directory output-dir (str scenario-name "-governance-impact"))
-        
+
         rng (rng/make-rng (:seed params 42))
         n-epochs (get params :n-epochs 10)
         n-trials (get params :n-trials-per-epoch 500)
-        
+
         _ (println (format "\n🏛️  Running governance impact test: %s" scenario-name))
         _ (println (format "   Governance response: %d days" (:governance-response-days params 3)))
-        
+
         result (gov-impact/run-multi-epoch-governance-impact rng n-epochs n-trials params)
-        
+
         summary {:scenario-id scenario-id
                  :scenario-name scenario-name
                  :type :governance-impact
                  :governance-response-days (:governance-response-days params 3)
-                 :params (select-keys params [:governance-response-days :n-epochs :n-trials-per-epoch 
+                 :params (select-keys params [:governance-response-days :n-epochs :n-trials-per-epoch
                                             :slashing-detection-probability :strategy-mix])
                  :results (select-keys result [:epoch-results :governance-metrics :aggregated-stats])}]
-    
+
     ; Print key findings
     (println (format "   Final honest resolvers: %d" (get-in result [:aggregated-stats :honest-final-count])))
     (println (format "   Slashes executed: %d" (get-in result [:governance-metrics :total-pending-slashes-resolved])))
     (println (format "   Still pending: %d" (get-in result [:governance-metrics :pending-slashes-still-waiting])))
     (println (format "   Frozen resolvers: %d" (get-in result [:governance-metrics :frozen-resolvers])))
-    
+
     ; Write outputs
     (results/write-edn (format "%s/summary.edn" run-dir) summary)
     (results/write-run-metadata (format "%s/metadata.edn" run-dir)
@@ -333,9 +333,58 @@
                                 :type :governance-impact
                                 :params params
                                 :results result})
-    
+
     (println (format "\n💾 Governance impact results saved to: %s" run-dir))
     summary))
+
+;; Dispatch table: CLI option key -> [label run-fn].
+;; run-fn signature: (fn [params output-dir]) — output-dir is ignored for pure phase sweeps.
+;; Helper fns (run-sweep, run-waterfall-simulation, etc.) print their own headers; label is nil for those.
+;; To add a new phase: add a require above, add an entry here, add a cli-options entry.
+(def ^:private phase-runners
+  {:phase-p-lite    ["\n📊 Running Phase P Lite Falsification Test"
+                     (fn [p _] (phase-p-lite/run-phase-p-lite p))]
+   :market-exit     ["\n🔄 Running Phase O Market Exit Cascade"
+                     (fn [p _] (phase-o/run-phase-o-complete p))]
+   :phase-y         ["\n🔬 Running Phase Y: Evidence Fog & Attention Budgets"
+                     (fn [p _] (phase-y/run-phase-y-sweep p))]
+   :phase-z         ["\n🔄 Running Phase Z: Legitimacy & Reflexive Participation"
+                     (fn [p _] (phase-z/run-phase-z-sweep p))]
+   :phase-aa        ["\n🏛️  Running Phase AA: Governance as Adversary"
+                     (fn [p _] (phase-aa/run-phase-aa-sweep p))]
+   :phase-ab        ["\n📊 Running Phase AB: Per-Dispute Effort Rewards"
+                     (fn [p _] (phase-ab/run-phase-ab-sweep p))]
+   :phase-ac        ["\n🔄 Running Phase AC: Trust Floor & Emergency Onboarding"
+                     (fn [p _] (phase-ac/run-phase-ac-sweep p))]
+   :phase-ad        ["\n🏛️  Running Phase AD: Governance Bandwidth Floor"
+                     (fn [p _] (phase-ad/run-phase-ad-sweep p))]
+   :phase-ac-sweep  ["\n🔬 Running Phase AC Threshold Search"
+                     (fn [p _] (phase-ac/run-phase-ac-threshold-sweep p))]
+   :phase-ad-sweep  ["\n🔬 Running Phase AD Threshold Search"
+                     (fn [p _] (phase-ad/run-phase-ad-threshold-sweep p))]
+   :phase-ac-cap    ["\n🔬 Running Phase AC Capacity Expansion"
+                     (fn [p _] (phase-ac/run-phase-ac-capacity-expansion p))]
+   :phase-t         ["\n🏛️  Running Phase T: Governance Capture via Rule Drift"
+                     (fn [p _] (phase-t/run-phase-t-sweep p))]
+   :phase-p-revised ["\n📊 Running Phase P Revised: Sequential Appeal Falsification"
+                     (fn [_ _] (phase-p-revised/run-phase-p-revised-sweep))]
+   :phase-q         ["\n🔬 Running Phase Q: Advanced Vulnerability"
+                     (fn [_ _] (phase-q/run-phase-q-sweep))]
+   :phase-r         ["\n🔬 Running Phase R: Liveness & Participation Failure"
+                     (fn [_ _] (phase-r/run-phase-r-sweep))]
+   :phase-u         ["\n🎯 Running Phase U: Adaptive Attacker Learning"
+                     (fn [_ _] (phase-u/run-phase-u-sweep))]
+   :phase-v         ["\n🌊 Running Phase V: Correlated Belief Cascades"
+                     (fn [_ _] (phase-v/run-phase-v-sweep))]
+   :phase-w         ["\n🎯 Running Phase W: Dispute Type Clustering"
+                     (fn [_ _] (phase-w/run-phase-w-sweep))]
+   :phase-x         ["\n💥 Running Phase X: Burst Concurrency Exploit"
+                     (fn [_ _] (phase-x/run-phase-x-sweep))]
+   :governance-impact [nil run-governance-impact-simulation]
+   :waterfall         [nil run-waterfall-simulation]
+   :multi-epoch       [nil run-multi-epoch-simulation]
+   :sweep             [nil run-sweep]
+   :adversarial       [nil (fn [p _] (adversarial/run-adversarial-search p))]})
 
 (defn -main [& args]
   (let [{:keys [options exit-message ok?]} (validate-args args)]
@@ -344,7 +393,6 @@
           (System/exit (if ok? 0 1)))
 
       (if (:serve options)
-        ;; --serve: start gRPC server; does not load params
         (let [port (:port options)]
           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable grpc/stop!))
           (grpc/start! port)
@@ -354,107 +402,18 @@
 
         (try
           (println "Loading params from:" (:params options))
-        (let [params (params/validate-and-merge (:params options))]
-          (cond
-            (:ring-spec params)
-            (run-ring-simulation params (:output options))
-            
-             
-             (:phase-p-lite options)
-             (do (println "\n📊 Running Phase P Lite Falsification Test")
-                (phase-p-lite/run-phase-p-lite params))
-            (:market-exit options)
-            (do (println "\n🔄 Running Phase O Market Exit Cascade")
-               (phase-o/run-phase-o-complete params))
+          (let [params    (params/validate-and-merge (:params options))
+                output    (:output options)
+                phase-key (some #(when (get options %) %) (keys phase-runners))
+                [label run-fn] (get phase-runners phase-key)]
+            (cond
+              (:ring-spec params) (run-ring-simulation params output)
+              phase-key           (do (when label (println label))
+                                      (run-fn params output))
+              :else               (run-simulation params output))
+            (System/exit 0))
 
-            (:phase-y options)
-            (do (println "\n🔬 Running Phase Y: Evidence Fog & Attention Budgets")
-               (phase-y/run-phase-y-sweep params))
-
-            (:phase-z options)
-            (do (println "\n🔄 Running Phase Z: Legitimacy & Reflexive Participation")
-               (phase-z/run-phase-z-sweep params))
-
-            (:phase-aa options)
-            (do (println "\n🏛️  Running Phase AA: Governance as Adversary")
-               (phase-aa/run-phase-aa-sweep params))
-
-            (:phase-ab options)
-            (do (println "\n📊 Running Phase AB: Per-Dispute Effort Rewards")
-               (phase-ab/run-phase-ab-sweep params))
-
-            (:phase-ac options)
-            (do (println "\n🔄 Running Phase AC: Trust Floor & Emergency Onboarding")
-               (phase-ac/run-phase-ac-sweep params))
-
-            (:phase-ad options)
-            (do (println "\n🏛️  Running Phase AD: Governance Bandwidth Floor")
-               (phase-ad/run-phase-ad-sweep params))
-
-            (:phase-ac-sweep options)
-            (do (println "\n🔬 Running Phase AC Threshold Search")
-               (phase-ac/run-phase-ac-threshold-sweep params))
-
-            (:phase-ad-sweep options)
-            (do (println "\n🔬 Running Phase AD Threshold Search")
-               (phase-ad/run-phase-ad-threshold-sweep params))
-
-            (:phase-ac-cap options)
-            (do (println "\n🔬 Running Phase AC Capacity Expansion")
-               (phase-ac/run-phase-ac-capacity-expansion params))
-
-            (:phase-t options)
-            (do (println "\n🏛️  Running Phase T: Governance Capture via Rule Drift")
-               (phase-t/run-phase-t-sweep params))
-
-            (:phase-p-revised options)
-            (do (println "\n📊 Running Phase P Revised: Sequential Appeal Falsification")
-               (phase-p-revised/run-phase-p-revised-sweep))
-
-            (:phase-q options)
-            (do (println "\n🔬 Running Phase Q: Advanced Vulnerability")
-               (phase-q/run-phase-q-sweep))
-
-            (:phase-r options)
-            (do (println "\n🔬 Running Phase R: Liveness & Participation Failure")
-               (phase-r/run-phase-r-sweep))
-
-            (:phase-u options)
-            (do (println "\n🎯 Running Phase U: Adaptive Attacker Learning")
-               (phase-u/run-phase-u-sweep))
-
-            (:phase-v options)
-            (do (println "\n🌊 Running Phase V: Correlated Belief Cascades")
-               (phase-v/run-phase-v-sweep))
-
-            (:phase-w options)
-            (do (println "\n🎯 Running Phase W: Dispute Type Clustering")
-               (phase-w/run-phase-w-sweep))
-
-            (:phase-x options)
-            (do (println "\n💥 Running Phase X: Burst Concurrency Exploit")
-               (phase-x/run-phase-x-sweep))
-            
-            (:governance-impact options)
-            (run-governance-impact-simulation params (:output options))
-            
-            (:waterfall options)
-            (run-waterfall-simulation params (:output options))
-            
-            (:multi-epoch options)
-            (run-multi-epoch-simulation params (:output options))
-            
-            (:sweep options)
-            (run-sweep params (:output options))
-            
-            (:adversarial options)
-            (adversarial/run-adversarial-search params)
-            
-            :else
-            (run-simulation params (:output options)))
-          (System/exit 0))
-        
-        (catch Exception e
-          (println "Error:" (.getMessage e))
-          (.printStackTrace e)
-          (System/exit 1)))))))
+          (catch Exception e
+            (println "Error:" (.getMessage e))
+            (.printStackTrace e)
+            (System/exit 1)))))))
