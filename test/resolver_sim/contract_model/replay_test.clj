@@ -628,3 +628,64 @@
       (is (false? (:halted? s6))))
     (testing "invariants hold throughout"
       (is (true? (:all-hold? (inv/check-all (:world s6))))))))
+
+;; ---------------------------------------------------------------------------
+;; Section 18: Workflow-id alias resolution
+;; ---------------------------------------------------------------------------
+
+(deftest test-wf-alias-save-and-resolve
+  ":save-wf-as captures the assigned workflow-id; subsequent events resolve the alias."
+  (let [r (replay/replay-scenario
+           (sc :events
+               [{:seq 0 :time 1000 :agent "alice" :action "create_escrow"
+                  :params {:token "0xUSDC" :to "0xBob" :amount 5000
+                            :custom-resolver "0xResolver"}
+                  :save-wf-as "wf0"}
+                {:seq 1 :time 1001 :agent "alice" :action "release"
+                  :params {:workflow-id "wf0"}}]))]
+    (is (= :pass (:outcome r)))
+    (is (= 2 (:events-processed r)))
+    (is (= :ok (get-in r [:trace 0 :result])))
+    (is (= :ok (get-in r [:trace 1 :result])))))
+
+(deftest test-wf-alias-multi-escrow
+  "Multiple aliases can be saved and resolved independently."
+  (let [r (replay/replay-scenario
+           (sc :events
+               [{:seq 0 :time 1000 :agent "alice" :action "create_escrow"
+                  :params {:token "0xUSDC" :to "0xBob" :amount 3000}
+                  :save-wf-as "wf0"}
+                {:seq 1 :time 1001 :agent "alice" :action "create_escrow"
+                  :params {:token "0xUSDC" :to "0xBob" :amount 4000}
+                  :save-wf-as "wf1"}
+                {:seq 2 :time 1002 :agent "alice" :action "release"
+                  :params {:workflow-id "wf1"}}
+                {:seq 3 :time 1003 :agent "alice" :action "release"
+                  :params {:workflow-id "wf0"}}]))]
+    (is (= :pass (:outcome r)))
+    (is (= 4 (:events-processed r)))
+    (is (= 2 (get-in r [:metrics :total-escrows])))
+    (is (= :ok (get-in r [:trace 2 :result])))
+    (is (= :ok (get-in r [:trace 3 :result])))))
+
+(deftest test-wf-alias-unresolved-returns-invalid
+  "A string alias with no prior :save-wf-as returns :invalid outcome."
+  (let [r (replay/replay-scenario
+           (sc :events
+               [{:seq 0 :time 1000 :agent "alice" :action "create_escrow"
+                  :params {:token "0xUSDC" :to "0xBob" :amount 5000}}
+                {:seq 1 :time 1001 :agent "alice" :action "release"
+                  :params {:workflow-id "no-such-alias"}}]))]
+    (is (= :invalid (:outcome r)))
+    (is (= :unresolved-alias (:halt-reason r)))))
+
+(deftest test-wf-alias-integer-passes-through
+  "Integer workflow-ids bypass the alias layer unchanged."
+  (let [r (replay/replay-scenario
+           (sc :events
+               [{:seq 0 :time 1000 :agent "alice" :action "create_escrow"
+                  :params {:token "0xUSDC" :to "0xBob" :amount 5000}}
+                {:seq 1 :time 1001 :agent "alice" :action "release"
+                  :params {:workflow-id 0}}]))]
+    (is (= :pass (:outcome r)))
+    (is (= :ok (get-in r [:trace 1 :result])))))

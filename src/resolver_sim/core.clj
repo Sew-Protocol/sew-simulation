@@ -2,6 +2,7 @@
   "CLI entry point."
   (:require [resolver-sim.io.params :as params]
             [resolver-sim.io.results :as results]
+            [resolver-sim.contract-model.invariant-runner :as invariant]
             [resolver-sim.sim.batch :as batch]
             [resolver-sim.sim.sweep :as sweep]
             [resolver-sim.sim.multi-epoch :as multi-epoch]
@@ -59,6 +60,7 @@
    ["-X" "--phase-x"           "Run Phase X: burst concurrency exploit"]
    ["-a" "--adversarial" "Run adversarial parameter search (falsification)"]
    ["-S" "--serve" "Start gRPC simulation server (Phase 2 live mode)"]
+   [nil "--invariants" "Run S01-S23 deterministic invariant scenarios (in-process, no gRPC)"]
    [nil  "--port PORT" "gRPC server port (used with --serve, default: 7070)"
     :default 7070
     :parse-fn #(Integer/parseInt %)]
@@ -392,28 +394,31 @@
       (do (println exit-message)
           (System/exit (if ok? 0 1)))
 
-      (if (:serve options)
-        (let [port (:port options)]
-          (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable grpc/stop!))
-          (grpc/start! port)
-          (println "[grpc] Press Ctrl+C to stop.")
-          (grpc/await-termination)
-          (System/exit 0))
+      (if (:invariants options)
+        (System/exit (invariant/run-and-report))
 
-        (try
-          (println "Loading params from:" (:params options))
-          (let [params    (params/validate-and-merge (:params options))
-                output    (:output options)
-                phase-key (some #(when (get options %) %) (keys phase-runners))
-                [label run-fn] (get phase-runners phase-key)]
-            (cond
-              (:ring-spec params) (run-ring-simulation params output)
-              phase-key           (do (when label (println label))
-                                      (run-fn params output))
-              :else               (run-simulation params output))
+        (if (:serve options)
+          (let [port (:port options)]
+            (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable grpc/stop!))
+            (grpc/start! port)
+            (println "[grpc] Press Ctrl+C to stop.")
+            (grpc/await-termination)
             (System/exit 0))
 
-          (catch Exception e
-            (println "Error:" (.getMessage e))
-            (.printStackTrace e)
-            (System/exit 1)))))))
+          (try
+            (println "Loading params from:" (:params options))
+            (let [params    (params/validate-and-merge (:params options))
+                  output    (:output options)
+                  phase-key (some #(when (get options %) %) (keys phase-runners))
+                  [label run-fn] (get phase-runners phase-key)]
+              (cond
+                (:ring-spec params) (run-ring-simulation params output)
+                phase-key           (do (when label (println label))
+                                        (run-fn params output))
+                :else               (run-simulation params output))
+              (System/exit 0))
+
+            (catch Exception e
+              (println "Error:" (.getMessage e))
+              (.printStackTrace e)
+              (System/exit 1))))))))

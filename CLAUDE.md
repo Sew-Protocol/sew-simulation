@@ -174,6 +174,8 @@ When eval-engine moves `xtdb.clj` → `evaluation/db/xtdb.clj`, update:
 | `io/params.clj` | EDN param loading |
 | `io/results.clj` | Result serialisation |
 | `sim/phase_*.clj` | One file per simulation phase; entry point `run-phase-*-sweep` |
+| `contract_model/invariant_scenarios.clj` | S01–S23 deterministic scenarios as Clojure data |
+| `contract_model/invariant_runner.clj` | In-process runner; `run-all` / `print-report` / `run-and-report` |
 
 ---
 
@@ -188,7 +190,8 @@ When eval-engine moves `xtdb.clj` → `evaluation/db/xtdb.clj`, update:
 
 ## Testing
 
-- **Adversarial invariant suite** (33 scenarios): `cd python && python invariant_suite.py` (requires gRPC server on :7070)
+- **Deterministic invariant suite** (S01–S23, 23 scenarios): `clojure -M:run -- --invariants` (in-process, no gRPC required; ~0.1 s)
+- **Adversarial failure-mode suite** (S24–S33, 10 scenarios): `python python/invariant_suite.py` (requires gRPC server on :7070)
 - **gRPC server**: `nohup clojure -M:run -- -S --port 7070 > grpc-server.log 2>&1 &`
 - **Monte Carlo phases** (G–AD): `scripts/monte-carlo/test-all.sh`
 - **Single phase**: `clojure -M:run -- -p params/<phase>.edn <flags>`

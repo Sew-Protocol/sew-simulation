@@ -557,6 +557,26 @@
       (update :invariant-violations inc))))
 
 ;; ---------------------------------------------------------------------------
+;; Workflow-id alias resolution
+;;
+;; Events may use string aliases (e.g. "wf0") in :params :workflow-id to
+;; reference an escrow created earlier in the same scenario.  The alias is
+;; resolved from wf-alias-map, which is populated when a create_escrow step
+;; with a :save-wf-as annotation succeeds.
+;; ---------------------------------------------------------------------------
+
+(defn- resolve-wf-alias
+  "Substitute a string :workflow-id alias.
+   Returns {:ok true :event resolved-event} or {:ok false :error :unresolved-alias}."
+  [event wf-alias-map]
+  (let [wf-val (get-in event [:params :workflow-id])]
+    (if (string? wf-val)
+      (if-let [int-id (get wf-alias-map wf-val)]
+        {:ok true :event (assoc-in event [:params :workflow-id] int-id)}
+        {:ok false :error :unresolved-alias :alias wf-val :seq (:seq event)})
+      {:ok true :event event})))
+
+;; ---------------------------------------------------------------------------
 ;; Public: replay-scenario
 ;; ---------------------------------------------------------------------------
 
@@ -565,6 +585,10 @@
 
    Validates the scenario structure before entering the event loop.
    Returns {:ok false :error kw} if the scenario is structurally invalid.
+
+   Events may carry :save-wf-as \"wfN\" on create_escrow steps; subsequent
+   events may then reference that alias as {:workflow-id \"wfN\"} instead of
+   an integer.  Aliases are resolved lazily in the event loop.
 
    Returns:
      {:outcome          :pass | :fail | :invalid
@@ -587,16 +611,17 @@
        :metrics          (zero-metrics)}
 
       (let [agent-list  (:agents scenario)
-            agent-index (agents-by-id agent-list)
-            snapshot    (build-snapshot (get scenario :protocol-params {}))
+            pp          (get scenario :protocol-params {})
+            context     (build-context agent-list pp)
+            agent-index (:agent-index context)
             init-time   (get scenario :initial-block-time 1000)
             world0      (t/empty-world init-time)
-            context     {:agent-index agent-index :snapshot snapshot}
             events      (sort-by :seq (:events scenario))]
-        (loop [world   world0
-               events  events
-               trace   []
-               metrics (zero-metrics)]
+        (loop [world        world0
+               events       events
+               trace        []
+               metrics      (zero-metrics)
+               wf-alias-map {}]
           (if (empty? events)
             {:outcome          :pass
              :scenario-id      (:scenario-id scenario)
@@ -605,20 +630,40 @@
              :halt-reason      nil
              :trace            trace
              :metrics          metrics}
-            (let [event       (first events)
-                  step        (process-step context world event)
-                  entry       (:trace-entry step)
-                  new-trace   (conj trace entry)
-                  new-metrics (accum-metrics metrics event entry agent-index)]
-              (if (:halted? step)
-                {:outcome          :fail
+            (let [raw-event   (first events)
+                  alias-res   (resolve-wf-alias raw-event wf-alias-map)]
+              (if-not (:ok alias-res)
+                {:outcome          :invalid
                  :scenario-id      (:scenario-id scenario)
-                 :events-processed (count new-trace)
-                 :halted-at-seq    (:seq event)
-                 :halt-reason      :invariant-violation
-                 :trace            new-trace
-                 :metrics          (update new-metrics :invariant-violations inc)}
-                (recur (:world step) (rest events) new-trace new-metrics)))))))))
+                 :events-processed (count trace)
+                 :halted-at-seq    (:seq raw-event)
+                 :halt-reason      :unresolved-alias
+                 :detail           (dissoc alias-res :ok)
+                 :trace            trace
+                 :metrics          metrics}
+                (let [event       (:event alias-res)
+                      step        (process-step context world event)
+                      entry       (:trace-entry step)
+                      new-trace   (conj trace entry)
+                      new-metrics (accum-metrics metrics event entry agent-index)
+                      ;; Register alias when create_escrow succeeds and :save-wf-as is set
+                      new-alias-map
+                      (if (and (= "create_escrow" (:action event))
+                               (= :ok (:result entry))
+                               (:save-wf-as raw-event))
+                        (assoc wf-alias-map
+                               (:save-wf-as raw-event)
+                               (get-in entry [:extra :workflow-id]))
+                        wf-alias-map)]
+                  (if (:halted? step)
+                    {:outcome          :fail
+                     :scenario-id      (:scenario-id scenario)
+                     :events-processed (count new-trace)
+                     :halted-at-seq    (:seq event)
+                     :halt-reason      :invariant-violation
+                     :trace            new-trace
+                     :metrics          (update new-metrics :invariant-violations inc)}
+                    (recur (:world step) (rest events) new-trace new-metrics new-alias-map)))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public: result->json-str
