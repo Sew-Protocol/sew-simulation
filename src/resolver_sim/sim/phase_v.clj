@@ -1,7 +1,8 @@
 (ns resolver-sim.sim.phase-v
   "Phase V: Correlated Belief Cascades
    Tests: Can early bias create permanent drift through rational herding?"
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 (defn resolver-decides
   "Resolver decision based on signal + prior"
@@ -95,13 +96,21 @@
                     (println (format "%-35s [%s]" (:scenario r) status-str))
                     r))]
     
-    (let [vuln (count (filter #(= :vulnerable (:status %)) results))]
+    (let [vuln    (count (filter #(= :vulnerable (:status %)) results))
+          passed? (<= vuln 1)]
       (println "\n" (apply str (repeat 70 "=")))
       (println (format "Results: %d vulnerable / %d total" vuln (count results)))
       (if (> vuln 5)
         (println "  🔴 CASCADES LOCK IN FREQUENTLY")
         (if (> vuln 1)
           (println "  🟡 Cascades in high-correlation scenarios")
-          (println "  🟢 SAFE: System resists cascades"))))))
+          (println "  🟢 SAFE: System resists cascades")))
+      (engine/make-result
+       {:benchmark-id "V"
+        :label        "Correlated Belief Cascades"
+        :hypothesis   "System resists belief cascades (<= 1 vulnerable scenario)"
+        :passed?      passed?
+        :results      (vec results)
+        :summary      {:vulnerable vuln :total (count results)}}))))
 
 (defn -main [& args] (run-phase-v-sweep))

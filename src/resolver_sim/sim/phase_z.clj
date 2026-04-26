@@ -140,9 +140,10 @@
   "Run all Phase Z legitimacy + reflexive participation tests."
   [params]
   (let [seed (:rng-seed params 42)
-        _ (println "\n📊 PHASE Z: LEGITIMACY & REFLEXIVE PARTICIPATION LOOP TESTING")
-        _ (println "   Hypothesis: System maintains stable participation (>40%) over 100 epochs")
-        _ (println "")
+        _ (engine/print-phase-header
+             {:benchmark-id "Z"
+              :label        "Legitimacy & Reflexive Participation Loop"
+              :hypothesis   "System maintains stable participation (>40%) over 100 epochs"})
         
         scenarios (make-scenarios seed)
         results (engine/run-sweep "PHASE Z SWEEP" scenarios params)
@@ -151,23 +152,15 @@
         class-c (count (filter #(= "C" (:class %)) results))
         hypothesis-holds? (zero? class-c)]
 
-    (println "\n═══════════════════════════════════════════════════")
-    (println "📋 PHASE Z SUMMARY")
-    (println "═══════════════════════════════════════════════════")
-    (println (format "   Robust (A): %d  Fragile (C): %d" class-a class-c))
-    (println (format "   Hypothesis holds? %s"
-                     (if hypothesis-holds?
-                       "✅ YES — legitimacy stable under tested shocks"
-                       "❌ NO — reflexive spiral possible; safeguards needed")))
-    (println "")
-    
-    (if hypothesis-holds?
-      (do (println "   Confidence impact: +6% (legitimacy not a critical risk)")
-          (println "   Recommendation: Monitor participation metrics at launch"))
-      (do (println "   Confidence impact: 0% (spiral risk found; trust floor needed)")
-          (println "   Recommendation: Add trust floor mechanism; emergency resolver onboarding reserve")))
-    (println "")
+    (engine/print-phase-footer
+     {:benchmark-id  "Z"
+      :passed?       hypothesis-holds?
+      :summary-lines [(format "Robust (A): %d  Fragile (C): %d" class-a class-c)]})
 
-    {:results results
-     :class-a class-a :class-c class-c
-     :hypothesis-holds? hypothesis-holds?}))
+    (engine/make-result
+     {:benchmark-id "Z"
+      :label        "Legitimacy & Reflexive Participation Loop"
+      :hypothesis   "System maintains stable participation (>40%) over 100 epochs"
+      :passed?      hypothesis-holds?
+      :results      results
+      :summary      {:class-a class-a :class-c class-c}})))

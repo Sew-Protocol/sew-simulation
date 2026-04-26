@@ -787,6 +787,54 @@ class ProfitThresholdResolver(LiveAgent):
         super().update_from_response(response)
 
 
+class ForkingStrategistLive(LiveAgent):
+    """
+    F11 — Forking strategist (Re-org Race).
+
+    Models an attacker who attempts to exploit the window between transaction
+    submission and finality (e.g. L1/L2 re-org).
+
+    Strategy:
+    - Observes a 'release' or 'execute_resolution' (RELEASE) in the trace.
+    - Immediately attempts to 'sender_cancel' or 'raise_dispute' (if still pending).
+    - If a re-org occurs, the attacker's transaction might land first in the
+      new fork, altering the outcome.
+    """
+
+    def __init__(self, agent_id: str, rng: random.Random | None = None):
+        super().__init__(agent_id, rng)
+        self._target_wfs: set[int] = set()
+        self.attack_attempts = 0
+
+    def decide(
+        self, world_view: WorldView | None, seq: int, block_time: int
+    ) -> Optional[dict]:
+        if world_view is None:
+            return None
+        # In a real re-org race, the attacker would try to front-run.
+        # Here we model the 'reactive' attempt to fork the logic.
+        live = world_view.get("live_states") or {}
+        for wf_id_str, state in live.items():
+            wf_id = int(wf_id_str)
+            if wf_id in self._target_wfs and state == "pending":
+                # Attacker sees it is still pending (or was reverted in their 'fork')
+                self.attack_attempts += 1
+                return {
+                    "action": "sender_cancel",
+                    "params": {"workflow_id": wf_id},
+                }
+        return None
+
+    def update_from_response(self, response: StepResponse) -> None:
+        super().update_from_response(response)
+        entry = response.get("trace_entry") or {}
+        # Attacker 'learns' about new escrows to target
+        if entry.get("action") == "create_escrow" and entry.get("result") == "ok":
+            wf = (entry.get("extra") or {}).get("workflow_id")
+            if wf is not None:
+                self._target_wfs.add(int(wf))
+
+
 class CapacityLimitedArbitrator(LiveAgent):
     """
     F10 — Capacity-limited arbitrator.

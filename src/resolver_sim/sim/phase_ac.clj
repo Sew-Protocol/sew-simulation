@@ -31,7 +31,8 @@
 
      This sweep tests that prediction empirically by sweeping (n-resolvers ×
      resolver-capacity) and finding the actual phase-transition multiplier."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 ;; ---------------------------------------------------------------------------
 ;; Trust and legitimacy model
@@ -259,11 +260,14 @@
           (println "     exit-probability formula before deploying trust floor")))
       (println "")
 
-      {:grid-results   (vec grid-results)
-       :viable-count   (count viable)
-       :total-count    (count grid-results)
-       :min-viable     min-viable
-       :hypothesis-holds? (some? min-viable)})))
+      (engine/make-result
+       {:benchmark-id "AC-threshold"
+        :label        "Trust Floor Threshold Search"
+        :hypothesis   "A minimum viable (floor, capacity) configuration exists"
+        :passed?      (some? min-viable)
+        :results      (vec grid-results)
+        :summary      {:viable-count (count viable) :total-count (count grid-results)
+                       :min-viable min-viable}})))
 
 (defn run-phase-ac-sweep
   "Test trust floor configurations against legitimacy collapse scenarios."
@@ -328,10 +332,13 @@
             (println "   Confidence impact: 0%")))
       (println "")
 
-      {:results           results
-       :class-a           class-a
-       :class-c           class-c
-       :hypothesis-holds? hypothesis-holds?})))
+      (engine/make-result
+       {:benchmark-id "AC"
+        :label        "Trust Floor & Emergency Onboarding"
+        :hypothesis   "Trust floor keeps attacker win rate < 20% and stabilises participation"
+        :passed?      hypothesis-holds?
+        :results      results
+        :summary      {:class-a class-a :class-c class-c}})))
 
 ;; ---------------------------------------------------------------------------
 ;; Phase AC Capacity Expansion
@@ -592,13 +599,11 @@
           (println "   Phase AC status: ❌ CAPACITY EXPANSION INSUFFICIENT — exit model redesign needed")))
       (println "")
 
-      {:recruit-configs    (vec recruit-configs)
-       :upgrade-configs    (vec upgrade-configs)
-       :diag-results       (some-> diag-results vec)
-       :viable-count       (count viable)
-       :total-count        (count all-configs)
-       :min-viable-mult    (when (seq viable) min-viable-mult)
-       :min-viable-cap     (when (seq viable) min-viable-cap)
-       :max-failed-mult    max-failed-mult
-       :ten-x-all-pass?    ten-x-all-pass?
-       :hypothesis-holds?  hypothesis-holds?})))
+      (engine/make-result
+       {:benchmark-id "AC-cap"
+        :label        "Trust Floor Capacity Expansion"
+        :hypothesis   "10x capacity rule resolves exit cascade"
+        :passed?      hypothesis-holds?
+        :results      (vec (concat recruit-configs upgrade-configs))
+        :summary      {:viable-count (count viable) :total-count (count all-configs)
+                       :ten-x-all-pass? ten-x-all-pass?}}))))))

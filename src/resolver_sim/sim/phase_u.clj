@@ -16,7 +16,8 @@
    - Strategy convergence (do they pick one winning strategy?)
    - Governance lag (can updates outpace learning?)
    - Budget efficiency (cost per successful attack)"
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 ;; ============ Simple Adaptive Attacker ============
 
@@ -319,7 +320,14 @@
       (if (> vulnerable-count 5)
         (println "  🔴 CRITICAL: Adaptive attackers can reliably improve attack success rates")
         (println "  🟢 ACCEPTABLE: Learning provides limited advantage to attackers"))
-      (println))))
+      (println)
+      (engine/make-result
+       {:benchmark-id "U"
+        :label        "Adaptive Attacker Learning"
+        :hypothesis   "Adaptive learning provides limited advantage (<= 5 vulnerable scenarios)"
+        :passed?      (<= vulnerable-count 5)
+        :results      results
+        :summary      {:vulnerable vulnerable-count :safe safe-count}}))))
 
 (defn -main
   [& args]

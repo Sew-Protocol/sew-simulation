@@ -8,7 +8,8 @@
   This test simulates attacker learning which of 10 categories are easiest
   to win in, then concentrating volume there."
   (:require [clojure.math :as math]
-            [resolver-sim.model.rng :as rng]))
+            [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 (defn simulate-category
   "Simulate resolver decisions for one category over N epochs.
@@ -138,14 +139,22 @@
                                    (:expected-value r)))
                     r))]
     
-    (let [vuln (count (filter #(:profitable? %) results))]
+    (let [vuln    (count (filter #(:profitable? %) results))
+          passed? (<= vuln 5)]
       (println "\n" (apply str (repeat 70 "=")))
       (println (format "Results: %d vulnerable / %d total" vuln (count results)))
       (if (> vuln 10)
         (println "  🔴 CATEGORY CLUSTERING VULNERABLE - Attacker achieves profit")
         (if (> vuln 5)
           (println "  🟡 MIXED - Some scenarios profitable")
-          (println "  🟢 SAFE: Category concentration does not enable profitable attacks"))))))
+          (println "  🟢 SAFE: Category concentration does not enable profitable attacks")))
+      (engine/make-result
+       {:benchmark-id "W"
+        :label        "Dispute Type Clustering"
+        :hypothesis   "Category concentration does not enable profitable attacks (<= 5 vulnerable)"
+        :passed?      passed?
+        :results      (vec results)
+        :summary      {:vulnerable vuln :total (count results)}}))))
 
 ;; Entry point
 (comment

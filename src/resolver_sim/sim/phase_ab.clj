@@ -20,7 +20,8 @@
      With reward-multiplier ≥ tier-complexity-multiplier, defection rate < 20%
      across all tiers.  Without the multiplier (reward = 1×), high-complexity
      tiers breach the 20% threshold."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 ;; ---------------------------------------------------------------------------
 ;; Effort tier definitions
@@ -142,8 +143,10 @@
             (println "   Confidence impact: 0%")))
       (println "")
 
-      {:results          results
-       :class-a          class-a
-       :class-c          class-c
-       :min-safe-mult    min-safe-mult
-       :hypothesis-holds? hypothesis-holds?})))
+      (engine/make-result
+       {:benchmark-id "AB"
+        :label        "Per-Dispute Effort Rewards"
+        :hypothesis   "reward-multiplier >= tier-complexity keeps defection < 20%"
+        :passed?      hypothesis-holds?
+        :results      results
+        :summary      {:class-a class-a :class-c class-c :min-safe-mult min-safe-mult}}))))

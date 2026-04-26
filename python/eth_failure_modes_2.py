@@ -24,6 +24,7 @@ from typing import Any
 from sew_sim.grpc_client import SimulationClient
 from sew_sim.live_agents import (
     LiveAgent,
+    HonestBuyerLive,
     HonestResolverLive,
     GriefingBuyerLive,
     EscalatingBuyerLive,
@@ -31,6 +32,7 @@ from sew_sim.live_agents import (
     ColludingResolverLive,
     ProfitThresholdResolver,
     CapacityLimitedArbitrator,
+    ForkingStrategistLive,
 )
 from sew_sim.live_runner import LiveRunner, RunResult
 from eth_failure_modes import (
@@ -387,6 +389,34 @@ def s33_f10_cascade_escalation_drain() -> tuple[RunResult, Any]:
     return result, ok
 
 
+def s34_f11_reorg_race_condition() -> tuple[RunResult, bool]:
+    """
+    S34 — F11 — Forking strategist (Re-org Race).
+
+    Attacker attempts to exploit the non-finality window.
+    """
+    attacker = ForkingStrategistLive("attacker")
+    seller = HonestBuyerLive("seller", recipient_address="0xattacker", amount=1000)
+
+    agents_meta = [
+        {"id": "attacker", "address": "0xattacker", "type": "honest"},
+        {"id": "seller",   "address": "0xseller",   "type": "honest"},
+    ]
+    live_agents = [attacker, seller]
+
+    # Seller will try to release. Attacker will try to cancel.
+    result = run_scenario(
+        "S34 f11-reorg-race-condition",
+        agents_meta,
+        live_agents,
+        max_steps=10,
+        max_ticks=5,
+    )
+
+    ok = assert_scenario("S34  f11-reorg-race-condition", result)
+    return result, ok
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
@@ -397,6 +427,7 @@ SCENARIOS_2 = [
     ("S31  f8-appeal-fee-amplification",   s31_f8_appeal_fee_amplification),
     ("S32  f9-subthreshold-misresolution", s32_f9_subthreshold_misresolution),
     ("S33  f10-cascade-escalation-drain",  s33_f10_cascade_escalation_drain),
+    ("S34  f11-reorg-race-condition",       s34_f11_reorg_race_condition),
 ]
 
 

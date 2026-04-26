@@ -17,7 +17,8 @@
    Hypothesis to confirm:
      With floor-reviews-per-epoch ≥ 1 per 5 disputes, attacker win rate < 20%
      across all governance bandwidth scenarios."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 ;; ---------------------------------------------------------------------------
 ;; Dispute value model (mirrors Phase AA)
@@ -208,11 +209,14 @@
         (println "   ❌ No viable configuration found — floor mechanism insufficient"))
       (println "")
 
-      {:grid-results   (vec grid-results)
-       :viable-count   (count viable)
-       :total-count    (count grid-results)
-       :min-viable     min-viable
-       :hypothesis-holds? (some? min-viable)})))
+      (engine/make-result
+       {:benchmark-id "AD-threshold"
+        :label        "Governance Bandwidth Floor Threshold Search"
+        :hypothesis   "A minimum viable (floor-reviews, capacity) configuration exists"
+        :passed?      (some? min-viable)
+        :results      (vec grid-results)
+        :summary      {:viable-count (count viable) :total-count (count grid-results)
+                       :min-viable min-viable}})))
 
 (defn run-phase-ad-sweep
   "Sweep governance bandwidth floor configurations against attacker strategies."
@@ -267,8 +271,10 @@
             (println "   Confidence impact: 0%")))
       (println "")
 
-      {:results           results
-       :class-a           class-a
-       :class-c           class-c
-       :max-win-rate      max-win-rate
-       :hypothesis-holds? hypothesis-holds?})))
+      (engine/make-result
+       {:benchmark-id "AD"
+        :label        "Governance Bandwidth Floor"
+        :hypothesis   "Mandatory floor reviews keep attacker win rate < 20%"
+        :passed?      hypothesis-holds?
+        :results      results
+        :summary      {:class-a class-a :class-c class-c :max-win-rate max-win-rate}})))))

@@ -11,7 +11,8 @@
   (:require [resolver-sim.model.bribery-markets :as bribery]
             [resolver-sim.model.evidence-spoofing :as evidence]
             [resolver-sim.model.correlated-failures :as corr]
-            [resolver-sim.model.rng :as rng]))
+            [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 ;; ============ Bribery Feasibility Test ============
 
@@ -215,8 +216,12 @@
                                :else "HIGH"))
     (println "")
     
-    {:bribery-results bribery-results
-     :evidence-results evidence-results
-     :correlation-results correlation-results
-     :total-vulnerable total-vuln
-     :total-scenarios total-scenarios}))
+    (engine/make-result
+     {:benchmark-id "Q"
+      :label        "Advanced Vulnerability: Bribery, Evidence Spoofing, Correlated Failures"
+      :hypothesis   "Total vulnerable scenarios < 5 (LOW risk)"
+      :passed?      (< total-vuln 5)
+      :results      {:bribery bribery-results :evidence evidence-results :correlation correlation-results}
+      :summary      {:total-vulnerable total-vuln :total-scenarios total-scenarios
+                     :risk-level (cond (< total-vuln 5) "LOW"
+                                       (< total-vuln 15) "MODERATE" :else "HIGH")}})))

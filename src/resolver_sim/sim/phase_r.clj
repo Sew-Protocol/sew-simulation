@@ -14,7 +14,8 @@
    Key insight: Economic incentives alone don't guarantee liveness.
    You need active participation ecosystem design."
   (:require [resolver-sim.model.liveness-failures :as liveness]
-            [resolver-sim.model.rng :as rng]))
+            [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 ;; ============ Test 1: Opportunity Cost ============
 
@@ -361,10 +362,16 @@
                                 :else "LOW"))
     (println "")
     
-    {:opportunity-cost opp-cost-results
-     :boredom boredom-results
-     :adverse-selection adverse-sel-results
-     :latency latency-results
-     :spiral spiral-result
-     :critical-mass critical-results
-     :total-vulnerable total-vuln}))
+    (engine/make-result
+     {:benchmark-id "R"
+      :label        "Liveness & Participation Failure"
+      :hypothesis   "Total vulnerable scenarios < 5 (LOW risk)"
+      :passed?      (< total-vuln 5)
+      :results      {:opportunity-cost opp-cost-results :boredom boredom-results
+                     :adverse-selection adverse-sel-results :latency latency-results
+                     :spiral spiral-result :critical-mass critical-results}
+      :summary      {:total-vulnerable total-vuln
+                     :risk-level (cond (> total-vuln 15) "CRITICAL"
+                                       (> total-vuln 10) "HIGH"
+                                       (> total-vuln 5)  "MODERATE"
+                                       :else             "LOW")}})))

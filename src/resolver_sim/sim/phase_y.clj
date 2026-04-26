@@ -13,7 +13,8 @@
 
    If correctness drops below 75% under realistic loads, the system
    needs attention-reward design changes before 90% confidence is claimed."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 ;; ============ Dispute Complexity Distribution ============
 
@@ -151,7 +152,10 @@
             (println "   Recommendation: Add per-dispute effort rewards; increase budget for ambiguous cases")))
       (println "")
 
-      {:results all-results
-       :class-a class-a :class-c class-c
-       :min-accuracy min-accuracy
-       :hypothesis-holds? hypothesis-holds?})))
+      (engine/make-result
+       {:benchmark-id "Y"
+        :label        "Evidence Fog & Attention Budget"
+        :hypothesis   ">75% correctness survives budget caps + attacker complexity escalation"
+        :passed?      hypothesis-holds?
+        :results      all-results
+        :summary      {:class-a class-a :class-c class-c :min-accuracy min-accuracy}}))))

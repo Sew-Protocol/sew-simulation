@@ -12,7 +12,7 @@ To verify whether SEW behaves as a **robust game** before real-world deployment.
 *   **State-Machine Correctness**: Every transition is checked against a formal model of the protocol.
 *   **Accounting Reconciliation**: Atomic balance updates are enforced for every state change.
 *   **Adversarial Liveness**: Detects conditions where funds become permanently locked due to rational agent withdrawal or capacity exhaustion.
-*   **Trace Replay & EVM Equivalence**: Execution traces are replayed step-by-step against live Solidity contracts to ensure the model never drifts from the code.
+*   **Trace Replay & EVM Equivalence**: Execution traces can be replayed step-by-step against Solidity contracts to detect model–EVM divergence. Coverage is expanding toward full scenario parity.
 
 ---
 
@@ -26,7 +26,7 @@ We have published the standardized traces for this discovery to demonstrate the 
 ---
 
 ## 🌐 CDRS v0.1
-This project is the first implementation of the **[Common Dispute Resolution Standard (CDRS) v0.1](spec/cdrs-v0.1.md)** — a draft schema for standardized, adversarial trace-testing of decentralized arbitration.
+This project includes an early reference implementation of the [Common Dispute Resolution Standard (CDRS) v0.1](spec/cdrs-v0.1.md)
 
 ---
 

@@ -9,7 +9,8 @@
   What if attacker bunches 20+ disputes in one block, before governance
   can respond?"
   (:require [clojure.math :as math]
-            [resolver-sim.model.rng :as rng]))
+            [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 (defn simulate-burst-attack
   "Simulate attack where attacker triggers N disputes simultaneously.
@@ -115,7 +116,14 @@
         (println "  🔴 BURST ATTACKS PROFITABLE - Parallelism defeats sequential defense")
         (if (> vuln 5)
           (println "  🟡 MIXED - Large bursts become profitable")
-          (println "  🟢 SAFE: Burst attacks unprofitable even with 40 simultaneous disputes"))))))
+          (println "  🟢 SAFE: Burst attacks unprofitable even with 40 simultaneous disputes")))
+      (engine/make-result
+       {:benchmark-id "X"
+        :label        "Burst Concurrency Exploit"
+        :hypothesis   "Burst attacks unprofitable even with 40 simultaneous disputes (<= 5 vulnerable)"
+        :passed?      (<= vuln 5)
+        :results      (vec results)
+        :summary      {:vulnerable vuln :total (count results)}}))))
 
 ;; Entry point
 (comment

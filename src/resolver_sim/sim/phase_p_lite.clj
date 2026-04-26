@@ -9,7 +9,8 @@
    Returns comprehensive heatmap of dominance ratios"
   (:require [resolver-sim.model.rng :as rng]
             [resolver-sim.model.difficulty :as diff]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [resolver-sim.sim.engine :as engine]))
 
 ;; Configuration
 (def LOAD-LEVELS
@@ -283,5 +284,11 @@
         report (generate-full-report sweep-results params)]
     
     (println report)
-    (assoc (scenario-classification sweep-results)
-           :sweep-results sweep-results)))
+    (let [classification (scenario-classification sweep-results)]
+      (engine/make-result
+       {:benchmark-id "P-lite"
+        :label        "Sequential Appeal Falsification (Lite)"
+        :hypothesis   "System achieves ROBUST (class A) under all tested conditions"
+        :passed?      (= :A (:scenario classification))
+        :results      sweep-results
+        :summary      classification}))))

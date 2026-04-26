@@ -37,7 +37,8 @@
        attacker-stake > (1 - attacker-stake) × (1 - abstention)
      Abstention is drawn per epoch with ±5% noise around the base rate.
      Timing-attack epochs (every 5th) apply an additional +20pp spike."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 ;; ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -368,10 +369,13 @@
                 (println "   Recommendation: Require supermajority (>60%) for all safety-critical")
                 (println "   parameter changes (slash-multiplier, appeal-bond-bps).")))
             (println "")
-            {:h1-holds?            h1-holds?
-             :h2-timing-confirmed? h2-confirmed?
-             :h3-holds?            h3-holds?
-             :governance-safe?     governance-safe?
-             :h1-results           h1-results
-             :h2-results           h2-pairs
-             :h3-results           h3-results}))))))
+            (engine/make-result
+             {:benchmark-id "T"
+              :label        "Governance Capture via Rule Drift"
+              :hypothesis   "Detect-and-revert safeguard prevents capture at <= 40% attacker stake"
+              :passed?      governance-safe?
+              :results      {:h1 h1-results :h2 h2-pairs :h3 h3-results}
+              :summary      {:h1-holds? h1-holds?
+                             :h2-timing-confirmed? h2-confirmed?
+                             :h3-holds? h3-holds?
+                             :governance-safe? governance-safe?}})))))))

@@ -18,7 +18,8 @@
 
    Pass threshold: ≥80% of resolver capital correctly preserved across
    false-positive scenarios."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 ;; ---------------------------------------------------------------------------
 ;; Slash outcome model
@@ -143,5 +144,23 @@
   "Entry point: run the full Phase AE fair-slashing sweep and return a summary."
   ([] (run-phase-ae {}))
   ([opts]
-   (let [results (run-sweep opts)]
-     (summarize-sweep results))))
+   (engine/print-phase-header
+    {:benchmark-id "AE"
+     :label        "Fair Slashing — Capital Preservation"
+     :hypothesis   "Resolver capital preserved in >=80% of false-positive slash scenarios"})
+   (let [results (run-sweep opts)
+         summary (summarize-sweep results)]
+     (engine/print-phase-footer
+      {:benchmark-id  "AE"
+       :passed?       (:hypothesis-holds? summary)
+       :summary-lines [(format "Pass rate: %.0f%%  (%d / %d scenarios)"
+                               (* 100 (:overall-pass-rate summary))
+                               (:passing-scenarios summary)
+                               (:total-scenarios summary))]})
+     (engine/make-result
+      {:benchmark-id "AE"
+       :label        "Fair Slashing — Capital Preservation"
+       :hypothesis   "Resolver capital preserved in >=80% of false-positive slash scenarios"
+       :passed?      (:hypothesis-holds? summary)
+       :results      results
+       :summary      summary}))))

@@ -9,7 +9,8 @@
   - Track pool composition over 10 epochs
   - Test 4 scenarios: baseline, governance failure, fraud spike, recovery"
   (:require [resolver-sim.sim.batch :as batch]
-            [resolver-sim.model.rng :as rng]))
+            [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine      :as engine]))
 
 ;;;; ============================================================================
 ;;;; EXIT PROBABILITY & SIMULATION
@@ -175,4 +176,10 @@
     
     (println (format "\n   Key Finding: %s\n" finding))
     
-    {:results results :summary-finding finding}))
+    (engine/make-result
+     {:benchmark-id "O"
+      :label        "Market Exit Cascade"
+      :hypothesis   "Honest resolver ratio stays >= 70% under governance failure + fraud spike"
+      :passed?      (>= spike-ratio 0.70)
+      :results      results
+      :summary      {:finding finding :spike-ratio spike-ratio}})))

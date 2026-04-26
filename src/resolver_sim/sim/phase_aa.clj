@@ -148,9 +148,10 @@
   "Run all Phase AA governance gaming tests."
   [params]
   (let [seed (:rng-seed params 42)
-        _ (println "\n📊 PHASE AA: GOVERNANCE AS ADVERSARY TESTING")
-        _ (println "   Hypothesis: Attackers cannot exceed 20% win rate via governance gaming")
-        _ (println "")
+        _ (engine/print-phase-header
+             {:benchmark-id "AA"
+              :label        "Governance as Adversary"
+              :hypothesis   "Attackers cannot exceed 20% win rate via governance gaming"})
         
         scenarios (make-scenarios seed)
         results (engine/run-sweep "PHASE AA SWEEP" scenarios params)
@@ -160,25 +161,16 @@
         max-win-rate (apply max (map :win-rate results))
         hypothesis-holds? (< max-win-rate 0.20)]
 
-    (println "\n═══════════════════════════════════════════════════")
-    (println "📋 PHASE AA SUMMARY")
-    (println "═══════════════════════════════════════════════════")
-    (println (format "   Robust (A): %d  Fragile (C): %d" class-a class-c))
-    (println (format "   Max attacker win rate: %.1f%%" (* 100 max-win-rate)))
-    (println (format "   Hypothesis holds? %s"
-                     (if hypothesis-holds?
-                       "✅ YES — governance gaming not profitable"
-                       "❌ NO — governance capacity increase needed")))
-    (println "")
-    
-    (if hypothesis-holds?
-      (do (println "   Confidence impact: +7% (governance capture not critical risk)")
-          (println "   Recommendation: Maintain current capacity; add low-value sampling"))
-      (do (println "   Confidence impact: 0% (governance gaming exploitable)")
-          (println "   Recommendation: Raise capacity, add minimum review floor for all dispute values")))
-    (println "")
+    (engine/print-phase-footer
+     {:benchmark-id  "AA"
+      :passed?       hypothesis-holds?
+      :summary-lines [(format "Robust (A): %d  Fragile (C): %d" class-a class-c)
+                      (format "Max attacker win rate: %.1f%%" (* 100 max-win-rate))]})
 
-    {:results results
-     :class-a class-a :class-c class-c
-     :max-win-rate max-win-rate
-     :hypothesis-holds? hypothesis-holds?}))
+    (engine/make-result
+     {:benchmark-id "AA"
+      :label        "Governance as Adversary"
+      :hypothesis   "Attackers cannot exceed 20% win rate via governance gaming"
+      :passed?      hypothesis-holds?
+      :results      results
+      :summary      {:class-a class-a :class-c class-c :max-win-rate max-win-rate}})))

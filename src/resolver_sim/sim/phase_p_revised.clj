@@ -10,7 +10,8 @@
   (:require [resolver-sim.model.rng :as rng]
             [resolver-sim.model.decision-quality :as dq]
             [resolver-sim.model.information-cascade :as ic]
-            [resolver-sim.model.escalation-economics :as ee]))
+            [resolver-sim.model.escalation-economics :as ee]
+            [resolver-sim.sim.engine :as engine]))
 
 ;; ============ Test Parameters ============
 
@@ -255,7 +256,14 @@
                       (if (:vulnerable? test) "⚠️ VULNERABLE" "✓ OK"))))
     (println "")
     
-    {:tests cascade-tests}))
+    (engine/make-result
+     {:benchmark-id "P-revised"
+      :label        "Sequential Appeal Falsification (Revised)"
+      :hypothesis   "Information cascades occur with friction; system not broken at moderate correlation"
+      :passed?      (not-any? :vulnerable? cascade-tests)
+      :results      cascade-tests
+      :summary      {:vulnerable-count (count (filter :vulnerable? cascade-tests))
+                     :total-count (count cascade-tests)}})))
 
 ;; ============ Comparative Analysis ============
 
