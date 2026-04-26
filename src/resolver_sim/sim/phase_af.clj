@@ -21,23 +21,18 @@
 
    Pass threshold: solvency-ratio ≥ 1.0 for all configurations in the
    design envelope (n-resolvers ≤ 20, avg-bond ≥ 500)."
-  (:require [resolver-sim.model.rng :as rng]
-            [resolver-sim.sim.waterfall :as waterfall]
-            [resolver-sim.economics.payoffs :as payoffs]))
+  (:require [resolver-sim.model.rng :as rng]))
 
 ;; ---------------------------------------------------------------------------
-;; Protocol constants (mirrors ResolverSlashingModuleV1.sol)
+;; Protocol constants (mirrors ResolverSlashingModuleV1.sol + ResolverStakingModuleV1.sol)
 ;; ---------------------------------------------------------------------------
 
-(def POLICY (:conservative payoffs/ECONOMIC_POLICIES))
-
-(def EPOCH_CAP_BPS         2000)   ; 20% per resolver per epoch
-(def SENIOR_EPOCH_CAP_BPS  1000)   ; 10% per senior per epoch
-(def INSURANCE_CUT_BPS     (:insurance-cut-bps POLICY))
-(def RESOLVER_SLASH_BPS    200)    ; 2% per-slash rate (PENALTY_MISSED_RESOLVE)
-(def MAX_ESCROW_PER_CASE   2000)   ; $2,000 hard cap
-(def CAPACITY_MULTIPLIER   (:capacity-multiplier POLICY))
-(def COVERAGE_MULTIPLIER   3)      ; M = 3× senior coverage requirement
+(def EPOCH_CAP_BPS        2000)   ; RESOLVER_SLASH_CAP_BPS  — 20% per resolver per epoch
+(def SENIOR_EPOCH_CAP_BPS 1000)   ; SENIOR_SLASH_CAP_BPS    — 10% per senior per epoch
+(def INSURANCE_CUT_BPS    2000)   ; 20% of each slash routes to InsurancePoolVault
+(def RESOLVER_SLASH_BPS    200)   ; PENALTY_MISSED_RESOLVE  — 2% per-slash rate
+(def MAX_ESCROW_PER_CASE  2000)   ; MAX_ESCROW_PER_L0_CASE  — $2,000 hard cap
+(def ESCROW_CAP_MULTIPLIER   4)   ; maxEscrowPerL0Case = min($2000, 4× resolverBond)
 
 ;; ---------------------------------------------------------------------------
 ;; Core solvency calculation (analytical, no RNG needed)
@@ -67,10 +62,8 @@
         incoming-to-pool (* total-slashed insurance-rate)
 
         ;; Worst-case user claims: every resolver has a user claim equal to
-        ;; max-escrow-per-case. If resolver bond < claim, insurance covers gap.
-        ;; Worst case: resolver bond = avg-bond, claim = actual capacity limit.
-        ;; Contract rule: maxEscrow = min(MAX_ESCROW_PER_CASE, bond * CAPACITY_MULTIPLIER)
-        effective-max-escrow (min MAX_ESCROW_PER_CASE (* avg-bond-usd CAPACITY_MULTIPLIER))
+        ;; their capacity limit. Contract: maxEscrow = min($2000, 4× resolverBond).
+        effective-max-escrow (min MAX_ESCROW_PER_CASE (* avg-bond-usd ESCROW_CAP_MULTIPLIER))
         
         ;; Net gap per resolver = max(0, effective-max-escrow - avg-bond)
         per-resolver-gap (max 0 (- effective-max-escrow avg-bond-usd))

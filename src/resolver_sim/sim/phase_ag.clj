@@ -32,7 +32,7 @@
 ;; Protocol constants
 ;; ---------------------------------------------------------------------------
 
-(def DEFAULT_ALPHA_BPS      1500)     ; emaAlphaBps = 1500 → α = 0.15
+(def DEFAULT_ALPHA_BPS      1000)     ; emaAlphaBps = 1000 → α = 0.10 (DRMStorageBase.sol)
 (def MIN_SCORE_THRESHOLD    0.50)     ; minEmaScoreThreshold = 500000 / 1e6
 (def CONVERGENCE_EPSILON    0.05)     ; 5% MAE target
 (def CONVERGENCE_N_TARGET   30)       ; disputes before convergence expected
@@ -155,7 +155,7 @@
 (defn run-convergence-sweep
   [{:keys [n-sims n-disputes base-seed]
     :or   {n-sims 2000 n-disputes 50 base-seed 42}}]
-  (let [alpha-vals    [500 1000 1500 2000 3000]
+  (let [alpha-vals    [500 1000 2000 3000]
         p-vals        [0.60 0.70 0.80 0.85 0.90 0.99]
         initial-vals  [0.5 1.0]]
     (doall
