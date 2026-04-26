@@ -14,7 +14,10 @@
    All functions return {:ok bool :world world' :error keyword}.
    Arithmetic: uint256 integer division (no rounding)."
   (:require [resolver-sim.contract-model.types         :as t]
-            [resolver-sim.contract-model.state-machine :as sm]))
+            [resolver-sim.contract-model.state-machine :as sm]
+            [resolver-sim.contract-model.accounting    :as acct]
+            [resolver-sim.contract-model.registry      :as reg]
+            [resolver-sim.economics.payoffs            :as payoffs]))
 
 ;; ---------------------------------------------------------------------------
 ;; Internal accounting helpers
@@ -37,15 +40,18 @@
 ;; either a state change or a claimable balance entry.
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; Internal: finalize helpers (no accounting — see lifecycle for that)
+;; ---------------------------------------------------------------------------
+
 (defn- finalize-release
-  "Internal: transition to :released, update accounting.
-   Assumes all guards have been checked by the caller."
+  "Internal: transition to :released, update accounting."
   [world workflow-id]
   (let [et    (t/get-transfer world workflow-id)
         token (:token et)
         amt   (:amount-after-fee et)]
     (-> world
-        (sub-held token amt)
+        (acct/sub-held token amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :released))))
 
@@ -56,7 +62,7 @@
         token (:token et)
         amt   (:amount-after-fee et)]
     (-> world
-        (sub-held token amt)
+        (acct/sub-held token amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :refunded))))
 
@@ -115,7 +121,7 @@
     :else
     (let [workflow-id   (count (:escrow-transfers world))
           fee-bps       (:escrow-fee-bps snapshot 0)
-          fee           (t/compute-fee amount fee-bps)
+          fee           (payoffs/calculate-escrow-fee amount fee-bps)
           afa           (- amount fee)
           ;; _applyEscrowSettings: compute effective auto times
           snap-rel      (:default-auto-release-delay snapshot 0)
@@ -133,23 +139,27 @@
           ;; Resolver: custom-resolver takes precedence over snapshot
           resolver      (or (:custom-resolver settings)
                             (:dispute-resolver snapshot))
-          et            (t/make-escrow-transfer
-                         {:token             token
-                          :to                to
-                          :from              caller
-                          :amount-after-fee  afa
-                          :dispute-resolver  resolver
-                          :auto-release-time auto-rel
-                          :auto-cancel-time  auto-can
-                          :escrow-state      :pending})
-          world'        (-> world
-                            (assoc-in [:escrow-transfers workflow-id] et)
-                            (assoc-in [:escrow-settings workflow-id]
-                                      (t/make-escrow-settings settings))
-                            (assoc-in [:module-snapshots workflow-id] snapshot)
-                            (add-held token afa)
-                            (add-fee token fee))]
-      (assoc (t/ok world') :workflow-id workflow-id))))
+          ;; Bonding guard: only enforce when resolver-bond-bps is configured
+          bond-bps      (:resolver-bond-bps snapshot 0)]
+      (if (and resolver (pos? bond-bps) (not (reg/can-handle-escrow? world resolver afa)))
+        (t/fail :insufficient-resolver-stake)
+        (let [et            (t/make-escrow-transfer
+                             {:token             token
+                              :to                to
+                              :from              caller
+                              :amount-after-fee  afa
+                              :dispute-resolver  resolver
+                              :auto-release-time auto-rel
+                              :auto-cancel-time  auto-can
+                              :escrow-state      :pending})
+              world'        (-> world
+                                (assoc-in [:escrow-transfers workflow-id] et)
+                                (assoc-in [:escrow-settings workflow-id]
+                                          (t/make-escrow-settings settings))
+                                (assoc-in [:module-snapshots workflow-id] snapshot)
+                                (add-held token afa)
+                                (add-fee token fee))]
+          (assoc (t/ok world') :workflow-id workflow-id))))))
 
 ;; ---------------------------------------------------------------------------
 ;; raise-dispute
@@ -302,7 +312,8 @@
 
 (defn auto-cancel-disputed-escrow
   "Cancel a :disputed escrow after max-dispute-duration has elapsed.
-   Anyone may call this (keeper / user / governance)."
+   Performs full accounting reconciliation: slashes the resolver (as a timeout)
+   and distributes funds."
   [world workflow-id]
   (cond
     (not (t/valid-workflow-id? world workflow-id))
@@ -311,7 +322,6 @@
     (not= :disputed (t/escrow-state world workflow-id))
     (t/fail :transfer-not-in-dispute)
 
-    ;; CRIT-3: must not override existing resolver decision
     (:exists (t/get-pending world workflow-id))
     (t/fail :has-pending-settlement)
 
@@ -319,6 +329,18 @@
     (t/fail :dispute-timeout-not-exceeded)
 
     :else
-    (t/ok (-> world
-              (finalize-refund workflow-id)
-              (update :dispute-timestamps dissoc workflow-id)))))
+    (let [et      (t/get-transfer world workflow-id)
+          resolver (:dispute-resolver et)
+          ;; Timeout slash = entire amount-after-fee slashed as timeout
+          slash-amt (:amount-after-fee et)
+          
+          world' (-> world
+                     ;; 1. Slash the resolver stake, if one is assigned
+                     (cond-> (and resolver (not= resolver "0x0000000000000000000000000000000000000000"))
+                             (reg/slash-resolver-stake resolver slash-amt))
+                     ;; 2. Perform reconciliation
+                     (acct/distribute-slashed-funds slash-amt)
+                     ;; 3. Finalize: this updates :total-held and state to :refunded
+                     (finalize-refund workflow-id)
+                     (update :dispute-timestamps dissoc workflow-id))]
+      (t/ok world'))))

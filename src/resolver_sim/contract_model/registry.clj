@@ -33,7 +33,8 @@
   "True if the resolver's stake is sufficient for the given escrow amount."
   [world resolver-addr escrow-amount]
   (let [stake (get-stake world resolver-addr)
-        cap   (payoffs/calculate-escrow-cap stake)]
+        multiplier (get-in world [:params :capacity-multiplier] 1.0)
+        cap   (payoffs/calculate-escrow-cap stake multiplier)]
     (>= cap escrow-amount)))
 
 ;; ---------------------------------------------------------------------------

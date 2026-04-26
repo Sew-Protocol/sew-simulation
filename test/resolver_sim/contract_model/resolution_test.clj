@@ -192,8 +192,16 @@
                                             :appeal-deadline 2800
                                             :resolution-hash "0xhash"}))))
 
+(defn- with-pending
+  "Manually add a pending settlement to a world."
+  [world workflow-id is-release appeal-deadline]
+  (assoc-in world [:pending-settlements workflow-id]
+            (t/make-pending-settlement {:exists true :is-release is-release
+                                        :appeal-deadline appeal-deadline
+                                        :resolution-hash "0xhash"})))
+
 (deftest escalate-dispute-ok
-  (let [w   (base-world 0)
+  (let [w   (-> (base-world 0) (with-pending 0 true 5000))
         r   (res/escalate-dispute w 0 alice (make-escalation-fn senior-resolver))]
     (testing "returns ok"
       (is (true? (:ok r))))
@@ -214,7 +222,8 @@
         "pending settlement cleared when escalation proceeds")))
 
 (deftest escalate-dispute-not-participant
-  (let [r (res/escalate-dispute (base-world 0) 0 carol (make-escalation-fn senior-resolver))]
+  (let [w (-> (base-world 0) (with-pending 0 true 5000))
+        r (res/escalate-dispute w 0 carol (make-escalation-fn senior-resolver))]
     (is (false? (:ok r)))
     (is (= :not-participant (:error r)))))
 
@@ -225,28 +234,34 @@
     (is (= :transfer-not-in-dispute (:error r)))))
 
 (deftest escalate-dispute-no-escalation-fn
-  (let [r (res/escalate-dispute (base-world 0) 0 alice nil)]
+  (let [w (-> (base-world 0) (with-pending 0 true 5000))
+        r (res/escalate-dispute w 0 alice nil)]
     (is (false? (:ok r)))
     (is (= :escalation-not-configured (:error r)))))
 
 (deftest escalate-dispute-at-max-level-rejected
-  (let [w (assoc-in (base-world 0) [:dispute-levels 0] t/max-dispute-level)
+  (let [w (-> (base-world 0)
+              (assoc-in [:dispute-levels 0] t/max-dispute-level)
+              (with-pending 0 true 5000))
         r (res/escalate-dispute w 0 alice (make-escalation-fn senior-resolver))]
     (is (false? (:ok r)))
     (is (= :escalation-not-allowed (:error r)))))
 
 (deftest escalate-dispute-module-refusal
   (let [refusing-fn (fn [_w _wf _caller _level] {:ok false :error :module-declined})
-        r           (res/escalate-dispute (base-world 0) 0 alice refusing-fn)]
+        w           (-> (base-world 0) (with-pending 0 true 5000))
+        r           (res/escalate-dispute w 0 alice refusing-fn)]
     (is (false? (:ok r)))
     (is (= :module-declined (:error r)))))
 
 (deftest escalate-dispute-level-2-is-final-round
   "After two escalations the level reaches max-dispute-level; a third must be rejected."
-  (let [w0 (base-world 0)
+  (let [w0 (-> (base-world 0) (with-pending 0 true 5000))
         r1 (res/escalate-dispute w0 0 alice (make-escalation-fn "0xSenior"))
-        r2 (res/escalate-dispute (:world r1) 0 alice (make-escalation-fn "0xKleros"))
-        r3 (res/escalate-dispute (:world r2) 0 alice (make-escalation-fn "0xAnother"))]
+        w1 (-> (:world r1) (with-pending 0 true 6000))
+        r2 (res/escalate-dispute w1 0 alice (make-escalation-fn "0xKleros"))
+        w2 (-> (:world r2) (with-pending 0 true 7000))
+        r3 (res/escalate-dispute w2 0 alice (make-escalation-fn "0xAnother"))]
     (is (true?  (:ok r1)) "first escalation ok")
     (is (= 1    (t/dispute-level (:world r1) 0)))
     (is (true?  (:ok r2)) "second escalation ok")
@@ -281,6 +296,7 @@
         context (replay/build-context agents {:resolver-fee-bps 50} esc-fn)
         ;; Build a disputed world manually
         world   (-> (base-world 0)
+                    (with-pending 0 true 5000)
                     (assoc-in [:dispute-timestamps 0] 1000))
         event   {:seq 0 :time 1000 :agent "alice" :action "escalate_dispute"
                  :params {:workflow-id 0}}

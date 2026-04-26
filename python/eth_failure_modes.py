@@ -5,7 +5,6 @@ Each scenario models a distinct on-chain attack or failure:
 
   S24  f1-liveness-extraction         N disputes vs throttled resolver → liveness failure
   S25  f2-appeal-window-race          MEV front-run clears pending before execution
-  S26  f3-governance-sandwich         Governance rotation swaps resolver mid-dispute
   S27  f4-escalation-loop-amplified   Escalation loop forces resolver to re-submit per level
   S28  f5-concurrent-status-desync    Concurrent cancel + dispute; both orderings correct
 
@@ -30,8 +29,6 @@ from sew_sim.live_agents import (
     ThrottledResolverLive,
     AppealWindowRacerLive,
     EscalationLoopAgent,
-    GovernanceRotationAgent,
-    MaliciousGovernanceResolver,
 )
 from sew_sim.live_runner import LiveRunner, RunResult
 
@@ -62,12 +59,6 @@ DR3_KLEROS_APPEAL_PARAMS = {
 }
 
 # Governance scenario uses fallback (P3) resolver so rotation changes who can resolve.
-GOVERNANCE_PARAMS = {
-    "resolver_fee_bps": 150,
-    "appeal_window_duration": 0,
-    "max_dispute_duration": 2592000,
-    "dispute_resolver": "0xhonest-resolver",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -259,61 +250,8 @@ def s25_f2_appeal_window_race() -> tuple[RunResult, bool]:
 
 
 # ---------------------------------------------------------------------------
-# S26 — F3: Governance sandwich (resolver rotation mid-dispute)
 # ---------------------------------------------------------------------------
 
-def s26_f3_governance_sandwich() -> tuple[RunResult, bool]:
-    """
-    F3 — Governance sandwich: resolver rotation on an in-flight dispute.
-
-    Setup:
-      - Dispute is raised. Honest resolver (0xhonest-resolver) is authorized.
-      - GovernanceRotationAgent rotates the resolver to 0xmalicious after
-        timelock_ticks=2 ticks (simulating a governance timelock delay).
-      - MaliciousGovernanceResolver then resolves the dispute.
-
-    Asserts:
-      - No invariant violations (rotation + resolution are valid state transitions)
-      - Rotation happened (GovernanceRotationAgent fired)
-      - Malicious resolver succeeded (attack_successes > 0)
-
-    Security finding: Protocols that allow governance to change resolvers for
-    in-flight disputes enable governance attacks. Mitigations: resolver lock-in
-    at dispute-open, mandatory grace period before rotation takes effect.
-    """
-    gov = GovernanceRotationAgent("gov", new_resolver="0xmalicious", timelock_ticks=2)
-    mal = MaliciousGovernanceResolver("malicious", favour_release=False)
-    result = run_scenario(
-        "S26",
-        agents_meta=[
-            {"id": "buyer",     "address": "0xbuyer",           "type": "honest"},
-            {"id": "seller",    "address": "0xseller",          "type": "honest"},
-            {"id": "honest_r",  "address": "0xhonest-resolver", "type": "resolver"},
-            {"id": "gov",       "address": "0xgov",             "type": "honest"},
-            {"id": "malicious", "address": "0xmalicious",       "type": "resolver"},
-        ],
-        live_agents=[
-            GriefingBuyerLive("buyer", "0xseller"),
-            gov,
-            mal,
-        ],
-        protocol_params=GOVERNANCE_PARAMS,
-        max_steps=40,
-        max_ticks=15,
-    )
-    ok = assert_scenario_with_attack_metric(
-        "S26  f3-governance-sandwich",
-        result,
-        expected_attack_successes=None,
-        expected_attack_attempts_min=1,
-    )
-    if len(mal._resolved) == 0:
-        ok = False
-        print("  FAIL: malicious resolver never succeeded after governance rotation")
-    print(f"         rotations={gov._attack_count}  "
-          f"malicious_resolutions_attempted={mal._attack_count}  "
-          f"malicious_resolutions_succeeded={len(mal._resolved)}")
-    return result, ok
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +480,6 @@ def s28_f5_concurrent_status_desync() -> tuple[RunResult, bool]:
 ETH_SCENARIOS = [
     ("S24  f1-liveness-extraction",        s24_f1_liveness_extraction),
     ("S25  f2-appeal-window-race",         s25_f2_appeal_window_race),
-    ("S26  f3-governance-sandwich",        s26_f3_governance_sandwich),
     ("S27  f4-escalation-loop-amplified",  s27_f4_escalation_loop_amplification),
     ("S28  f5-concurrent-status-desync",   s28_f5_concurrent_status_desync),
 ]

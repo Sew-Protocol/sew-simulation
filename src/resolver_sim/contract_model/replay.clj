@@ -41,9 +41,13 @@
             [clojure.string                         :as str]
             [resolver-sim.contract-model.diff       :as diff]
             [resolver-sim.contract-model.types      :as t]
-            [resolver-sim.contract-model.lifecycle  :as lc]
-            [resolver-sim.contract-model.resolution :as res]
-            [resolver-sim.contract-model.authority  :as auth]
+            [resolver-sim.contract-model.state-machine :as sm]
+            [resolver-sim.contract-model.lifecycle     :as lc]
+            [resolver-sim.contract-model.resolution    :as res]
+            [resolver-sim.contract-model.registry      :as reg]
+            [resolver-sim.contract-model.authority     :as auth]
+            [resolver-sim.io.trace-metadata            :as meta]
+
             [resolver-sim.contract-model.invariants :as inv]))
 
 ;; ---------------------------------------------------------------------------
@@ -92,7 +96,16 @@
     :appeal-window-duration       (get pp :appeal-window-duration 0)
     :max-dispute-duration         (get pp :max-dispute-duration 2592000)
     :appeal-bond-protocol-fee-bps (get pp :appeal-bond-protocol-fee-bps 0)
-    :dispute-resolver             (get pp :dispute-resolver nil)}))
+    :dispute-resolver             (get pp :dispute-resolver nil)
+    :appeal-bond-bps              (get pp :appeal-bond-bps 0)
+    :resolver-bond-bps            (get pp :resolver-bond-bps 1000) ; 10%
+    :appeal-bond-amount           (get pp :appeal-bond-amount 0)
+    :reversal-slash-bps           (get pp :reversal-slash-bps 0)
+    :fraud-slash-bps              (get pp :fraud-slash-bps 5000)
+    :challenge-window-duration    (get pp :challenge-window-duration 0)
+    :challenge-bond-bps           (get pp :challenge-bond-bps 0)
+    :challenge-bounty-bps         (get pp :challenge-bounty-bps 0)}))
+
 
 ;; ---------------------------------------------------------------------------
 ;; Release strategy: only sender (:from) may release in simulation mode
@@ -372,6 +385,51 @@
                                 :new-resolver (:new-resolver result)})
           result)))))
 
+(defmethod apply-action "register_stake"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (let [amount (get-in event [:params :amount] 0)]
+        (t/ok (reg/register-stake world (:address ar) amount))))))
+
+(defmethod apply-action "propose_fraud_slash"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (let [p             (:params event)
+            workflow-id   (:workflow-id p)
+            resolver-addr (:resolver-addr p)
+            amount        (:amount p)]
+        (res/propose-fraud-slash world workflow-id (:address ar) resolver-addr amount)))))
+
+(defmethod apply-action "challenge_resolution"
+  [{:keys [agent-index escalation-fn]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (res/challenge-resolution world (get-in event [:params :workflow-id]) (:address ar) escalation-fn))))
+
+(defmethod apply-action "appeal_slash"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (res/appeal-slash world (get-in event [:params :workflow-id]) (:address ar)))))
+
+(defmethod apply-action "resolve_appeal"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (let [p (:params event)]
+        (res/resolve-appeal world (:workflow-id p) (:address ar) (:upheld? p))))))
+
+(defmethod apply-action "execute_fraud_slash"
+  [_ctx world event]
+  (res/execute-fraud-slash world (get-in event [:params :workflow-id])))
+
 (defmethod apply-action "advance_time"
   [_ctx world _event]
   ;; Time is already advanced before dispatch — this is a pure no-op.
@@ -418,7 +476,9 @@
                                      (:escrow-transfers world)))
    :resolver-rotations (into {} (:resolver-rotations world))
    :escrow-amounts     (into {} (map (fn [[id et]] [id (:amount-after-fee et)])
-                                     (:escrow-transfers world)))})
+                                     (:escrow-transfers world)))
+   :resolver-stakes     (:resolver-stakes world)
+   :bond-distribution   (:bond-distribution world)})
 
 ;; ---------------------------------------------------------------------------
 ;; Single-step processor — public for gRPC server use
@@ -501,6 +561,11 @@
           :extra          (:extra result)
           :invariants-ok? (if ok? (and (:ok? inv-single) (:ok? inv-trans)) true)
           :violations     all-violations
+          :trace-metadata {:transition/type (meta/transition-type (:action event))
+                           :effect/type     (meta/effect-type (cond violated? :invariant-violated
+                                                                    ok?       :ok
+                                                                    :else     :rejected))
+                           :resolution/path (meta/resolution-path (:action event))}
           ;; On invariant violation we halt and roll back to world-t.
           ;; The snapshot shown to the client must match the canonical world
           ;; that will be retained — showing the violated world-next would

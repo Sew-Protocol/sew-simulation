@@ -1,5 +1,5 @@
 """
-invariant_suite.py — Adversarial failure-mode scenarios (S24–S33).
+invariant_suite.py — Adversarial failure-mode scenarios (S24–S34).
 
 Runs the F-series scenarios over the gRPC bridge.  Each scenario asserts
 protocol-level security properties under adversarial agent strategies.
@@ -20,6 +20,7 @@ Scenarios
  S31  f8-appeal-fee-amplification   appeal bonds amplify protocol fee extraction
  S32  f9-subthreshold-misresolution below-threshold disputes misresolved silently
  S33  f10-cascade-escalation-drain  cascading escalations drain arbitration pool
+ S34  phase-k-auto-slash            reversal slashing ensures robustness with 0% detection
 
 Usage:
     python python/invariant_suite.py
@@ -55,6 +56,8 @@ from eth_failure_modes_2 import (
     s32_f9_subthreshold_misresolution,
     s33_f10_cascade_escalation_drain,
 )
+from phase_k_robustness import s34_phase_k_auto_slash_robustness
+from phase_l_optimistic import s35_phase_l_watchtower_robustness
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +75,8 @@ SCENARIOS = [
     ("S31  f8-appeal-fee-amplification",   s31_f8_appeal_fee_amplification),
     ("S32  f9-subthreshold-misresolution", s32_f9_subthreshold_misresolution),
     ("S33  f10-cascade-escalation-drain",  s33_f10_cascade_escalation_drain),
+    ("S34  phase-k-auto-slash-robustness", s34_phase_k_auto_slash_robustness),
+    ("S35  phase-l-watchtower-robustness", s35_phase_l_watchtower_robustness),
 ]
 
 

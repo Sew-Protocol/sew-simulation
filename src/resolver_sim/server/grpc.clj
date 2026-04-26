@@ -18,6 +18,7 @@
    Layering: server/* may import contract_model/*.  Must NOT import db/* or io/*."
   (:require [clojure.data.json          :as json]
             [clojure.string             :as str]
+            [clojure.stacktrace         :as st]
             [resolver-sim.server.session :as session])
   (:import [io.grpc ServerBuilder MethodDescriptor MethodDescriptor$MethodType
                     MethodDescriptor$Marshaller
@@ -187,21 +188,22 @@
      (println (str "[grpc] SimulationEngine listening on port " port))
      srv)))
 
-(defn stop!
+  (defn stop!
   "Gracefully shut down the running gRPC server.
-   No-op if no server is running."
+  No-op if no server is running."
   []
   (when-let [srv @server]
-    (.shutdown srv)
-    (reset! server nil)
-    (println "[grpc] SimulationEngine stopped")))
+   (.shutdown srv)
+   (reset! server nil)
+   (println "[grpc] SimulationEngine stopped")))
 
-(defn port
+  (defn port
   "Return the port the running server is bound to, or nil."
   []
   (some-> @server .getPort))
 
-(defn await-termination
+  (defn await-termination
   "Block until the server shuts down. Useful for CLI entry points."
   []
   (some-> @server .awaitTermination))
+

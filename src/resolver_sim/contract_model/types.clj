@@ -103,7 +103,10 @@
            yield-generation-module yield-distribution-module incentive-module
            yield-protocol-fee-bps appeal-bond-protocol-fee-bps escrow-fee-bps
            default-auto-release-delay default-auto-cancel-delay
-           max-dispute-duration appeal-window-duration dispute-resolver]}]
+           max-dispute-duration appeal-window-duration dispute-resolver
+           appeal-bond-bps resolver-bond-bps appeal-bond-amount
+           reversal-slash-bps fraud-slash-bps
+           challenge-window-duration challenge-bond-bps challenge-bounty-bps]}]
   {:resolution-module           resolution-module
    :release-strategy            release-strategy
    :cancellation-strategy       cancellation-strategy
@@ -117,7 +120,15 @@
    :default-auto-cancel-delay   (or default-auto-cancel-delay 0)
    :max-dispute-duration        (or max-dispute-duration 0)
    :appeal-window-duration      (or appeal-window-duration 0)
-   :dispute-resolver            dispute-resolver})
+   :dispute-resolver            dispute-resolver
+   :appeal-bond-bps             (or appeal-bond-bps 0)
+   :resolver-bond-bps           (or resolver-bond-bps 0)
+   :appeal-bond-amount          (or appeal-bond-amount 0)
+   :reversal-slash-bps          (or reversal-slash-bps 0)
+   :fraud-slash-bps             (or fraud-slash-bps 0)
+   :challenge-window-duration   (or challenge-window-duration 0)
+   :challenge-bond-bps          (or challenge-bond-bps 0)
+   :challenge-bounty-bps        (or challenge-bounty-bps 0)})
 
 (defn make-pending-settlement
   "Construct a PendingSettlement map.
@@ -167,6 +178,15 @@
     :dispute-timestamps  {}
     :dispute-levels      {}   ; {workflow-id nat-int} — current escalation round (0–2)
     :claimable           {}
+    :resolver-stakes     {}   ; {addr nat-int} — for Tiered Authority (Phase K)
+    :pending-fraud-slashes {} ; {slash-id {:resolver :amount :status :appeal-deadline
+                              ;            :appeal-bond-held :contest-deadline :proposed-at}}
+    :previous-decisions  {}   ; {wf-id {level {:resolver :is-release}}}
+    :challengers         {}   ; {wf-id {level challenger-addr}} — for Phase L Bounties
+    :bond-balances       {}   ; {workflow-id {addr amount}}
+    :bond-fees           {}   ; {token amount}
+    :bond-slashed        {}   ; {workflow-id amount}
+    :bond-distribution   {:insurance 0 :protocol 0 :burned 0} ; 50/30/20 split
     :block-time          block-time}))
 
 ;; ---------------------------------------------------------------------------

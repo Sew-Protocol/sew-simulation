@@ -11,7 +11,9 @@
   (:require [resolver-sim.contract-model.types         :as t]
             [resolver-sim.contract-model.state-machine :as sm]
             [resolver-sim.contract-model.authority     :as auth]
-            [resolver-sim.contract-model.accounting    :as acct]))
+            [resolver-sim.contract-model.accounting    :as acct]
+            [resolver-sim.contract-model.registry      :as reg]
+            [resolver-sim.economics.payoffs            :as payoffs]))
 
 ;; ---------------------------------------------------------------------------
 ;; Internal: finalize helpers (no accounting — see lifecycle for that)
@@ -34,6 +36,95 @@
         (acct/sub-held token amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :refunded))))
+
+;; ---------------------------------------------------------------------------
+;; Internal: slashing helpers
+;; ---------------------------------------------------------------------------
+
+(defn- handle-reversal-slashing
+  "Handles the outcome of a reversed decision. 
+   Matches Solidity's two-track slashing system:
+   
+   1. Automated Track (slashForReversal):
+      If the evidence is identical, it's a verifiable failure of the resolver.
+      Slash is EXECUTED immediately and is NOT appealable.
+   
+   2. Manual Track (proposeSlash):
+      If new evidence was provided, governance must decide if it was fraud.
+      Slash is PENDING and can be appealed by the resolver."
+  [world workflow-id current-is-release]
+  (let [level (t/dispute-level world workflow-id)]
+    (if (pos? level)
+      (let [prev-decision (get-in world [:previous-decisions workflow-id (dec level)])]
+        (if (and (some? prev-decision) (not= (:is-release prev-decision) current-is-release))
+          (let [prev-resolver (:resolver prev-decision)
+                et            (t/get-transfer world workflow-id)
+                afa           (:amount-after-fee et)
+                snap          (t/get-snapshot world workflow-id)
+                
+                ;; Evidence Check (Phase M Practicality)
+                ;; In a real system, the resolver signs an evidence hash.
+                ;; Here we check if the world state indicates "new information".
+                new-evidence? (get-in world [:evidence-updated? workflow-id] false)
+                
+                slash-bps     (:reversal-slash-bps snap 0)
+                slash-amt     (payoffs/calculate-reversal-slash afa slash-bps)
+                slash-id      (str workflow-id "-reversal")
+                now           (:block-time world)]
+            
+            (if (not new-evidence?)
+              ;; TRACK 1: AUTOMATED (Same evidence = Negligence/Bias)
+              ;; Slash is EXECUTED immediately, no appeal window.
+              (if (pos? slash-amt)
+                (let [challenger (get-in world [:challengers workflow-id (dec level)])
+                      bounty-bps (:challenge-bounty-bps snap 0)]
+                  (-> (reg/slash-resolver-stake world prev-resolver slash-amt challenger bounty-bps)
+                      :world
+                      (assoc-in [:pending-fraud-slashes slash-id]
+                                {:resolver        prev-resolver
+                                 :amount          slash-amt
+                                 :status          :executed
+                                 :proposed-at     now
+                                 :appeal-deadline 0
+                                 :appeal-bond-held 0
+                                 :contest-deadline 0})))
+                world)
+              
+              ;; TRACK 2: MANUAL (New evidence = Honest Disagreement potential)
+              ;; Slash is PENDING with appeal window — resolver can contest.
+              (let [gov-delay (or (:appeal-window-duration snap) 259200)]
+                (assoc-in world [:pending-fraud-slashes slash-id]
+                          {:resolver         prev-resolver
+                           :amount           slash-amt
+                           :status           :pending
+                           :proposed-at      now
+                           :appeal-deadline  (+ now gov-delay)
+                           :appeal-bond-held 0
+                           :contest-deadline 0}))))
+          world))
+      world)))
+
+(defn- handle-fraud-slashing
+  "Create a PENDING fraud slash for a resolver.
+   
+   Mirrors the corrected slashForFraud (Fix A): fraud slashes start as PENDING
+   with an appeal window, not immediately EXECUTED. This ensures resolvers have
+   procedural protection against incorrect fraud allegations.
+   
+   slash-id     — unique identifier (e.g. workflow-id or a generated key)
+   resolver     — the resolver being slashed
+   slash-amt    — amount to slash (in stake units)
+   appeal-window — seconds the resolver has to appeal"
+  [world slash-id resolver slash-amt appeal-window]
+  (let [now (:block-time world)]
+    (assoc-in world [:pending-fraud-slashes slash-id]
+              {:resolver         resolver
+               :amount           slash-amt
+               :status           :pending
+               :proposed-at      now
+               :appeal-deadline  (+ now appeal-window)
+               :appeal-bond-held 0
+               :contest-deadline 0})))
 
 ;; ---------------------------------------------------------------------------
 ;; execute-resolution
@@ -80,25 +171,40 @@
 
     :else
     (let [snap           (t/get-snapshot world workflow-id)
-          appeal-dur     (:appeal-window-duration snap 0)
+          ;; Phase L extension: window is the MAX of appeal-window and challenge-window
+          window-dur     (max (:appeal-window-duration snap 0)
+                              (:challenge-window-duration snap 0))
           now            (:block-time world)
           ;; Mirrors SettlementOps.computeResolutionExecution:
           ;; if isFinalRound (currentRound >= MAX_ROUND) → shouldExecute = true
           ;; (no appeal window, decision is immediately final)
-          final-round?   (t/final-round? world workflow-id)]
-      (if (or final-round? (not (pos? appeal-dur)))
-        ;; Final round or no appeal window: execute immediately
+          final-round?   (t/final-round? world workflow-id)
+          ;; DR3 Sync: handle resolver bond staking (record for now)
+          bond-bps       (:resolver-bond-bps snap 0)
+          et             (t/get-transfer world workflow-id)
+          afa            (:amount-after-fee et)
+          bond-amt       (t/compute-fee afa bond-bps)
+          
+          ;; Phase K: handle reversal slashing
+          world'         (handle-reversal-slashing world workflow-id is-release)
+          
+          ;; Record current decision for future reversal checks
+          world''        (assoc-in world' [:previous-decisions workflow-id (t/dispute-level world workflow-id)]
+                                   {:resolver caller :is-release is-release})]
+      (if (or final-round? (not (pos? window-dur)))
+        ;; Final round or no windows: execute immediately
         (t/ok (if is-release
-                (finalize-release world workflow-id)
-                (finalize-refund  world workflow-id)))
-        ;; Appeal window active: defer settlement
+                (finalize-release world'' workflow-id)
+                (finalize-refund  world'' workflow-id)))
+
+        ;; Window active: defer settlement
         (let [pending (t/make-pending-settlement
                        {:exists          true
                         :is-release      is-release
-                        :appeal-deadline (+ now appeal-dur)
+                        :appeal-deadline (+ now window-dur)
                         :resolution-hash resolution-hash})
-              world'  (assoc-in world [:pending-settlements workflow-id] pending)]
-          (t/ok world'))))))
+              world''' (assoc-in world'' [:pending-settlements workflow-id] pending)]
+          (t/ok world'''))))))
 
 ;; ---------------------------------------------------------------------------
 ;; execute-pending-settlement
@@ -133,6 +239,70 @@
       (t/ok (if (:is-release pending)
               (finalize-release world workflow-id)
               (finalize-refund  world workflow-id))))))
+
+;; ---------------------------------------------------------------------------
+;; Internal building block: _validateAndPrepareEscalation deletes
+;; pendingSettlements[workflowId] before escalation proceeds.
+;; ---------------------------------------------------------------------------
+
+(defn cancel-pending-on-escalation
+  "Cancel pending-settlement when a dispute is being escalated.
+   Called as a side-effect of escalation before the new level is set.
+   Returns the updated world (not a result map)."
+  [world workflow-id]
+  (update world :pending-settlements dissoc workflow-id))
+
+;; ---------------------------------------------------------------------------
+;; challenge-resolution (Phase L)
+;;
+;; Allows any third party to force an escalation by posting a challenge bond.
+;; ---------------------------------------------------------------------------
+
+(defn challenge-resolution
+  "Challenge a provisional resolution decision (Phase L).
+   Similar to escalate-dispute but can be called by anyone.
+
+   caller — address of the challenger (third party or participant)
+   escalation-fn — (fn [world workflow-id caller level] → {:ok bool :new-resolver addr})"
+  [world workflow-id caller escalation-fn]
+  (cond
+    (not (t/valid-workflow-id? world workflow-id))
+    (t/fail :invalid-workflow-id)
+
+    (not= :disputed (t/escrow-state world workflow-id))
+    (t/fail :transfer-not-in-dispute)
+
+    (t/final-round? world workflow-id)
+    (t/fail :escalation-not-allowed)
+
+    (not (:exists (t/get-pending world workflow-id)))
+    (t/fail :no-resolution-to-challenge)
+
+    (nil? escalation-fn)
+    (t/fail :escalation-not-configured)
+
+    :else
+    (let [current-level (t/dispute-level world workflow-id)
+          esc-result    (escalation-fn world workflow-id caller current-level)]
+      (if-not (:ok esc-result)
+        (t/fail (or (:error esc-result) :escalation-not-allowed))
+        (let [new-level    (inc current-level)
+              new-resolver (:new-resolver esc-result)
+              snap         (t/get-snapshot world workflow-id)
+              et           (t/get-transfer world workflow-id)
+              ;; Challenge bond amount
+              bond-amt     (payoffs/calculate-challenge-bond-amount (:amount-after-fee et) snap)
+              
+              world'       (-> world
+                               (acct/post-appeal-bond workflow-id caller snap (:token et) bond-amt)
+                               (assoc-in [:challengers workflow-id current-level] caller)
+                               (cancel-pending-on-escalation workflow-id)
+                               (assoc-in [:dispute-levels workflow-id] new-level)
+                               (assoc-in [:escrow-transfers workflow-id :dispute-resolver]
+                                         new-resolver))]
+          (assoc (t/ok world')
+                 :new-level    new-level
+                 :new-resolver new-resolver))))))
 
 ;; ---------------------------------------------------------------------------
 ;; automate-timed-actions
@@ -272,7 +442,14 @@
         (t/fail (or (:error esc-result) :escalation-not-allowed))
         (let [new-level    (inc current-level)
               new-resolver (:new-resolver esc-result)
+              
+              ;; DR3 Sync: handle appeal bond posting
+              snap         (t/get-snapshot world workflow-id)
+              et           (t/get-transfer world workflow-id)
+              bond-amt     (payoffs/calculate-appeal-bond-amount (:amount-after-fee et) snap)
+              
               world'       (-> world
+                               (acct/post-appeal-bond workflow-id caller snap (:token et) bond-amt)
                                (cancel-pending-on-escalation workflow-id)
                                (assoc-in [:dispute-levels workflow-id] new-level)
                                (assoc-in [:escrow-transfers workflow-id :dispute-resolver]
@@ -280,6 +457,86 @@
           (assoc (t/ok world')
                  :new-level    new-level
                  :new-resolver new-resolver))))))
+
+(defn appeal-slash
+  "Resolver appeals a PENDING manual slash (Phase M).
+   Mirrors: ResolverSlashingModuleV1.appealSlash"
+  [world workflow-id caller]
+  (let [pending (get-in world [:pending-fraud-slashes workflow-id])]
+    (cond
+      (nil? pending)
+      (t/fail :no-pending-slash)
+
+      (not= :pending (:status pending))
+      (t/fail :slash-not-pending)
+
+      (not= caller (:resolver pending))
+      (t/fail :not-resolver)
+
+      :else
+      (t/ok (assoc-in world [:pending-fraud-slashes workflow-id :status] :appealed)))))
+
+(defn propose-fraud-slash
+  "Governance (TIMELOCK) proposes a manual fraud slash for a resolver (Phase M).
+   Mirrors: ResolverSlashingModuleV1.proposeSlash.
+   Marks status as :pending to allow for appeal."
+  [world workflow-id caller resolver-addr amount]
+  (if-not (t/valid-workflow-id? world workflow-id)
+    (t/fail :invalid-workflow-id)
+    (let [snap (t/get-snapshot world workflow-id)
+          gov-delay (or (:appeal-window-duration snap) 259200)] ; 3 days default
+      (t/ok (assoc-in world [:pending-fraud-slashes workflow-id]
+                      {:resolver resolver-addr
+                       :amount   amount
+                       :status   :pending
+                       :appeal-deadline (+ (:block-time world) gov-delay)})))))
+
+(defn resolve-appeal
+  "Governance (TIMELOCK) resolves a slashing appeal.
+   If upheld, the slash is REVERSED and cannot be executed.
+   Mirrors: ResolverSlashingModuleV1.resolveAppeal"
+  [world workflow-id caller upheld?]
+  (let [pending (get-in world [:pending-fraud-slashes workflow-id])]
+    (cond
+      (nil? pending)
+      (t/fail :no-pending-slash)
+
+      (not= :appealed (:status pending))
+      (t/fail :no-active-appeal)
+
+      :else
+      (if upheld?
+        (t/ok (assoc-in world [:pending-fraud-slashes workflow-id :status] :reversed))
+        ;; Appeal rejected: return to pending state for execution after deadline
+        (t/ok (assoc-in world [:pending-fraud-slashes workflow-id :status] :pending))))))
+
+(defn execute-fraud-slash
+  "Execute a previously proposed fraud slash after the timelock/appeal window.
+   Mirrors: ResolverSlashingModuleV1.executeSlash"
+  [world workflow-id]
+  (let [pending (get-in world [:pending-fraud-slashes workflow-id])]
+    (cond
+      (nil? pending)
+      (t/fail :no-pending-slash)
+
+      (not= :pending (:status pending))
+      (t/fail (case (:status pending)
+                :appealed :appeal-in-progress
+                :reversed :slash-already-reversed
+                :executed :already-executed
+                :unknown-status))
+
+      (< (:block-time world) (:appeal-deadline pending))
+      (t/fail :timelock-not-expired)
+
+      :else
+      (let [resolver (:resolver pending)
+            amount   (:amount pending)
+            world'   (-> world
+                         (assoc-in [:pending-fraud-slashes workflow-id :status] :executed)
+                         (reg/slash-resolver-stake resolver amount)
+                         :world)]
+        (t/ok world')))))
 
 ;; ---------------------------------------------------------------------------
 ;; rotate-dispute-resolver

@@ -58,7 +58,7 @@ class SimulationClient:
             assert r["result"] == "ok"
     """
 
-    def __init__(self, host: str = "localhost", port: int = 7070):
+    def __init__(self, host: str = "localhost", port: int = 7071):
         self._channel = grpc.insecure_channel(f"{host}:{port}")
         self._start = self._channel.unary_unary(
             f"/{_SERVICE}/StartSession",

@@ -10,7 +10,8 @@
      - BondCollector appeal bond accounting
 
    All arithmetic uses integer division (uint256 truncation semantics)."
-  (:require [resolver-sim.contract-model.types :as t]))
+  (:require [resolver-sim.contract-model.types :as t]
+            [resolver-sim.economics.payoffs :as payoffs]))
 
 ;; ---------------------------------------------------------------------------
 ;; total-held tracking
@@ -109,15 +110,32 @@
    amount — gross bond amount"
   [world workflow-id appellant snap token amount]
   (let [fee-bps (or (:appeal-bond-protocol-fee-bps snap) 0)
-        fee     (t/compute-fee amount fee-bps)
-        net     (- amount fee)]
+        {:keys [fee net]} (payoffs/calculate-appeal-bond-fee amount fee-bps)]
     (-> world
         (update-in [:bond-balances workflow-id appellant] (fnil + 0) net)
         (update-in [:bond-fees token] (fnil + 0) fee))))
 
+(defn distribute-slashed-funds
+  "Internal: distribute slashed funds according to 50/30/20 split.
+   If a challenger is provided (Phase L), they receive a bounty from the slashed amount.
+   50% -> insurance, 30% -> protocol, 20% -> burned.
+   Bounty is subtracted from the 'insurance' and 'protocol' portions proportionally.
+   Returns updated world."
+  ([world amount] (distribute-slashed-funds world amount nil 0))
+  ([world amount challenger bounty-bps]
+   (let [bounty (payoffs/calculate-bounty amount bounty-bps)
+         dist   (payoffs/calculate-slashing-distribution amount bounty)]
+     (-> world
+         (update-in [:bond-distribution :insurance] (fnil + 0) (:insurance dist))
+         (update-in [:bond-distribution :protocol]  (fnil + 0) (:protocol dist))
+         (update-in [:bond-distribution :burned]    (fnil + 0) (:burned dist))
+         (cond-> (and challenger (pos? bounty))
+           (update-in [:claimable challenger] (fnil + 0) bounty))))))
+
 (defn slash-bond
   "Slash the posted bond for a losing appellant.
-   Moves balance from :bond-balances to :bond-slashed (for incentive distribution).
+   Moves balance from :bond-balances to :bond-slashed (for incentive distribution)
+   and applies the 50/30/20 split logic.
 
    Guard: bond balance must be > 0."
   [world workflow-id appellant]
@@ -126,7 +144,8 @@
       (t/fail :no-bond-to-slash)
       (let [world' (-> world
                        (assoc-in [:bond-balances workflow-id appellant] 0)
-                       (update-in [:bond-slashed workflow-id] (fnil + 0) amount))]
+                       (update-in [:bond-slashed workflow-id] (fnil + 0) amount)
+                       (distribute-slashed-funds amount))]
         (assoc (t/ok world') :slashed amount)))))
 
 (defn return-bond

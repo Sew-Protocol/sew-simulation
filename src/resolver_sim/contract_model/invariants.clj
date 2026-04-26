@@ -348,6 +348,97 @@
      :violations (vec violations)}))
 
 ;; ---------------------------------------------------------------------------
+;; Invariant 14: Slash status consistency
+;;
+;; A slash in :executed status must have proposed-at > 0 and executedAt > 0
+;; (modelled here as proposed-at > 0 and status == :executed requires appeal-deadline == 0
+;; OR appeal-deadline has passed). A slash in :pending must have proposed-at > 0
+;; and appeal-deadline > proposed-at.
+;; ---------------------------------------------------------------------------
+
+(defn slash-status-consistent?
+  "Invariant 14: every slash event has a status consistent with its timestamps.
+
+   Rules:
+     :pending  — proposed-at > 0, appeal-deadline > proposed-at
+     :executed — proposed-at > 0
+     :reversed — proposed-at > 0 (was once pending)"
+  [world]
+  (let [slashes   (:pending-fraud-slashes world {})
+        violations
+        (for [[slash-id ev] slashes
+              :let [proposed-at    (or (:proposed-at ev) 0)
+                    appeal-dl      (or (:appeal-deadline ev) 0)
+                    status         (:status ev)
+                    pending-ok?    (and (pos? proposed-at)
+                                        (> appeal-dl proposed-at))
+                    executed-ok?   (pos? proposed-at)
+                    reversed-ok?   (pos? proposed-at)
+                    valid?
+                    (case status
+                      :pending  pending-ok?
+                      :executed executed-ok?
+                      :reversed reversed-ok?
+                      true)]
+              :when (not valid?)]
+          {:slash-id slash-id :status status :proposed-at proposed-at :appeal-deadline appeal-dl})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
+;; Invariant 15: Appeal bond conserved
+;;
+;; Total appeal-bond-held across all PENDING/APPEALED slashes must be >= 0.
+;; No individual slash can have a negative appeal-bond-held.
+;; (Once resolved the field is cleared to 0, which is also valid.)
+;; ---------------------------------------------------------------------------
+
+(defn appeal-bond-conserved?
+  "Invariant 15: no slash event has a negative :appeal-bond-held."
+  [world]
+  (let [slashes   (:pending-fraud-slashes world {})
+        violations
+        (for [[slash-id ev] slashes
+              :let [held (or (:appeal-bond-held ev) 0)]
+              :when (neg? held)]
+          {:slash-id slash-id :appeal-bond-held held})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
+;; Invariant 16: Fraud slashes must not be auto-executed
+;;
+;; A slash with :reason == :fraud may not have :status == :executed
+;; with :proposed-at == some-time AND no appeal-deadline > proposed-at
+;; (i.e. it was never given a pending window).
+;;
+;; In practice: any fraud slash must have had appeal-deadline > 0 at creation,
+;; meaning it passed through PENDING before EXECUTED.
+;;
+;; We enforce: for all executed fraud slashes, there must have been a
+;; non-zero appeal deadline recorded (even after execution the field persists).
+;; ---------------------------------------------------------------------------
+
+(defn no-auto-fraud-execute?
+  "Invariant 16: fraud slashes must pass through a pending window before execution.
+
+   An :executed slash with :reason :fraud and :appeal-deadline == 0 indicates
+   the slash was executed immediately without a pending window — a violation."
+  [world]
+  (let [slashes   (:pending-fraud-slashes world {})
+        violations
+        (for [[slash-id ev] slashes
+              :let [status      (:status ev)
+                    reason      (:reason ev)
+                    appeal-dl   (or (:appeal-deadline ev) 0)]
+              :when (and (= status :executed)
+                         (= reason :fraud)
+                         (zero? appeal-dl))]
+          {:slash-id slash-id :reason reason})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
 ;; Composite: check all world-level invariants
 ;; ---------------------------------------------------------------------------
 
@@ -364,7 +455,10 @@
                   :all-status-combinations-valid (all-status-combinations-valid? world)
                   :pending-settlement-consistent (pending-settlement-consistency? world)
                   :dispute-timestamp-consistent  (dispute-timestamp-consistency? world)
-                  :dispute-level-bounded         (dispute-level-bounded? world)}
+                  :dispute-level-bounded         (dispute-level-bounded? world)
+                  :slash-status-consistent       (slash-status-consistent? world)
+                  :appeal-bond-conserved         (appeal-bond-conserved? world)
+                  :no-auto-fraud-execute         (no-auto-fraud-execute? world)}
          all?    (every? #(:holds? %) (vals results))]
      {:all-hold? all?
       :results   results})))

@@ -95,30 +95,169 @@
   (set-escrow-state world workflow-id new-state))
 
 ;; ---------------------------------------------------------------------------
+;; Transition Registry (Declarative Logic)
+;; ---------------------------------------------------------------------------
+
+(def transitions
+  "Declarative registry of protocol transitions.
+   Each entry defines:
+     :from         — starting state(s)
+     :to           — destination state
+     :guards       — list of registry keys
+     :effects      — list of registry keys
+     :state-error  — legacy error keyword for invalid initial state
+     :guard-error  — map of {guard-kw legacy-error-kw}"
+  {:to-disputed
+   {:from         #{:pending}
+    :to           :disputed
+    :guards       [:participant?]
+    :effects      [:set-raise-dispute-status :record-dispute-timestamp]
+    :state-error  :transfer-not-pending
+    :guard-error  {:participant? :not-participant}}
+
+   :to-released
+   {:from         #{:pending :disputed}
+    :to           :released
+    :guards       []
+    :effects      []
+    :state-error  :invalid-state-for-release}
+
+   :to-refunded
+   {:from         #{:pending :disputed}
+    :to           :refunded
+    :guards       []
+    :effects      []
+    :state-error  :invalid-state-for-refund}
+
+   :to-resolved
+   {:from         #{:disputed}
+    :to           :resolved
+    :guards       [:terminal-transfer-done?]
+    :effects      []
+    :state-error  :transfer-not-in-dispute
+    :guard-error  {:terminal-transfer-done? :resolution-without-settlement}}})
+
+;; ---------------------------------------------------------------------------
+;; Guard & Effect Implementations
+;; ---------------------------------------------------------------------------
+
+(defn- terminal-transfer-done?
+  "True when the escrow's amount-after-fee is no longer reflected in total-held
+   for its token, i.e. the release/refund transfer accounting has already run."
+  [world workflow-id]
+  (let [et    (t/get-transfer world workflow-id)
+        token (:token et)
+        held  (get-in world [:total-held token] 0)
+        live-states #{:pending :disputed}
+        other-live  (reduce (fn [acc [wf e]]
+                              (if (and (not= wf workflow-id)
+                                       (= (:token e) token)
+                                       (contains? live-states (:escrow-state e)))
+                                (+ acc (:amount-after-fee e))
+                                acc))
+                            0
+                            (:escrow-transfers world))]
+    (= held other-live)))
+
+(def registry
+  {:guards
+   {:participant?
+    (fn [world workflow-id caller]
+      (let [et (t/get-transfer world workflow-id)]
+        (or (= caller (:from et)) (= caller (:to et)))))
+    
+    :terminal-transfer-done?
+    (fn [world workflow-id _]
+      (terminal-transfer-done? world workflow-id))}
+
+   :effects
+   {:set-raise-dispute-status
+    (fn [world workflow-id caller]
+      (let [et (t/get-transfer world workflow-id)
+            is-sender? (= caller (:from et))]
+        (update-transfer world workflow-id
+                        (if is-sender?
+                          #(assoc % :sender-status    :raise-dispute
+                                    :recipient-status  :none)
+                          #(assoc % :recipient-status :raise-dispute
+                                    :sender-status     :none)))))
+    
+    :record-dispute-timestamp
+    (fn [world workflow-id _]
+      (assoc-in world [:dispute-timestamps workflow-id] (:block-time world)))}})
+
+(defn- run-guards [world workflow-id caller txn]
+  (reduce (fn [_ g-kw]
+            (if-let [g-fn (get-in registry [:guards g-kw])]
+              (if (g-fn world workflow-id caller)
+                {:ok true}
+                (reduced (t/fail (get-in txn [:guard-error g-kw] :guard-failed))))
+              (throw (ex-info "Unknown guard" {:guard g-kw}))))
+          {:ok true}
+          (:guards txn)))
+
+(defn- apply-effects [world workflow-id caller effects]
+  (reduce (fn [w e-kw]
+            (if-let [e-fn (get-in registry [:effects e-kw])]
+              (e-fn w workflow-id caller)
+              (throw (ex-info "Unknown effect" {:effect e-kw}))))
+          world
+          effects))
+
+(defn execute-transition
+  "Generic engine to execute a declarative transition."
+  [world workflow-id caller transition-kw]
+  (if-let [txn (get transitions transition-kw)]
+    (or (assert-workflow world workflow-id)
+        (let [et    (t/get-transfer world workflow-id)
+              state (:escrow-state et)]
+          (cond
+            (not (contains? (:from txn) state))
+            (t/fail (:state-error txn :invalid-state))
+
+            :else
+            (let [g-res (run-guards world workflow-id caller txn)]
+              (if-not (:ok g-res)
+                g-res
+                (let [world' (-> world
+                                 (set-escrow-state workflow-id (:to txn))
+                                 (apply-effects workflow-id caller (:effects txn)))]
+                  (t/ok world')))))))
+    (throw (ex-info "Unknown transition" {:transition transition-kw}))))
+
+;; ---------------------------------------------------------------------------
+;; Public Transitions (Refactored to use execute-transition)
+;; ---------------------------------------------------------------------------
+
+(defn transition-to-disputed
+  "Transition a :pending escrow to :disputed."
+  [world workflow-id caller]
+  (execute-transition world workflow-id caller :to-disputed))
+
+(defn transition-to-released
+  "Transition a :pending or :disputed escrow to :released."
+  [world workflow-id]
+  (execute-transition world workflow-id nil :to-released))
+
+(defn transition-to-refunded
+  "Transition a :pending or :disputed escrow to :refunded."
+  [world workflow-id]
+  (execute-transition world workflow-id nil :to-refunded))
+
+(defn transition-to-resolved
+  "Transition a :disputed escrow to :resolved."
+  [world workflow-id]
+  (execute-transition world workflow-id nil :to-resolved))
+
+;; ---------------------------------------------------------------------------
 ;; Valid status-combination predicate
 ;;
 ;; Mirrors the protocol constraints on (EscrowState × SenderStatus × RecipientStatus).
-;;
-;; From StateManagementLibrary.sol and BaseEscrow.sol call-site analysis:
-;;
-;;   :none     — only :none/:none statuses permitted
-;;   :pending  — AGREE_TO_CANCEL allowed for either party; RAISE_DISPUTE is
-;;               transitional and should not persist in :pending
-;;   :disputed — exactly one party has :raise-dispute, the other :none;
-;;               AGREE_TO_CANCEL is forbidden (senderCancel/recipientCancel
-;;               require state == :pending, so can't set it after raiseDispute)
-;;   terminal  — statuses are frozen; any combination is valid
 ;; ---------------------------------------------------------------------------
 
 (defn valid-status-combination?
   "True when {:escrow-state :sender-status :recipient-status} is a valid
-   combination according to the SEW protocol.
-
-   Invalid examples:
-     :disputed + :agree-to-cancel + *       — AGREE_TO_CANCEL can't be set in disputed
-     :disputed + :none + :none              — at least one party must have RAISE_DISPUTE
-     :disputed + :raise-dispute + :raise-dispute  — only one party can initiate (guards)
-     :pending  + :raise-dispute + *         — RAISE_DISPUTE means state already :disputed"
+   combination according to the SEW protocol."
   [{:keys [escrow-state sender-status recipient-status]}]
   (let [terminals #{:released :refunded :resolved}]
     (cond
@@ -131,8 +270,6 @@
       (and (= :none sender-status) (= :none recipient-status))
 
       ;; :pending — AGREE_TO_CANCEL is valid; RAISE_DISPUTE is not
-      ;; (RAISE_DISPUTE on :pending is a transient state that should have
-      ;;  immediately become :disputed via transitionToDisputed)
       (= :pending escrow-state)
       (and (contains? #{:none :agree-to-cancel} sender-status)
            (contains? #{:none :agree-to-cancel} recipient-status))
@@ -151,160 +288,6 @@
                      (= :raise-dispute recipient-status))))
 
       :else false)))
-
-;; ---------------------------------------------------------------------------
-;; transitionToDisputed
-;;
-;; Mirrors: StateManagementLibrary.transitionToDisputed
-;;          + raiseDispute preconditions in BaseEscrow
-;;
-;; Guards:
-;;   1. workflow-id must exist
-;;   2. escrow-state must be :pending
-;;   3. caller must be :from or :to of the escrow
-;; ---------------------------------------------------------------------------
-
-(defn transition-to-disputed
-  "Transition a :pending escrow to :disputed.
-
-   Sets senderStatus = :raise-dispute when caller is :from,
-   recipientStatus = :raise-dispute when caller is :to.
-   Records dispute-raised-timestamp = block-time.
-
-   Returns {:ok true :world world'} or {:ok false :error kw}."
-  [world workflow-id caller]
-  (or (assert-workflow world workflow-id)
-      (let [et (t/get-transfer world workflow-id)]
-        (cond
-          (not (valid-transition? (:escrow-state et) :disputed))
-          (t/fail :transfer-not-pending)
-
-          (and (not= caller (:from et)) (not= caller (:to et)))
-          (t/fail :not-participant)
-
-          :else
-          (let [is-sender? (= caller (:from et))
-                world'     (-> world
-                               (set-escrow-state workflow-id :disputed)
-                               ;; Set caller's status to :raise-dispute and clear the
-                               ;; counterparty's status — mirrors the Solidity invariant
-                               ;; that :agree-to-cancel cannot persist once disputed.
-                               (update-transfer workflow-id
-                                               (if is-sender?
-                                                 #(assoc % :sender-status    :raise-dispute
-                                                           :recipient-status  :none)
-                                                 #(assoc % :recipient-status :raise-dispute
-                                                           :sender-status     :none)))
-                               (assoc-in [:dispute-timestamps workflow-id]
-                                         (:block-time world)))]
-            (t/ok world'))))))
-
-;; ---------------------------------------------------------------------------
-;; transitionToReleased
-;;
-;; Mirrors: StateManagementLibrary.transitionToReleased
-;;          + _releaseEscrowTransfer preconditions
-;;
-;; Guards:
-;;   1. workflow-id must exist
-;;   2. valid-transition? :pending/:disputed → :released
-;;      (release can be called from PENDING via direct release, or from
-;;       DISPUTED via _executeResolution → _releaseEscrowTransfer)
-;; ---------------------------------------------------------------------------
-
-(defn transition-to-released
-  "Transition a :pending or :disputed escrow to :released.
-
-   Returns {:ok true :world world'} or {:ok false :error kw}."
-  [world workflow-id]
-  (or (assert-workflow world workflow-id)
-      (let [state (t/escrow-state world workflow-id)]
-        (if-not (valid-transition? state :released)
-          (t/fail :invalid-state-for-release)
-          (t/ok (set-escrow-state world workflow-id :released))))))
-
-;; ---------------------------------------------------------------------------
-;; transitionToRefunded
-;;
-;; Mirrors: StateManagementLibrary.transitionToRefunded
-;;          + _cancelAndRefund preconditions
-;;
-;; Guards:
-;;   1. workflow-id must exist
-;;   2. valid-transition? :pending/:disputed → :refunded
-;; ---------------------------------------------------------------------------
-
-(defn transition-to-refunded
-  "Transition a :pending or :disputed escrow to :refunded.
-
-   Returns {:ok true :world world'} or {:ok false :error kw}."
-  [world workflow-id]
-  (or (assert-workflow world workflow-id)
-      (let [state (t/escrow-state world workflow-id)]
-        (if-not (valid-transition? state :refunded)
-          (t/fail :invalid-state-for-refund)
-          (t/ok (set-escrow-state world workflow-id :refunded))))))
-
-;; ---------------------------------------------------------------------------
-;; transitionToResolved
-;;
-;; Mirrors: StateManagementLibrary.transitionToResolved
-;;
-;; NOTE: No production BaseEscrow code path currently calls this function.
-;; Disputes resolve to :released or :refunded directly.  :resolved is retained
-;; for enum completeness and future Foundry/halmos invariant tests.
-;;
-;; Guards:
-;;   1. workflow-id must exist
-;;   2. valid-transition? :disputed → :resolved
-;;   3. terminal-transfer-done? — accounting must already be settled
-;;      (total-held excludes this escrow's amount) before marking resolved.
-;;      This prevents :resolved being reached without proper fund movement.
-;; ---------------------------------------------------------------------------
-
-(defn- terminal-transfer-done?
-  "True when the escrow's amount-after-fee is no longer reflected in total-held
-   for its token, i.e. the release/refund transfer accounting has already run.
-
-   Computed by checking that total-held[token] == sum of all OTHER live escrows
-   for that token (meaning this escrow's afa has been subtracted)."
-  [world workflow-id]
-  (let [et    (t/get-transfer world workflow-id)
-        token (:token et)
-        afa   (:amount-after-fee et)
-        held  (get-in world [:total-held token] 0)
-        live-states #{:pending :disputed}
-        other-live  (reduce (fn [acc [wf e]]
-                              (if (and (not= wf workflow-id)
-                                       (= (:token e) token)
-                                       (contains? live-states (:escrow-state e)))
-                                (+ acc (:amount-after-fee e))
-                                acc))
-                            0
-                            (:escrow-transfers world))]
-    ;; If held == other-live, this escrow's afa was already removed
-    (= held other-live)))
-
-(defn transition-to-resolved
-  "Transition a :disputed escrow to :resolved.
-
-   Guard: terminal-transfer-done? must be true — accounting must be settled
-   before resolved may be entered.  This prevents the state being used as a
-   shortcut that skips fund movement.
-
-   Returns {:ok true :world world'} or {:ok false :error kw}."
-  [world workflow-id]
-  (or (assert-workflow world workflow-id)
-      (let [state (t/escrow-state world workflow-id)]
-        (cond
-          (not (valid-transition? state :resolved))
-          (t/fail :transfer-not-in-dispute)
-
-          (not (terminal-transfer-done? world workflow-id))
-          (t/fail :resolution-without-settlement)
-
-          :else
-          (t/ok (set-escrow-state world workflow-id :resolved))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Mutual-consent cancel state setters

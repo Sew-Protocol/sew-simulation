@@ -13,17 +13,13 @@
       governance capacity is limited and biased toward high-value disputes.'
 
    Also covers the governance capture gap (rule drift) not tested in Phases M/J."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine :as engine]))
 
-;; ============ Governance Bandwidth Model ============
-
-(def governance-capacity-per-epoch 3)
+;; ============ Governance Models (Pure) ============
 
 (defn governance-review-probability
-  "Probability that governance reviews a dispute given its value.
-   High value  (>$100K): 95%
-   Medium value ($10K-$100K): 60%
-   Low value   (<$10K): 20%"
+  "Probability that governance reviews a dispute given its value."
   [dispute-value]
   (cond
     (>= dispute-value 100000) 0.95
@@ -40,14 +36,11 @@
     (take capacity sorted)))
 
 (defn simulate-dispute-outcome
-  "Attacker win rate without governance: 35% (imperfect detection).
-   With governance review: 5% (freeze/intervention)."
+  "Determine if an attacker wins a dispute."
   [dispute reviewed-ids d-rng]
   (let [reviewed? (contains? reviewed-ids (:id dispute))
         win-prob (if reviewed? 0.05 0.35)]
     (< (rng/next-double d-rng) win-prob)))
-
-;; ============ Attacker Learning ============
 
 (defn infer-grey-zone
   "Attacker analyzes history to find the highest value with <20% review rate."
@@ -57,81 +50,115 @@
                                        :else :high)) history)
         stats (for [[k v] by-value]
                 [k (/ (double (count (filter :reviewed v))) (count v))])]
-    ;; Attacker targets the most profitable zone with low review probability
     (if-let [best (first (sort-by second < (filter (fn [[_ prob]] (< prob 0.3)) stats)))]
       (first best)
       :low)))
 
-;; ============ Simulation Loop ============
+;; ============ Engine Adapters ============
 
-(defn run-governance-simulation
-  [scenario-label n-disputes capacity bias-overrides learning? seed]
-  (println (format "📋 %s" scenario-label))
-  (let [d-rng (rng/make-rng seed)]
-    (loop [epoch 1
-           history []
-           total-wins 0
-           total-attempts 0]
-      (if (> epoch 50)
-        (let [win-rate (/ (double total-wins) total-attempts)
-              passed? (< win-rate 0.20)]
-          (println (format "   Final win rate: %.1f%%" (* 100 win-rate)))
-          (println (format "   Status: %s" (if passed? "✅ SAFE" "❌ VULNERABLE")))
-          {:scenario scenario-label :win-rate win-rate :class (if passed? "A" "C")})
-        (let [attacker-strategy (if (and learning? (> epoch 20))
+(defn simulate-epoch-aa
+  [epoch state params d-rng]
+  (let [{:keys [capacity learning? bias-overrides]} params
+        history  (:history state [])
+        attacker-strategy (if (and learning? (> epoch 20))
                                   (infer-grey-zone history)
                                   :random)
-              
-              ;; Generate disputes for this epoch
-              epoch-disputes (for [i (range 5)]
-                               (let [val (case attacker-strategy
-                                           :low  (rng/next-int d-rng 9999)
-                                           :med  (+ 10000 (rng/next-int d-rng 89999))
-                                           :high (+ 100000 (rng/next-int d-rng 100000))
-                                           :random (+ 1000 (rng/next-int d-rng 150000)))]
-                                 {:id (str epoch "-" i) :value val}))
-              
-              reviewed (select-reviewed-disputes epoch-disputes capacity d-rng)
-              reviewed-ids (set (map :id reviewed))
-              
-              outcomes (for [d epoch-disputes]
-                         (let [won? (simulate-dispute-outcome d reviewed-ids d-rng)]
-                           (assoc d :won won? :reviewed (contains? reviewed-ids (:id d)))))
-              
-              new-wins (count (filter :won outcomes))]
-          
-          (recur (inc epoch)
-                 (concat history outcomes)
-                 (+ total-wins new-wins)
-                 (+ total-attempts (count epoch-disputes))))))))
+        
+        ;; Generate disputes for this epoch
+        epoch-disputes (for [i (range 5)]
+                         (let [val (case attacker-strategy
+                                     :low  (rng/next-int d-rng 9999)
+                                     :med  (+ 10000 (rng/next-int d-rng 89999))
+                                     :high (+ 100000 (rng/next-int d-rng 100000))
+                                     :random (+ 1000 (rng/next-int d-rng 150000)))]
+                           {:id (str epoch "-" i) :value val}))
+        
+        reviewed (select-reviewed-disputes epoch-disputes capacity d-rng)
+        reviewed-ids (set (map :id reviewed))
+        
+        outcomes (for [d epoch-disputes]
+                   (let [won? (simulate-dispute-outcome d reviewed-ids d-rng)]
+                     (assoc d :won won? :reviewed (contains? reviewed-ids (:id d)))))
+        
+        new-wins (count (filter :won outcomes))]
+    
+    {:epoch epoch
+     :history (concat history outcomes)
+     :total-wins (+ (:total-wins state 0) new-wins)
+     :total-attempts (+ (:total-attempts state 0) (count epoch-disputes))}))
+
+(defn summarize-aa-history
+  [history params]
+  (let [final (last history)
+        total-wins (:total-wins final)
+        total-attempts (:total-attempts final)
+        win-rate (/ (double total-wins) total-attempts)
+        passed? (< win-rate 0.20)]
+    {:status (if passed? "✅ SAFE" "❌ VULNERABLE")
+     :win-rate win-rate
+     :class (if passed? "A" "C")
+     :passed? passed?}))
+
+;; ============ Scenario Definitions ============
+
+(defn make-scenarios [seed]
+  [{:label "TEST 1: Baseline (High capacity, naive attacker)"
+    :initial-state {:history [] :total-wins 0 :total-attempts 0}
+    :update-fn simulate-epoch-aa
+    :summary-fn summarize-aa-history
+    :epochs 50
+    :seed seed
+    :params {:capacity 5 :learning? false}}
+   
+   {:label "TEST 2: Limited Capacity (Cap=3, learning attacker)"
+    :initial-state {:history [] :total-wins 0 :total-attempts 0}
+    :update-fn simulate-epoch-aa
+    :summary-fn summarize-aa-history
+    :epochs 50
+    :seed (+ seed 1)
+    :params {:capacity 3 :learning? true}}
+   
+   {:label "TEST 3: Biased Governance (Focus on >$50K)"
+    :initial-state {:history [] :total-wins 0 :total-attempts 0}
+    :update-fn simulate-epoch-aa
+    :summary-fn summarize-aa-history
+    :epochs 50
+    :seed (+ seed 2)
+    :params {:capacity 3 :bias {:bias :high} :learning? true}}
+   
+   {:label "TEST 4: Low-Value Flooding"
+    :initial-state {:history [] :total-wins 0 :total-attempts 0}
+    :update-fn simulate-epoch-aa
+    :summary-fn summarize-aa-history
+    :epochs 50
+    :seed (+ seed 3)
+    :params {:capacity 2 :learning? true}}
+   
+   {:label "TEST 5: Adversarial Threshold Search"
+    :initial-state {:history [] :total-wins 0 :total-attempts 0}
+    :update-fn simulate-epoch-aa
+    :summary-fn summarize-aa-history
+    :epochs 50
+    :seed (+ seed 4)
+    :params {:capacity 1 :learning? true}}])
 
 ;; ============ Full Phase AA Run ============
 
 (defn run-phase-aa-sweep
   "Run all Phase AA governance gaming tests."
   [params]
-  (let [seed (:rng-seed params 42)]
-    (println "\n📊 PHASE AA: GOVERNANCE AS ADVERSARY TESTING")
-    (println "   Hypothesis: Attackers cannot exceed 20% win rate via governance gaming")
-    (println "")
-
-    (let [r1 (run-governance-simulation "TEST 1: Baseline (High capacity, naive attacker)" 
-                                      250 5 {} false seed)
-          r2 (run-governance-simulation "TEST 2: Limited Capacity (Cap=3, learning attacker)" 
-                                      250 3 {} true (+ seed 1))
-          r3 (run-governance-simulation "TEST 3: Biased Governance (Focus on >$50K)" 
-                                      250 3 {:bias :high} true (+ seed 2))
-          r4 (run-governance-simulation "TEST 4: Low-Value Flooding" 
-                                      250 2 {} true (+ seed 3))
-          r5 (run-governance-simulation "TEST 5: Adversarial Threshold Search" 
-                                      250 1 {} true (+ seed 4))
-
-          all-results [r1 r2 r3 r4 r5]
-          class-a (count (filter #(= "A" (:class %)) all-results))
-          class-c (count (filter #(= "C" (:class %)) all-results))
-
-          max-win-rate (apply max (map :win-rate all-results))
-          hypothesis-holds? (< max-win-rate 0.20)]
+  (let [seed (:rng-seed params 42)
+        _ (println "\n📊 PHASE AA: GOVERNANCE AS ADVERSARY TESTING")
+        _ (println "   Hypothesis: Attackers cannot exceed 20% win rate via governance gaming")
+        _ (println "")
+        
+        scenarios (make-scenarios seed)
+        results (engine/run-sweep "PHASE AA SWEEP" scenarios params)
+        
+        class-a (count (filter #(= "A" (:class %)) results))
+        class-c (count (filter #(= "C" (:class %)) results))
+        max-win-rate (apply max (map :win-rate results))
+        hypothesis-holds? (< max-win-rate 0.20)]
 
     (println "\n═══════════════════════════════════════════════════")
     (println "📋 PHASE AA SUMMARY")
@@ -143,6 +170,7 @@
                        "✅ YES — governance gaming not profitable"
                        "❌ NO — governance capacity increase needed")))
     (println "")
+    
     (if hypothesis-holds?
       (do (println "   Confidence impact: +7% (governance capture not critical risk)")
           (println "   Recommendation: Maintain current capacity; add low-value sampling"))
@@ -150,7 +178,7 @@
           (println "   Recommendation: Raise capacity, add minimum review floor for all dispute values")))
     (println "")
 
-    {:results all-results
+    {:results results
      :class-a class-a :class-c class-c
      :max-win-rate max-win-rate
-     :hypothesis-holds? hypothesis-holds?})))
+     :hypothesis-holds? hypothesis-holds?}))

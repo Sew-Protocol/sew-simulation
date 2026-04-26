@@ -22,17 +22,21 @@
    Pass threshold: solvency-ratio ≥ 1.0 for all configurations in the
    design envelope (n-resolvers ≤ 20, avg-bond ≥ 500)."
   (:require [resolver-sim.model.rng :as rng]
-            [resolver-sim.sim.waterfall :as waterfall]))
+            [resolver-sim.sim.waterfall :as waterfall]
+            [resolver-sim.economics.payoffs :as payoffs]))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocol constants (mirrors ResolverSlashingModuleV1.sol)
 ;; ---------------------------------------------------------------------------
 
+(def POLICY (:conservative payoffs/ECONOMIC_POLICIES))
+
 (def EPOCH_CAP_BPS         2000)   ; 20% per resolver per epoch
 (def SENIOR_EPOCH_CAP_BPS  1000)   ; 10% per senior per epoch
-(def INSURANCE_CUT_BPS     2000)   ; 20% of slash → insurance pool
+(def INSURANCE_CUT_BPS     (:insurance-cut-bps POLICY))
 (def RESOLVER_SLASH_BPS    200)    ; 2% per-slash rate (PENALTY_MISSED_RESOLVE)
 (def MAX_ESCROW_PER_CASE   2000)   ; $2,000 hard cap
+(def CAPACITY_MULTIPLIER   (:capacity-multiplier POLICY))
 (def COVERAGE_MULTIPLIER   3)      ; M = 3× senior coverage requirement
 
 ;; ---------------------------------------------------------------------------
@@ -64,11 +68,12 @@
 
         ;; Worst-case user claims: every resolver has a user claim equal to
         ;; max-escrow-per-case. If resolver bond < claim, insurance covers gap.
-        ;; Worst case: resolver bond = avg-bond, claim = MAX_ESCROW_PER_CASE.
-        ;; After slashing, resolver has (1 - epoch_cap) × bond remaining.
-        ;; But user claim was placed BEFORE the slash, so full bond is available.
-        ;; Net gap per resolver = max(0, MAX_ESCROW_PER_CASE - avg-bond)
-        per-resolver-gap (max 0 (- MAX_ESCROW_PER_CASE avg-bond-usd))
+        ;; Worst case: resolver bond = avg-bond, claim = actual capacity limit.
+        ;; Contract rule: maxEscrow = min(MAX_ESCROW_PER_CASE, bond * CAPACITY_MULTIPLIER)
+        effective-max-escrow (min MAX_ESCROW_PER_CASE (* avg-bond-usd CAPACITY_MULTIPLIER))
+        
+        ;; Net gap per resolver = max(0, effective-max-escrow - avg-bond)
+        per-resolver-gap (max 0 (- effective-max-escrow avg-bond-usd))
         total-user-gaps  (* n-resolvers per-resolver-gap)
 
         ;; Net pool obligation = user gaps - incoming slash cuts

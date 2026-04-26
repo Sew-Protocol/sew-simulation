@@ -13,7 +13,8 @@
 
    Canonical form: all nested maps are key-sorted so pr-str output is
    deterministic regardless of Clojure hash-map insertion order."
-  (:require [clojure.data :as data])
+  (:require [clojure.data :as data]
+            [resolver-sim.contract-model.invariants.accounting :as acct-inv])
   (:import [java.security MessageDigest]
            [java.util Base64]))
 
@@ -125,7 +126,8 @@
   (select-keys world (comparable-keys)))
 
 (defn projection-hash
-  "SHA-256 of the EVM-comparable projection of world.
-   Use this (not world-hash) when comparing against Anvil-derived state."
+  "SHA-256 of the EVM-comparable projection of world, including accounting."
   [world]
-  (world-hash (projection world)))
+  (let [proj (-> (projection world)
+                 (assoc :accounting-consistent? (acct-inv/accounting-consistent? world)))]
+    (world-hash proj)))
