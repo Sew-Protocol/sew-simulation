@@ -26,7 +26,8 @@
    Protocol constants (from DRMStorageBase.sol):
      emaAlphaBps            = 1000   (10%)
      minEmaScoreThreshold   = 500000 / 1e6 = 0.50  (normalised)"
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine :as engine]))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocol constants
@@ -49,20 +50,12 @@
   (+ (* (- 1.0 a) score) (* a signal)))
 
 (defn ema-steady-state
-  "EMA steady-state value for a resolver with known accuracy p-correct.
-
-   signal = 1 with probability p-correct (correct decision, not reversed)
-   signal = 0 with probability (1 - p-correct) (reversed on escalation)
-
-   E[score] = p-correct × 1 + (1 - p-correct) × 0 = p-correct
-
-   Note: the actual escalation rate modulates how often a signal fires.
-   We simplify by treating every dispute as producing a signal."
+  "EMA steady-state = p-correct (binary signal expectation)."
   [p-correct]
   p-correct)
 
 ;; ---------------------------------------------------------------------------
-;; Single resolver simulation: track EMA trajectory over n-disputes
+;; Single resolver simulation
 ;; ---------------------------------------------------------------------------
 
 (defn simulate-resolver
@@ -70,155 +63,134 @@
    Returns the EMA score at each dispute step as a vector."
   [p-correct alpha-bps initial-score n-disputes d-rng]
   (let [a (alpha alpha-bps)]
-    (loop [step    0
-           score   initial-score
-           history []]
+    (loop [step 0 score initial-score history []]
       (if (= step n-disputes)
         history
-        (let [correct? (< (rng/next-double d-rng) p-correct)
-              signal   (if correct? 1.0 0.0)
+        (let [signal    (if (< (rng/next-double d-rng) p-correct) 1.0 0.0)
               new-score (ema-update score a signal)]
           (recur (inc step) new-score (conj history new-score)))))))
 
 ;; ---------------------------------------------------------------------------
-;; BM-05a: Convergence — MAE after n-disputes
+;; BM-05a: Convergence trial
 ;; ---------------------------------------------------------------------------
 
 (defn run-convergence-trial
-  "Run n-sims simulations and compute MAE of EMA at each dispute step."
-  [p-correct alpha-bps initial-score n-disputes n-sims seed]
-  (let [d-rng      (rng/make-rng seed)
-        steady     (ema-steady-state p-correct)
-        trajectories (doall
-                      (for [_ (range n-sims)]
-                        (simulate-resolver p-correct alpha-bps initial-score n-disputes d-rng)))
-        ;; MAE at each step = mean |score - steady| across all sims
-        mae-at-step (for [step (range n-disputes)]
-                      (let [scores (map #(nth % step) trajectories)
-                            errors (map #(Math/abs (- % steady)) scores)]
-                        (/ (reduce + errors) n-sims)))]
+  "Run n-sims simulations and compute MAE of EMA at each dispute step.
+   Accepts a param map as produced by build-convergence-grid."
+  [{:keys [p-correct alpha-bps initial-score n-disputes n-sims seed]
+    :or   {n-disputes 50 n-sims 2000}}]
+  (let [d-rng        (rng/make-rng seed)
+        steady       (ema-steady-state p-correct)
+        trajectories (doall (repeatedly n-sims
+                              #(simulate-resolver p-correct alpha-bps
+                                                  initial-score n-disputes d-rng)))
+        mae-at-step  (mapv (fn [step]
+                             (let [errs (map #(Math/abs (- (nth % step) steady)) trajectories)]
+                               (/ (reduce + errs) n-sims)))
+                           (range n-disputes))
+        mae-at-30    (nth mae-at-step (min (dec n-disputes) (dec CONVERGENCE_N_TARGET)))]
     {:p-correct     p-correct
      :alpha-bps     alpha-bps
      :initial-score initial-score
      :steady-state  steady
-     :mae-at-30     (nth (vec mae-at-step) (min (dec n-disputes) (dec CONVERGENCE_N_TARGET)))
+     :mae-at-30     mae-at-30
      :mae-at-50     (last mae-at-step)
-     :converged-at  (first (keep-indexed
-                            (fn [i mae] (when (< mae CONVERGENCE_EPSILON) i))
-                            mae-at-step))
-     :pass?         (< (nth (vec mae-at-step) (min (dec n-disputes) (dec CONVERGENCE_N_TARGET)))
-                       CONVERGENCE_EPSILON)}))
+     :converged-at  (first (keep-indexed #(when (< %2 CONVERGENCE_EPSILON) %1) mae-at-step))
+     :pass?         (< mae-at-30 CONVERGENCE_EPSILON)}))
 
 ;; ---------------------------------------------------------------------------
-;; BM-05b: Cold-start gap — lockout observation
+;; BM-05b: Cold-start trial
 ;; ---------------------------------------------------------------------------
 
 (defn cold-start-gap
-  "Number of disputes until EMA score first exceeds MIN_SCORE_THRESHOLD.
-   Returns nil if it never crosses within n-disputes."
+  "Disputes until EMA score first reaches MIN_SCORE_THRESHOLD. nil = never."
   [p-correct alpha-bps initial-score n-disputes d-rng]
-  (let [a    (alpha alpha-bps)
-        traj (simulate-resolver p-correct alpha-bps initial-score n-disputes d-rng)]
-    (first (keep-indexed
-            (fn [i score] (when (>= score MIN_SCORE_THRESHOLD) i))
-            traj))))
+  (first (keep-indexed #(when (>= %2 MIN_SCORE_THRESHOLD) %1)
+                       (simulate-resolver p-correct alpha-bps initial-score n-disputes d-rng))))
 
-(defn run-cold-start-comparison
-  "Compare 0.5 (neutral) vs 1.0 (production) initialization."
-  [p-correct n-sims seed]
-  (let [d-rng     (rng/make-rng seed)
+(defn run-cold-start-trial
+  "Compare init=0.5 vs init=1.0 for one p-correct value.
+   Accepts a param map as produced by build-cold-start-grid."
+  [{:keys [p-correct n-sims seed] :or {n-sims 2000}}]
+  (let [d-rng      (rng/make-rng seed)
         n-disputes 100
-        gaps-half (doall
-                   (for [_ (range n-sims)]
-                     (cold-start-gap p-correct DEFAULT_ALPHA_BPS 0.5 n-disputes d-rng)))
-        gaps-prod (doall
-                   (for [_ (range n-sims)]
-                     (cold-start-gap p-correct DEFAULT_ALPHA_BPS 1.0 n-disputes d-rng)))
-        finite-half (remove nil? gaps-half)
-        finite-prod (remove nil? gaps-prod)
-        median-gap  (fn [coll]
-                      (if (empty? coll)
-                        n-disputes
-                        (let [s (sort coll) n (count s)]
-                          (nth s (int (/ n 2))))))]
-    {:p-correct         p-correct
-     :median-gap-half   (median-gap finite-half)
-     :median-gap-prod   (median-gap finite-prod)
-     :pct-locked-half   (double (/ (count (filter nil? gaps-half)) n-sims))
-     :pct-locked-prod   (double (/ (count (filter nil? gaps-prod)) n-sims))
-     :gap-reduction     (- (median-gap finite-half) (median-gap finite-prod))}))
+        gaps-half  (doall (repeatedly n-sims #(cold-start-gap p-correct DEFAULT_ALPHA_BPS 0.5 n-disputes d-rng)))
+        gaps-prod  (doall (repeatedly n-sims #(cold-start-gap p-correct DEFAULT_ALPHA_BPS 1.0 n-disputes d-rng)))
+        median-gap (fn [coll]
+                     (let [f (remove nil? coll)]
+                       (if (empty? f)
+                         n-disputes
+                         (nth (sort f) (int (/ (count f) 2))))))]
+    {:p-correct       p-correct
+     :median-gap-half (median-gap gaps-half)
+     :median-gap-prod (median-gap gaps-prod)
+     :pct-locked-half (double (/ (count (filter nil? gaps-half)) n-sims))
+     :pct-locked-prod (double (/ (count (filter nil? gaps-prod)) n-sims))
+     :gap-reduction   (- (median-gap gaps-half) (median-gap gaps-prod))}))
 
 ;; ---------------------------------------------------------------------------
-;; Sweep
+;; Parameter grids
 ;; ---------------------------------------------------------------------------
 
-(defn run-convergence-sweep
-  [{:keys [n-sims n-disputes base-seed]
-    :or   {n-sims 2000 n-disputes 50 base-seed 42}}]
-  (let [alpha-vals    [500 1000 2000 3000]
-        p-vals        [0.60 0.70 0.80 0.85 0.90 0.99]
-        initial-vals  [0.5 1.0]]
-    (doall
-     (for [a-bps alpha-vals
-           p     p-vals
-           init  initial-vals
-           :let  [seed (+ base-seed (* a-bps 7) (int (* p 100)) (int (* init 10)))]]
-       (run-convergence-trial p a-bps init n-disputes n-sims seed)))))
+(defn- build-convergence-grid
+  [{:keys [n-sims n-disputes base-seed] :or {n-sims 2000 n-disputes 50 base-seed 42}}]
+  (for [a-bps [500 1000 2000 3000]
+        p     [0.60 0.70 0.80 0.85 0.90 0.99]
+        init  [0.5 1.0]
+        :let  [seed (+ base-seed (* a-bps 7) (int (* p 100)) (int (* init 10)))]]
+    {:alpha-bps a-bps :p-correct p
+     :initial-score init :n-disputes n-disputes :n-sims n-sims :seed seed}))
 
-(defn run-cold-start-sweep
-  [{:keys [n-sims base-seed]
-    :or   {n-sims 2000 base-seed 42}}]
-  (let [p-vals [0.60 0.70 0.80 0.85 0.90]]
-    (doall
-     (for [p p-vals
-           :let [seed (+ base-seed (int (* p 100)))]]
-       (run-cold-start-comparison p n-sims seed)))))
+(defn- build-cold-start-grid
+  [{:keys [n-sims base-seed] :or {n-sims 2000 base-seed 42}}]
+  (map (fn [p]
+         {:p-correct p :n-sims n-sims
+          :seed (+ base-seed (int (* p 100)))})
+       [0.60 0.70 0.80 0.85 0.90]))
 
 ;; ---------------------------------------------------------------------------
-;; Report
+;; Summary
 ;; ---------------------------------------------------------------------------
 
-(defn summarize-convergence [results]
+(defn- summarize-convergence [results]
   (let [protocol-default (filter #(= DEFAULT_ALPHA_BPS (:alpha-bps %)) results)
         pass-default     (count (filter :pass? protocol-default))
         total-default    (count protocol-default)
-        worst            (apply max-key :mae-at-30 protocol-default)
-        ;; Effect of initial score on convergence
-        init-half        (filter #(= 0.5 (:initial-score %)) protocol-default)
-        init-prod        (filter #(= 1.0 (:initial-score %)) protocol-default)
-        avg-mae-half     (if (seq init-half)
-                           (/ (reduce + (map :mae-at-30 init-half)) (count init-half))
-                           0.0)
-        avg-mae-prod     (if (seq init-prod)
-                           (/ (reduce + (map :mae-at-30 init-prod)) (count init-prod))
-                           0.0)]
-    {:total-scenarios    (count results)
-     :protocol-default   {:total total-default :passing pass-default
-                          :hypothesis-holds? (= pass-default total-default)}
-     :worst-case         {:p-correct     (:p-correct worst)
+        worst            (when (seq protocol-default)
+                           (apply max-key :mae-at-30 protocol-default))]
+    {:total-scenarios  (count results)
+     :protocol-default {:total             total-default
+                        :passing           pass-default
+                        :hypothesis-holds? (= pass-default total-default)}
+     :worst-case       (when worst
+                         {:p-correct     (:p-correct worst)
                           :alpha-bps     (:alpha-bps worst)
                           :initial-score (:initial-score worst)
-                          :mae-at-30     (:mae-at-30 worst)}
-     :initial-score-effect {:avg-mae-init-half avg-mae-half
-                             :avg-mae-init-prod avg-mae-prod
-                             :benefit-of-production (- avg-mae-half avg-mae-prod)}}))
+                          :mae-at-30     (:mae-at-30 worst)})}))
+
+;; ---------------------------------------------------------------------------
+;; Entry point
+;; ---------------------------------------------------------------------------
 
 (defn run-phase-ag
+  "BM-05: EMA quality signal convergence sweep."
   ([] (run-phase-ag {}))
   ([params]
-   (println "\n📊 PHASE AG: EMA QUALITY SIGNAL CONVERGENCE (BM-05)")
-   (println "   Hypothesis A: MAE < 5% after 30 disputes at protocol default (α=0.10)")
-   (println "   Hypothesis B: init=0.5 neutral start; init=1.0 production (benefit of doubt)")
-   (println (format "   Protocol default: alpha-bps=%d, threshold=%.2f"
-                    DEFAULT_ALPHA_BPS MIN_SCORE_THRESHOLD))
-   (println "")
+   (engine/print-phase-header
+    {:benchmark-id "BM-05"
+     :label        "EMA Quality Signal Convergence"
+     :hypothesis   (str "MAE < 5% after 30 disputes at α=0.10; "
+                        "init=1.0 avoids cold-start lockout")
+     :details      [(format "Protocol default: alpha-bps=%d, threshold=%.2f"
+                            DEFAULT_ALPHA_BPS MIN_SCORE_THRESHOLD)]})
 
    (println "   Running convergence sweep...")
-   (let [conv-results (run-convergence-sweep params)
-         summary      (summarize-convergence conv-results)]
+   (let [conv-grid    (build-convergence-grid params)
+         conv-results (engine/run-parameter-sweep conv-grid run-convergence-trial)
+         conv-summary (summarize-convergence conv-results)]
 
-   (println (format "   Protocol-default results (alpha=%d, init ∈ {0.5, 1.0}):"
-                    DEFAULT_ALPHA_BPS))
+     (println (format "   Protocol-default results (alpha=%d, init ∈ {0.5, 1.0}):"
+                      DEFAULT_ALPHA_BPS))
      (println "   p-correct  init   MAE@30   converged-at  result")
      (println "   ──────────────────────────────────────────────────")
      (doseq [r (filter #(= DEFAULT_ALPHA_BPS (:alpha-bps %)) conv-results)]
@@ -226,12 +198,16 @@
                         (:p-correct r)
                         (:initial-score r)
                         (:mae-at-30 r)
-                        (if (:converged-at r) (str (:converged-at r) " disputes") "never@50")
+                        (if (:converged-at r)
+                          (str (:converged-at r) " disputes")
+                          "never@50")
                         (if (:pass? r) "✅" "❌"))))
-     (println "")
 
+     (println "")
      (println "   Running cold-start comparison...")
-     (let [cs-results (run-cold-start-sweep params)]
+     (let [cs-grid    (build-cold-start-grid params)
+           cs-results (engine/run-parameter-sweep cs-grid run-cold-start-trial)]
+
        (println "   Assignment gap (disputes until score ≥ 0.50 threshold):")
        (println "   p-correct  gap@init=0.5  gap@init=1.0  reduction  pct-locked@0.5")
        (println "   ──────────────────────────────────────────────────────────────────")
@@ -242,38 +218,41 @@
                           (:median-gap-prod r)
                           (:gap-reduction r)
                           (* 100 (:pct-locked-half r)))))
-       (println "")
 
-       (println "═══════════════════════════════════════════════════")
-       (println "📋 PHASE AG SUMMARY")
-       (println "═══════════════════════════════════════════════════")
-       (let [pd (:protocol-default summary)
+       (let [pd             (:protocol-default conv-summary)
              cs-any-locked? (some #(> (:pct-locked-half %) 0.10) cs-results)
-             cs-prod-clear? (every? #(< (:pct-locked-prod %) 0.01) cs-results)]
-         (println (format "   Convergence (Hypothesis A):"))
-         (println (format "     Protocol-default configs passing: %d / %d"
-                          (:passing pd) (:total pd)))
-         (println (format "     Hypothesis A holds? %s"
-                          (if (:hypothesis-holds? pd)
-                            "✅ YES — EMA converges within 30 disputes"
-                            "❌ NO  — convergence gap; consider higher alpha or smaller epsilon")))
-         (println (format "     Worst case: p=%.2f init=%.1f MAE@30=%.4f"
-                          (get-in summary [:worst-case :p-correct])
-                          (get-in summary [:worst-case :initial-score])
-                          (get-in summary [:worst-case :mae-at-30])))
-         (println "")
-         (println (format "   Initialization Strategy (Hypothesis B):"))
-         (println (format "     init=0.5 neutral lockout rate > 10%%: %s"
-                          (if cs-any-locked? "✅ CONFIRMED" "— not observed")))
-         (println (format "     init=1.0 production lockout rate < 1%%: %s"
-                          (if cs-prod-clear? "✅ CONFIRMED" "❌ still locked")))
-         (println "")
-         (println (format "   Recommendation: Maintain production default initial EMA score at 1.0."))
-         (println (format "   This provides the necessary 'benefit of the doubt' buffer for new resolvers."))
-         (println "")
+             cs-prod-clear? (every? #(< (:pct-locked-prod %) 0.01) cs-results)
+             passed?        (and (:hypothesis-holds? pd) cs-prod-clear?)]
 
-         {:convergence-summary summary
-          :cold-start-results  (vec cs-results)
-          :hypothesis-a-holds? (:hypothesis-holds? pd)
-          :hypothesis-b-holds? (and cs-any-locked? cs-prod-clear?)
-          :recommendation      "Maintain production default initial EMA score at 1.0"})))))
+         (engine/print-phase-footer
+          {:benchmark-id  "BM-05"
+           :passed?       passed?
+           :summary-lines [(format "Convergence (Hypothesis A):")
+                           (format "  Protocol-default configs passing: %d / %d"
+                                   (:passing pd) (:total pd))
+                           (format "  Hypothesis A holds? %s"
+                                   (if (:hypothesis-holds? pd)
+                                     "✅ YES — EMA converges within 30 disputes"
+                                     "❌ NO  — convergence gap; consider higher alpha"))
+                           (when (:worst-case conv-summary)
+                             (format "  Worst: p=%.2f init=%.1f MAE@30=%.4f"
+                                     (get-in conv-summary [:worst-case :p-correct])
+                                     (get-in conv-summary [:worst-case :initial-score])
+                                     (get-in conv-summary [:worst-case :mae-at-30])))
+                           ""
+                           (format "Initialization Strategy (Hypothesis B):")
+                           (format "  init=0.5 lockout > 10%%: %s"
+                                   (if cs-any-locked? "✅ CONFIRMED" "— not observed"))
+                           (format "  init=1.0 lockout < 1%%:  %s"
+                                   (if cs-prod-clear? "✅ CONFIRMED" "❌ still locked"))
+                           (format "  Recommendation: Maintain production default at 1.0")]})
+
+         (engine/make-result
+          {:benchmark-id "BM-05"
+           :label        "EMA Quality Signal Convergence"
+           :hypothesis   (str "MAE < 5% after 30 disputes; init=1.0 avoids cold-start lockout")
+           :passed?      passed?
+           :results      {:convergence conv-results :cold-start cs-results}
+           :summary      {:convergence conv-summary
+                          :cold-start  {:any-locked? cs-any-locked?
+                                        :prod-clear? cs-prod-clear?}}}))))))

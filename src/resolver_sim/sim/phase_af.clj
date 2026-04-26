@@ -21,7 +21,8 @@
 
    Pass threshold: solvency-ratio ≥ 1.0 for all configurations in the
    design envelope (n-resolvers ≤ 20, avg-bond ≥ 500)."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.model.rng :as rng]
+            [resolver-sim.sim.engine :as engine]))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocol constants (mirrors ResolverSlashingModuleV1.sol + ResolverStakingModuleV1.sol)
@@ -54,26 +55,13 @@
   [n-resolvers avg-bond-usd]
   (let [epoch-cap-rate   (/ EPOCH_CAP_BPS 10000.0)
         insurance-rate   (/ INSURANCE_CUT_BPS 10000.0)
-
-        ;; Total slashed across all resolvers in one epoch
         total-slashed    (* n-resolvers avg-bond-usd epoch-cap-rate)
-
-        ;; Insurance receives a cut of incoming slashes
         incoming-to-pool (* total-slashed insurance-rate)
-
-        ;; Worst-case user claims: every resolver has a user claim equal to
-        ;; their capacity limit. Contract: maxEscrow = min($2000, 4× resolverBond).
+        ;; Contract: maxEscrow = min($2000, 4× resolverBond)
         effective-max-escrow (min MAX_ESCROW_PER_CASE (* avg-bond-usd ESCROW_CAP_MULTIPLIER))
-        
-        ;; Net gap per resolver = max(0, effective-max-escrow - avg-bond)
         per-resolver-gap (max 0 (- effective-max-escrow avg-bond-usd))
         total-user-gaps  (* n-resolvers per-resolver-gap)
-
-        ;; Net pool obligation = user gaps - incoming slash cuts
-        ;; (insurance cuts arrive before payouts in happy path, but
-        ;;  in a simultaneous crash we model them as arriving after)
         net-obligation   (max 0 (- total-user-gaps incoming-to-pool))]
-
     {:n-resolvers        n-resolvers
      :avg-bond-usd       avg-bond-usd
      :epoch-cap-rate     epoch-cap-rate
@@ -84,7 +72,7 @@
      :net-obligation     net-obligation}))
 
 (defn solvency-ratio
-  "pool-seed-usd / net-obligation. Infinity when obligation is zero (trivially solvent)."
+  "pool-seed-usd / net-obligation. Infinity when obligation is zero."
   [pool-seed-usd net-obligation]
   (if (zero? net-obligation)
     ##Inf
@@ -96,69 +84,52 @@
 
 (defn simulate-epoch-solvency
   "Simulate one epoch with N resolvers drawn from a lognormal bond distribution.
-
-   Resolvers with bond < MIN_RESOLVER_BOND are excluded (they cannot participate).
-   Each resolver is slashed a random amount up to the epoch cap.
-   Returns {:solvency-ratio float :pool-balance-after float :pass? bool}"
+   Returns {:pool-after float :solvency-ratio float :pass? bool}"
   [{:keys [n-resolvers avg-bond-usd pool-seed-usd min-bond-usd]
     :or   {min-bond-usd 250}} d-rng]
   (let [epoch-cap-rate (/ EPOCH_CAP_BPS 10000.0)
         insurance-rate (/ INSURANCE_CUT_BPS 10000.0)
-
-        ;; Generate resolver bonds from lognormal centred on avg-bond
-        ;; stddev = avg-bond × 0.5 gives reasonable spread
-        ln-mean  (Math/log avg-bond-usd)
-        ln-std   0.5
-        bonds    (for [_ (range n-resolvers)]
-                   (max min-bond-usd
-                        (* avg-bond-usd
-                           (Math/exp (* ln-std (- (rng/next-double d-rng) 0.5) 2)))))
-
-        ;; Slash each resolver a random fraction up to epoch cap
+        bonds (for [_ (range n-resolvers)]
+                (max min-bond-usd
+                     (* avg-bond-usd
+                        (Math/exp (* 0.5 (- (rng/next-double d-rng) 0.5) 2)))))
         slash-events (for [bond bonds]
-                       (let [slash-fraction (* epoch-cap-rate (rng/next-double d-rng))
-                             slashed        (* bond slash-fraction)
-                             ins-cut        (* slashed insurance-rate)
-                             ;; User claim capped at max-escrow, resolver bond covers rest
-                             user-claim     (min MAX_ESCROW_PER_CASE bond)
-                             resolver-gap   (max 0.0 (- user-claim (- bond slashed)))]
-                         {:slashed slashed :ins-cut ins-cut :resolver-gap resolver-gap}))
-
-        total-ins-incoming (reduce + (map :ins-cut slash-events))
-        total-user-gaps    (reduce + (map :resolver-gap slash-events))
-        pool-after         (- (+ pool-seed-usd total-ins-incoming) total-user-gaps)]
-
-    {:pool-before       pool-seed-usd
-     :total-ins-cut     total-ins-incoming
-     :total-user-gaps   total-user-gaps
-     :pool-after        pool-after
-     :solvency-ratio    (solvency-ratio (+ pool-seed-usd total-ins-incoming) total-user-gaps)
-     :pass?             (>= pool-after 0)}))
+                       (let [slashed      (* bond epoch-cap-rate (rng/next-double d-rng))
+                             ins-cut      (* slashed insurance-rate)
+                             user-claim   (min MAX_ESCROW_PER_CASE bond)
+                             resolver-gap (max 0.0 (- user-claim (- bond slashed)))]
+                         {:ins-cut ins-cut :resolver-gap resolver-gap}))
+        pool-after (- (+ pool-seed-usd (reduce + (map :ins-cut slash-events)))
+                      (reduce + (map :resolver-gap slash-events)))]
+    {:pool-after     pool-after
+     :solvency-ratio (solvency-ratio (+ pool-seed-usd (reduce + (map :ins-cut slash-events)))
+                                     (reduce + (map :resolver-gap slash-events)))
+     :pass?          (>= pool-after 0)}))
 
 ;; ---------------------------------------------------------------------------
-;; Scenario: run n-trials for a single (n-resolvers, avg-bond, pool-seed) triple
+;; Trial function (engine interface)
 ;; ---------------------------------------------------------------------------
 
 (defn run-scenario
-  "Run n-trials Monte Carlo for one parameter combination.
-   Returns {:params ... :pass-rate float :worst-pool-after float :pass? bool}"
-  [n-resolvers avg-bond-usd pool-seed-usd n-trials seed]
+  "Run one (n-resolvers × avg-bond × pool-seed) trial: analytical + MC.
+   Accepts a param map as produced by build-param-grid.
+   Returns a result map suitable for engine/run-parameter-sweep."
+  [{:keys [n-resolvers avg-bond-usd pool-seed-usd n-trials seed]
+    :or   {n-trials 500}}]
   (let [d-rng      (rng/make-rng seed)
         analytical (max-epoch-drawdown n-resolvers avg-bond-usd)
-        mc-results (doall
-                    (for [_ (range n-trials)]
-                      (simulate-epoch-solvency
-                       {:n-resolvers  n-resolvers
-                        :avg-bond-usd avg-bond-usd
-                        :pool-seed-usd pool-seed-usd}
-                       d-rng)))
-        pass-count  (count (filter :pass? mc-results))
-        pass-rate   (double (/ pass-count n-trials))
-        worst-pool  (apply min (map :pool-after mc-results))
+        mc-results (doall (repeatedly n-trials
+                            #(simulate-epoch-solvency
+                              {:n-resolvers   n-resolvers
+                               :avg-bond-usd  avg-bond-usd
+                               :pool-seed-usd pool-seed-usd}
+                              d-rng)))
+        pass-rate  (double (/ (count (filter :pass? mc-results)) n-trials))
+        worst-pool (apply min (map :pool-after mc-results))
         analytic-sr (solvency-ratio pool-seed-usd (:net-obligation analytical))]
-    {:params              {:n-resolvers  n-resolvers
-                           :avg-bond-usd avg-bond-usd
-                           :pool-seed-usd pool-seed-usd}
+    {:params             {:n-resolvers   n-resolvers
+                          :avg-bond-usd  avg-bond-usd
+                          :pool-seed-usd pool-seed-usd}
      :analytical-solvency analytic-sr
      :mc-pass-rate        pass-rate
      :worst-pool-after    worst-pool
@@ -169,50 +140,45 @@
                             :else "C")}))
 
 ;; ---------------------------------------------------------------------------
-;; Sweep
+;; Parameter grid
 ;; ---------------------------------------------------------------------------
 
-(defn run-sweep
-  [{:keys [n-trials base-seed]
-    :or   {n-trials 500 base-seed 42}}]
-  (let [resolver-counts [5 10 20 50]
-        avg-bonds       [250 500 1000 2500]
-        pool-seeds      [0 500 1000 5000 10000]]
-    (doall
-     (for [n     resolver-counts
-           bond  avg-bonds
-           pool  pool-seeds
-           :let  [seed (+ base-seed (* n 7) (* bond 3) pool)]]
-       (run-scenario n bond pool n-trials seed)))))
+(defn- build-param-grid
+  [{:keys [n-trials base-seed] :or {n-trials 500 base-seed 42}}]
+  (for [n    [5 10 20 50]
+        bond [250 500 1000 2500]
+        pool [0 500 1000 5000 10000]
+        :let [seed (+ base-seed (* n 7) (* bond 3) pool)]]
+    {:n-resolvers n :avg-bond-usd bond :pool-seed-usd pool
+     :n-trials n-trials :seed seed}))
 
 ;; ---------------------------------------------------------------------------
-;; Report
+;; Summary
 ;; ---------------------------------------------------------------------------
 
-(defn summarize
-  [results]
-  (let [total     (count results)
-        passing   (count (filter :pass? results))
-        class-a   (count (filter #(= "A" (:class %)) results))
-        class-b   (count (filter #(= "B" (:class %)) results))
-        class-c   (count (filter #(= "C" (:class %)) results))
-        ;; Design-envelope: n≤20, bond≥500
-        envelope  (filter #(and (<= (get-in % [:params :n-resolvers]) 20)
-                                (>= (get-in % [:params :avg-bond-usd]) 500))
-                           results)
-        env-pass  (count (filter :pass? envelope))
-        worst     (apply min-key :analytical-solvency results)
-        best      (apply max-key :analytical-solvency results)]
-    {:total-scenarios      total
-     :passing-scenarios    passing
-     :class-a class-a :class-b class-b :class-c class-c
+(defn- summarize [results]
+  (let [total    (count results)
+        passing  (count (filter :pass? results))
+        by-class (frequencies (map :class results))
+        envelope (filter #(and (<= (get-in % [:params :n-resolvers]) 20)
+                               (>= (get-in % [:params :avg-bond-usd]) 500))
+                         results)
+        env-pass (count (filter :pass? envelope))
+        finite   (remove #(= ##Inf (:analytical-solvency %)) results)
+        worst    (when (seq finite) (apply min-key :analytical-solvency finite))
+        best     (when (seq finite) (apply max-key :analytical-solvency finite))]
+    {:total-scenarios       total
+     :passing-scenarios     passing
+     :class-a               (get by-class "A" 0)
+     :class-b               (get by-class "B" 0)
+     :class-c               (get by-class "C" 0)
      :design-envelope-total (count envelope)
      :design-envelope-pass  env-pass
-     :hypothesis-holds?    (= env-pass (count envelope))
-     :worst-solvency-ratio (:analytical-solvency worst)
-     :worst-params         (:params worst)
-     :best-solvency-ratio  (:analytical-solvency best)
-     :best-params          (:params best)}))
+     :hypothesis-holds?     (= env-pass (count envelope))
+     :worst-solvency-ratio  (if worst (:analytical-solvency worst) ##Inf)
+     :worst-params          (when worst (:params worst))
+     :best-solvency-ratio   (if best (:analytical-solvency best) ##Inf)
+     :best-params           (when best (:params best))}))
 
 ;; ---------------------------------------------------------------------------
 ;; Entry point
@@ -228,14 +194,16 @@
    (n-resolvers ≤ 20, avg-bond ≥ $500)."
   ([] (run-phase-af {}))
   ([params]
-   (println "\n📊 PHASE AF: SLASHING EPOCH SOLVENCY (BM-04)")
-   (println "   Hypothesis: insurance pool solvent after worst-case epoch")
-   (println (format "   Constants: epoch-cap=%d bps, insurance-cut=%d bps, max-escrow=$%d"
-                    EPOCH_CAP_BPS INSURANCE_CUT_BPS MAX_ESCROW_PER_CASE))
-   (println "")
+   (engine/print-phase-header
+    {:benchmark-id "BM-04"
+     :label        "Slashing Epoch Solvency"
+     :hypothesis   "Insurance pool solvency-ratio ≥ 1.0 for all design-envelope configs"
+     :details      [(format "Constants: epoch-cap=%d bps, insurance-cut=%d bps, max-escrow=$%d"
+                            EPOCH_CAP_BPS INSURANCE_CUT_BPS MAX_ESCROW_PER_CASE)]})
 
-   (let [results  (run-sweep params)
-         summary  (summarize results)]
+   (let [grid    (build-param-grid params)
+         results (engine/run-parameter-sweep grid run-scenario)
+         summary (summarize results)]
 
      (println "   Sample results (n-resolvers=10, avg-bond=$500):")
      (doseq [r (filter #(and (= 10 (get-in % [:params :n-resolvers]))
@@ -247,28 +215,30 @@
                         (* 100 (:mc-pass-rate r))
                         (case (:class r) "A" "✅ A" "B" "✅ B" "❌ C"))))
 
-     (println "")
-     (println "═══════════════════════════════════════════════════")
-     (println "📋 PHASE AF SUMMARY")
-     (println "═══════════════════════════════════════════════════")
-     (println (format "   Total configs:    %d" (:total-scenarios summary)))
-     (println (format "   Passing (A+B):    %d  (%.0f%%)"
-                      (:passing-scenarios summary)
-                      (* 100.0 (/ (:passing-scenarios summary) (:total-scenarios summary)))))
-     (println (format "   Class A:  %d   Class B: %d   Class C: %d"
-                      (:class-a summary) (:class-b summary) (:class-c summary)))
-     (println (format "   Design-envelope (%d configs, n≤20 bond≥$500):"
-                      (:design-envelope-total summary)))
-     (println (format "     Passing: %d / %d"
-                      (:design-envelope-pass summary)
-                      (:design-envelope-total summary)))
-     (println (format "   Worst solvency ratio: %.2fx  params: %s"
-                      (:worst-solvency-ratio summary)
-                      (:worst-params summary)))
-     (println (format "   Hypothesis holds? %s"
-                      (if (:hypothesis-holds? summary)
-                        "✅ YES — pool solvent in design envelope"
-                        "❌ NO  — solvency gap found; increase pool-seed or tighten caps")))
-     (println "")
+     (engine/print-phase-footer
+      {:benchmark-id  "BM-04"
+       :passed?       (:hypothesis-holds? summary)
+       :summary-lines [(format "Total configs:    %d" (:total-scenarios summary))
+                       (format "Passing (A+B):    %d  (%.0f%%)"
+                               (:passing-scenarios summary)
+                               (* 100.0 (/ (:passing-scenarios summary)
+                                           (:total-scenarios summary))))
+                       (format "Class A:  %d   Class B: %d   Class C: %d"
+                               (:class-a summary) (:class-b summary) (:class-c summary))
+                       (format "Design-envelope (%d configs, n≤20 bond≥$500):"
+                               (:design-envelope-total summary))
+                       (format "  Passing: %d / %d"
+                               (:design-envelope-pass summary)
+                               (:design-envelope-total summary))
+                       (when (:worst-params summary)
+                         (format "Worst solvency ratio: %.2fx  params: %s"
+                                 (:worst-solvency-ratio summary)
+                                 (:worst-params summary)))]})
 
-     (assoc summary :results (vec results)))))
+     (engine/make-result
+      {:benchmark-id "BM-04"
+       :label        "Slashing Epoch Solvency"
+       :hypothesis   "Insurance pool solvency-ratio ≥ 1.0 for all design-envelope configs"
+       :passed?      (:hypothesis-holds? summary)
+       :results      results
+       :summary      summary}))))

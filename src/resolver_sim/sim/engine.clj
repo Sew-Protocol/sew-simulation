@@ -1,29 +1,130 @@
 (ns resolver-sim.sim.engine
   "Unified simulation engine for Phase-series experiments.
-   Consumes declarative scenario definitions and handles the simulation loop,
-   result aggregation, and reporting."
+
+   Provides three building blocks used by every phase:
+
+     make-result        — canonical benchmark result map (6 guaranteed keys)
+     run-parameter-sweep — iterate a trial-fn over a seq of param maps
+     print-phase-header  — standard phase header to stdout
+     print-phase-footer  — standard pass/fail summary footer to stdout
+
+   Multi-epoch loop:
+
+     run-epoch-simulation — drive an epoch-state simulation to completion
+     run-sweep            — run multiple epoch simulations under a common label"
   (:require [resolver-sim.model.rng :as rng]
-            [resolver-sim.io.results :as results]
-            [clojure.java.io :as io]))
+            [resolver-sim.io.results :as results]))
+
+;; ---------------------------------------------------------------------------
+;; Standard result schema
+;; ---------------------------------------------------------------------------
+
+(defn make-result
+  "Construct a canonical benchmark result map.
+
+   Every phase entry point should return exactly this shape so that consumers
+   can treat results from different phases uniformly.
+
+   Required keys:
+     :benchmark-id — string, e.g. \"BM-04\"
+     :label        — human-readable phase name
+     :hypothesis   — string stating what the phase tests
+     :passed?      — boolean
+
+   Optional keys (defaulted if absent):
+     :status   — \"PASS\" | \"FAIL\" | \"PARTIAL\" (derived from :passed? if omitted)
+     :results  — seq of per-trial result maps (default [])
+     :summary  — aggregated stats map (default {})"
+  [{:keys [benchmark-id label hypothesis passed? status results summary]}]
+  {:benchmark-id  benchmark-id
+   :label         label
+   :hypothesis    hypothesis
+   :passed?       (boolean passed?)
+   :status        (or status (if passed? "PASS" "FAIL"))
+   :results       (or results [])
+   :summary       (or summary {})})
+
+;; ---------------------------------------------------------------------------
+;; Parameter sweep runner
+;; ---------------------------------------------------------------------------
+
+(defn run-parameter-sweep
+  "Execute trial-fn over a sequence of parameter maps and return the results.
+
+   param-grid  — seq of maps; each is passed directly to trial-fn.
+                 Include a :seed key in each map for reproducibility.
+   trial-fn    — (fn [param-map]) -> result-map
+
+   The trial-fn is responsible for including any identifying fields (e.g.
+   :params, :p-correct) in its return map.  The engine does not add them.
+
+   Returns a vec of result-maps in the same order as param-grid."
+  [param-grid trial-fn]
+  (mapv trial-fn param-grid))
+
+;; ---------------------------------------------------------------------------
+;; Standard printing utilities
+;; ---------------------------------------------------------------------------
+
+(def ^:private RULE "═══════════════════════════════════════════════════")
+
+(defn print-phase-header
+  "Print a standard phase header to stdout.
+
+   m keys:
+     :benchmark-id — \"BM-04\"
+     :label        — \"Slashing Epoch Solvency\"
+     :hypothesis   — one-line statement of what is being tested
+     :details      — optional seq of additional detail strings"
+  [{:keys [benchmark-id label hypothesis details]}]
+  (println (format "\n📊 %s: %s" benchmark-id label))
+  (println (format "   Hypothesis: %s" hypothesis))
+  (doseq [line (or details [])]
+    (println (format "   %s" line)))
+  (println ""))
+
+(defn print-phase-footer
+  "Print a standard pass/fail summary footer to stdout.
+
+   m keys:
+     :benchmark-id   — \"BM-04\"
+     :passed?        — bool
+     :summary-lines  — seq of strings printed before the pass/fail line"
+  [{:keys [benchmark-id passed? summary-lines]}]
+  (println "")
+  (println RULE)
+  (println (format "📋 %s SUMMARY" benchmark-id))
+  (println RULE)
+  (doseq [line (or summary-lines [])]
+    (println (format "   %s" line)))
+  (println (format "   Hypothesis holds? %s"
+                   (if passed?
+                     "✅ YES"
+                     "❌ NO")))
+  (println ""))
+
+;; ---------------------------------------------------------------------------
+;; Multi-epoch loop (unchanged)
+;; ---------------------------------------------------------------------------
 
 (defn run-epoch-simulation
   "Run a multi-epoch simulation based on a scenario definition.
-   
+
    Scenario keys:
-     :label        — Display name
-     :initial-state — Starting map
-     :update-fn    — (fn [epoch state params rng]) -> new-state
-     :epochs       — Number of epochs to run
-     :seed         — RNG seed
-     :params       — Static parameters for the update-fn
-     :summary-fn   — (fn [history params]) -> result-summary-map
+     :label          — Display name
+     :initial-state  — Starting map
+     :update-fn      — (fn [epoch state params rng]) -> new-state
+     :epochs         — Number of epochs to run
+     :seed           — RNG seed
+     :params         — Static parameters for the update-fn
+     :summary-fn     — (fn [history params]) -> result-summary-map
      :persist-trace? — If true, save trial traces to results/ directory"
-  [{:keys [label initial-state update-fn epochs seed params summary-fn persist-trace?] :as scenario}]
+  [{:keys [label initial-state update-fn epochs seed params summary-fn persist-trace?]}]
   (println (format "📋 %s" label))
-  (let [d-rng (rng/make-rng seed)
+  (let [d-rng   (rng/make-rng seed)
         res-dir (format "results/%s" (java.time.LocalDateTime/now))]
-    (loop [epoch 1
-           state initial-state
+    (loop [epoch   1
+           state   initial-state
            history []]
       (if (> epoch epochs)
         (let [summary (summary-fn history params)]
@@ -37,9 +138,8 @@
                  (conj history (assoc new-state :epoch epoch))))))))
 
 (defn run-sweep
-  "Run a sweep of multiple scenarios."
+  "Run a sweep of multiple epoch simulations under a common label."
   [sweep-label scenarios common-params]
   (println (format "\n📊 %s" sweep-label))
-  (let [results (mapv #(run-epoch-simulation (merge % {:params (merge common-params (:params %))})) 
-                      scenarios)]
-    results))
+  (mapv #(run-epoch-simulation (merge % {:params (merge common-params (:params %))}))
+        scenarios))
