@@ -16,6 +16,9 @@
             [resolver-sim.sim.phase-ab :as phase-ab]
             [resolver-sim.sim.phase-ac :as phase-ac]
             [resolver-sim.sim.phase-ad :as phase-ad]
+            [resolver-sim.sim.phase-ae :as phase-ae]
+            [resolver-sim.sim.phase-af :as phase-af]
+            [resolver-sim.sim.phase-ag :as phase-ag]
             [resolver-sim.sim.phase-t          :as phase-t]
             [resolver-sim.sim.phase-p-revised  :as phase-p-revised]
             [resolver-sim.sim.phase-q          :as phase-q]
@@ -51,6 +54,9 @@
    ["-F" "--phase-ad-sweep" "Run Phase AD threshold search: min viable governance floor config"]
    ["-G" "--phase-ac-cap"  "Run Phase AC capacity expansion: validate the 10× capacity rule"]
    ["-H" "--phase-t"            "Run Phase T: governance capture via rule drift"]
+   ["-Q" "--phase-ae" "Run Phase AE: fair-slashing — capital preservation under false-positive slash"]
+   ["-R" "--phase-af" "Run Phase AF: slashing epoch solvency (BM-04) — insurance pool worst-case"]
+   ["-T" "--phase-ag" "Run Phase AG: EMA convergence (BM-05) — quality signal and cold-start gap"]
    ["-I" "--phase-p-revised"   "Run Phase P Revised: sequential appeal falsification"]
    ["-J" "--phase-q"           "Run Phase Q: advanced vulnerability (bribery, evidence spoofing, correlated failures)"]
    ["-K" "--phase-r"           "Run Phase R: liveness & participation failure"]
@@ -360,6 +366,9 @@
                      (fn [p _] (phase-ac/run-phase-ac-sweep p))]
    :phase-ad        ["\n🏛️  Running Phase AD: Governance Bandwidth Floor"
                      (fn [p _] (phase-ad/run-phase-ad-sweep p))]
+   :phase-ae        [nil (fn [p _] (phase-ae/run-phase-ae p))]
+   :phase-af        [nil (fn [p _] (phase-af/run-phase-af p))]
+   :phase-ag        [nil (fn [p _] (phase-ag/run-phase-ag p))]
    :phase-ac-sweep  ["\n🔬 Running Phase AC Threshold Search"
                      (fn [p _] (phase-ac/run-phase-ac-threshold-sweep p))]
    :phase-ad-sweep  ["\n🔬 Running Phase AD Threshold Search"
@@ -398,12 +407,17 @@
         (System/exit (invariant/run-and-report))
 
         (if (:serve options)
-          (let [port (:port options)]
-            (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable grpc/stop!))
-            (grpc/start! port)
-            (println "[grpc] Press Ctrl+C to stop.")
-            (grpc/await-termination)
-            (System/exit 0))
+          (try
+            (let [port (:port options)]
+              (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable grpc/stop!))
+              (grpc/start! port)
+              (println "[grpc] Press Ctrl+C to stop.")
+              (grpc/await-termination)
+              (System/exit 0))
+            (catch Throwable e
+              (println "Error in server:" (.getMessage e))
+              (.printStackTrace e)
+              (System/exit 1)))
 
           (try
             (println "Loading params from:" (:params options))
