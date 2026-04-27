@@ -52,6 +52,7 @@
         amt   (:amount-after-fee et)]
     (-> world
         (acct/sub-held token amt)
+        (acct/record-released token amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :released))))
 
@@ -63,6 +64,7 @@
         amt   (:amount-after-fee et)]
     (-> world
         (acct/sub-held token amt)
+        (acct/record-refunded token amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :refunded))))
 
@@ -149,6 +151,7 @@
                               :to                to
                               :from              caller
                               :amount-after-fee  afa
+                              :initial-fee       fee
                               :dispute-resolver  resolver
                               :auto-release-time auto-rel
                               :auto-cancel-time  auto-can

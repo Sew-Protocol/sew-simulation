@@ -503,25 +503,17 @@
 
 (defn fee-cap-holds?
   "True when (total-fees-for-escrow) <= (original-amount) for all workflows.
-   
-   Original amount is inferred from (amount-after-fee + initial-fee).
-   Appeal bonds are added to the fee total."
+
+   Uses the :initial-fee stored at escrow creation rather than reconstructing
+   it from bps, which avoids integer-truncation false positives at large BPS values."
   [world]
   (let [violations
         (for [[wf et] (:escrow-transfers world)
-              :let [afa    (:amount-after-fee et)
-                    snap   (t/get-snapshot world wf)
-                    bps    (get snap :escrow-fee-bps 0)
-                    ;; Reconstruct the fee from the AFA and bps
-                    ;; fee = floor(original * bps / 10000)
-                    ;; original = afa + fee
-                    ;; afa = original * (1 - bps/10000)
-                    ;; original = afa / (1 - bps/10000)
-                    fee (if (>= bps 10000) 0 (quot (* afa bps) (- 10000 bps)))
-                    original (+ afa fee)
-                    ;; appeal-fees = sum of all bonds currently held for this wf
+              :let [afa         (:amount-after-fee et)
+                    fee         (:initial-fee et 0)
+                    original    (+ afa fee)
                     appeal-fees (reduce + 0 (vals (get (:bond-balances world) wf {})))
-                    total-fees (+ fee appeal-fees)]
+                    total-fees  (+ fee appeal-fees)]
               :when (> total-fees original)]
           {:workflow-id wf :total-fees total-fees :original original})]
     {:holds?     (empty? violations)
@@ -563,6 +555,84 @@
          :violations (vec violations)}))))
 
 ;; ---------------------------------------------------------------------------
+;; Invariant 21: Conservation of Funds
+;;
+;; Total system funds = (Sum of all held amounts) + (Sum of all released) +
+;;                      (Sum of all refunded) + (Sum of all pending-fees)
+;; must reconcile to the total initial deposits.
+;; ---------------------------------------------------------------------------
+
+(defn conservation-of-funds?
+  "True when, for every token, total-held + total-released + total-refunded equals
+   the sum of amount-after-fee across all escrows for that token.
+
+   This is an exact equality: every AFA ever deposited must be accounted for as
+   either still held, released to the recipient, or refunded to the sender."
+  [world]
+  (let [all-tokens (-> #{}
+                       (into (keys (:total-held world)))
+                       (into (keys (:total-released world)))
+                       (into (keys (:total-refunded world)))
+                       (into (map :token (vals (:escrow-transfers world)))))
+        violations
+        (for [token all-tokens
+              :let [deposited (reduce (fn [acc [_ et]]
+                                        (if (= (:token et) token)
+                                          (+ acc (:amount-after-fee et))
+                                          acc))
+                                      0
+                                      (:escrow-transfers world))
+                    held      (get (:total-held world) token 0)
+                    released  (get (:total-released world) token 0)
+                    refunded  (get (:total-refunded world) token 0)
+                    accounted (+ held released refunded)]
+              :when (not= accounted deposited)]
+          {:token token :held held :released released :refunded refunded
+           :accounted accounted :deposited deposited})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
+;; Invariant 22: Token Tax Reconciliation
+;;
+;; Ensure the protocol accounts for balance loss when handling Fee-on-Transfer (FoT) tokens.
+;; If a token has a tax, the received amount is less than the sent amount.
+;; ---------------------------------------------------------------------------
+
+(defn token-tax-reconciliation?
+  "True when no token's held balance drops by more than is accounted for by
+   simultaneous releases and refunds.
+
+   An unexplained drop (delta-held + delta-released + delta-refunded < 0) indicates
+   a Fee-on-Transfer token is leaking value without the protocol accounting for it.
+   Legitimate releases/refunds always pair sub-held with record-released/record-refunded,
+   so their contribution exactly offsets the held decrease."
+  [world-before world-after]
+  (let [all-tokens (into #{} (concat (keys (:total-held world-before))
+                                     (keys (:total-held world-after))))
+        violations
+        (for [token all-tokens
+              :let [held-before     (get (:total-held world-before) token 0)
+                    held-after      (get (:total-held world-after) token 0)
+                    released-before (get (:total-released world-before) token 0)
+                    released-after  (get (:total-released world-after) token 0)
+                    refunded-before (get (:total-refunded world-before) token 0)
+                    refunded-after  (get (:total-refunded world-after) token 0)
+                    delta-held      (- held-after held-before)
+                    delta-released  (- released-after released-before)
+                    delta-refunded  (- refunded-after refunded-before)
+                    ;; Positive = funds left the protocol without being accounted for
+                    unexplained-leak (- (- delta-held) delta-released delta-refunded)]
+              :when (pos? unexplained-leak)]
+          {:token token
+           :delta-held delta-held
+           :delta-released delta-released
+           :delta-refunded delta-refunded
+           :unexplained-leak unexplained-leak})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
 ;; Composite: check all world-level invariants
 ;; ---------------------------------------------------------------------------
 
@@ -584,10 +654,14 @@
                   :appeal-bond-conserved         (appeal-bond-conserved? world)
                   :no-auto-fraud-execute         (no-auto-fraud-execute? world)
                   :bond-liquidity                (bond-liquidity-holds? world)
-                  :fee-cap                       (fee-cap-holds? world)}
+                  :bond-slash-bounded            (bond-slash-bounded? world)
+                  :fee-cap                       (fee-cap-holds? world)
+                  :no-stale-automatable-escrows  (no-stale-automatable-escrows? world)
+                  :conservation-of-funds         (conservation-of-funds? world)}
          all?    (every? #(:holds? %) (vals results))]
      {:all-hold? all?
       :results   results})))
+
 
 (defn check-transition
   "Run all cross-world invariants that require comparing world-before to world-after.
@@ -604,7 +678,9 @@
                  :no-withdrawal-during-dispute
                  (no-withdrawal-during-dispute? world-before world-after)
                  :time-lock-integrity
-                 (time-lock-integrity? world-before world-after)}
+                 (time-lock-integrity? world-before world-after)
+                 :token-tax-reconciliation
+                 (token-tax-reconciliation? world-before world-after)}
         all?    (every? #(:holds? %) (vals results))]
     {:all-hold? all?
      :results   results}))

@@ -25,6 +25,7 @@
         amt   (:amount-after-fee et)]
     (-> world
         (acct/sub-held token amt)
+        (acct/record-released token amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :released))))
 
@@ -34,6 +35,7 @@
         amt   (:amount-after-fee et)]
     (-> world
         (acct/sub-held token amt)
+        (acct/record-refunded token amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :refunded))))
 
@@ -341,7 +343,8 @@
             token (:token et)
             amt   (:amount-after-fee et)
             w'    (-> world
-                      (update-in [:total-held token] (fnil - 0) amt)
+                      (acct/sub-held token amt)
+                      (acct/record-released token amt)
                       (update :pending-settlements dissoc workflow-id)
                       (sm/apply-transition! workflow-id :released))]
         (assoc (t/ok w') :action :auto-release))
@@ -352,27 +355,14 @@
             token (:token et)
             amt   (:amount-after-fee et)
             w'    (-> world
-                      (update-in [:total-held token] (fnil - 0) amt)
+                      (acct/sub-held token amt)
+                      (acct/record-refunded token amt)
                       (update :pending-settlements dissoc workflow-id)
                       (sm/apply-transition! workflow-id :refunded))]
         (assoc (t/ok w') :action :auto-cancel))
 
       :else
       (assoc (t/ok world) :action :none))))
-
-;; ---------------------------------------------------------------------------
-;; cancel-pending-on-escalation
-;;
-;; Internal building block: _validateAndPrepareEscalation deletes
-;; pendingSettlements[workflowId] before escalation proceeds.
-;; ---------------------------------------------------------------------------
-
-(defn cancel-pending-on-escalation
-  "Cancel pending-settlement when a dispute is being escalated.
-   Called as a side-effect of escalation before the new level is set.
-   Returns the updated world (not a result map)."
-  [world workflow-id]
-  (update world :pending-settlements dissoc workflow-id))
 
 ;; ---------------------------------------------------------------------------
 ;; escalate-dispute
@@ -460,21 +450,24 @@
 
 (defn appeal-slash
   "Resolver appeals a PENDING manual slash (Phase M).
+   slash-id defaults to workflow-id; pass the string slash-id for reversal slashes
+   (e.g. \"0-reversal\").
    Mirrors: ResolverSlashingModuleV1.appealSlash"
-  [world workflow-id caller]
-  (let [pending (get-in world [:pending-fraud-slashes workflow-id])]
-    (cond
-      (nil? pending)
-      (t/fail :no-pending-slash)
+  ([world workflow-id caller] (appeal-slash world workflow-id caller workflow-id))
+  ([world workflow-id caller slash-id]
+   (let [pending (get-in world [:pending-fraud-slashes slash-id])]
+     (cond
+       (nil? pending)
+       (t/fail :no-pending-slash)
 
-      (not= :pending (:status pending))
-      (t/fail :slash-not-pending)
+       (not= :pending (:status pending))
+       (t/fail :slash-not-pending)
 
-      (not= caller (:resolver pending))
-      (t/fail :not-resolver)
+       (not= caller (:resolver pending))
+       (t/fail :not-resolver)
 
-      :else
-      (t/ok (assoc-in world [:pending-fraud-slashes workflow-id :status] :appealed)))))
+       :else
+       (t/ok (assoc-in world [:pending-fraud-slashes slash-id :status] :appealed))))))
 
 (defn propose-fraud-slash
   "Governance (TIMELOCK) proposes a manual fraud slash for a resolver (Phase M).
@@ -486,10 +479,13 @@
     (let [snap (t/get-snapshot world workflow-id)
           gov-delay (or (:appeal-window-duration snap) 259200)] ; 3 days default
       (t/ok (assoc-in world [:pending-fraud-slashes workflow-id]
-                      {:resolver resolver-addr
-                       :amount   amount
-                       :status   :pending
-                       :appeal-deadline (+ (:block-time world) gov-delay)})))))
+                      {:resolver         resolver-addr
+                       :amount           amount
+                       :status           :pending
+                       :proposed-at      (:block-time world)
+                       :appeal-deadline  (+ (:block-time world) gov-delay)
+                       :appeal-bond-held 0
+                       :contest-deadline 0})))))
 
 (defn resolve-appeal
   "Governance (TIMELOCK) resolves a slashing appeal.
@@ -512,31 +508,34 @@
 
 (defn execute-fraud-slash
   "Execute a previously proposed fraud slash after the timelock/appeal window.
+   slash-id defaults to workflow-id; pass the string slash-id for reversal slashes
+   (e.g. \"0-reversal\").
    Mirrors: ResolverSlashingModuleV1.executeSlash"
-  [world workflow-id]
-  (let [pending (get-in world [:pending-fraud-slashes workflow-id])]
-    (cond
-      (nil? pending)
-      (t/fail :no-pending-slash)
+  ([world workflow-id] (execute-fraud-slash world workflow-id workflow-id))
+  ([world workflow-id slash-id]
+   (let [pending (get-in world [:pending-fraud-slashes slash-id])]
+     (cond
+       (nil? pending)
+       (t/fail :no-pending-slash)
 
-      (not= :pending (:status pending))
-      (t/fail (case (:status pending)
-                :appealed :appeal-in-progress
-                :reversed :slash-already-reversed
-                :executed :already-executed
-                :unknown-status))
+       (not= :pending (:status pending))
+       (t/fail (case (:status pending)
+                 :appealed :appeal-in-progress
+                 :reversed :slash-already-reversed
+                 :executed :already-executed
+                 :unknown-status))
 
-      (< (:block-time world) (:appeal-deadline pending))
-      (t/fail :timelock-not-expired)
+       (< (:block-time world) (:appeal-deadline pending))
+       (t/fail :timelock-not-expired)
 
-      :else
-      (let [resolver (:resolver pending)
-            amount   (:amount pending)
-            world'   (-> world
-                         (assoc-in [:pending-fraud-slashes workflow-id :status] :executed)
-                         (reg/slash-resolver-stake resolver amount)
-                         :world)]
-        (t/ok world')))))
+       :else
+       (let [resolver (:resolver pending)
+             amount   (:amount pending)
+             world'   (-> world
+                          (assoc-in [:pending-fraud-slashes slash-id :status] :executed)
+                          (reg/slash-resolver-stake resolver amount)
+                          :world)]
+         (t/ok world'))))))
 
 ;; ---------------------------------------------------------------------------
 ;; rotate-dispute-resolver

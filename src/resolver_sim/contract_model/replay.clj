@@ -46,7 +46,7 @@
             [resolver-sim.contract-model.resolution    :as res]
             [resolver-sim.contract-model.registry      :as reg]
             [resolver-sim.contract-model.authority     :as auth]
-            [resolver-sim.io.trace-metadata            :as meta]
+            [resolver-sim.contract-model.trace-metadata            :as meta]
 
             [resolver-sim.contract-model.invariants :as inv]))
 
@@ -416,7 +416,9 @@
   (let [ar (resolve-address agent-index (:agent event))]
     (if-not (:ok ar)
       ar
-      (res/appeal-slash world (get-in event [:params :workflow-id]) (:address ar)))))
+      (let [p (:params event)]
+        (res/appeal-slash world (:workflow-id p) (:address ar)
+                          (or (:slash-id p) (:workflow-id p)))))))
 
 (defmethod apply-action "resolve_appeal"
   [{:keys [agent-index]} world event]
@@ -428,7 +430,9 @@
 
 (defmethod apply-action "execute_fraud_slash"
   [_ctx world event]
-  (res/execute-fraud-slash world (get-in event [:params :workflow-id])))
+  (let [p (:params event)]
+    (res/execute-fraud-slash world (:workflow-id p)
+                             (or (:slash-id p) (:workflow-id p)))))
 
 (defmethod apply-action "advance_time"
   [_ctx world _event]

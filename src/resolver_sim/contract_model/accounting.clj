@@ -62,6 +62,24 @@
 ;; The recipient calls withdrawEscrow() to claim it later.
 ;; ---------------------------------------------------------------------------
 
+(defn record-released
+  "Track amount released to recipient. Called alongside sub-held on finalize-release."
+  [world token amount]
+  (update-in world [:total-released token] (fnil + 0) amount))
+
+(defn record-refunded
+  "Track amount refunded to sender. Called alongside sub-held on finalize-refund."
+  [world token amount]
+  (update-in world [:total-refunded token] (fnil + 0) amount))
+
+;; ---------------------------------------------------------------------------
+;; Claimable balances (push-transfer fallback)
+;;
+;; When a direct token transfer fails (e.g. recipient is a non-receiving contract),
+;; the amount is recorded in claimableBalances[workflowId][addr].
+;; The recipient calls withdrawEscrow() to claim it later.
+;; ---------------------------------------------------------------------------
+
 (defn record-claimable
   "Record amount as claimable by addr for workflow-id.
    Mirrors: claimableBalances[workflowId][recipient] += amount"

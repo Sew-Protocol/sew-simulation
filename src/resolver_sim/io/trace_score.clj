@@ -35,7 +35,7 @@
      :cascade         — disputes-triggered > 1
      :abnormal-slash  — invariant-violations > 0 AND slashing-related violation"
   (:require [resolver-sim.contract-model.diff :as diff]
-            [resolver-sim.io.trace-metadata   :as meta]))
+            [resolver-sim.contract-model.trace-metadata   :as meta]))
 
 ;; ---------------------------------------------------------------------------
 ;; Liveness check

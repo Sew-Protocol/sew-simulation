@@ -1,68 +1,93 @@
-# SEW Dispute Resolution Simulator
+# SEW Protocol Validation Suite
 
-> Adversarial security testing for Ethereum escrow and dispute-resolution protocols.
+Deterministic validation and adversarial testing for escrow and dispute resolution protocols.
 
-## What is this?
-A specialized adversarial simulator for **SEW Protocol** protected transfers and decentralized dispute resolution. It models multi-actor, time-ordered failure modes that emerge from the interaction of valid transactions—failures that static analysis and unit tests cannot detect.
+## What this is
 
-## Why it exists?
-To verify whether SEW behaves as a **robust game** before real-world deployment. Protocols that move funds through escrow rely on the structural integrity of their resolution logic; this simulator tests that integrity under extreme stress.
+This is a validation framework for the SEW Protocol, designed to test whether its dispute resolution system remains reliable under real-world conditions.
+
+It models how multiple actors interact over time — including adversarial behaviour — and verifies that the protocol maintains correctness, safety, and liveness.
+
+## Why it exists
+
+Most smart contract testing answers:
+
+“Does this function work?”
+
+This system answers:
+
+“Does the protocol still work when participants behave strategically or adversarially over time?”
+
+For escrow and dispute resolution systems, failures don’t come from invalid code —
+they come from valid actions interacting in unexpected sequences.
 
 ## What it verifies
-*   **State-Machine Correctness**: Every transition is checked against a formal model of the protocol.
-*   **Accounting Reconciliation**: Atomic balance updates are enforced for every state change.
-*   **Adversarial Liveness**: Detects conditions where funds become permanently locked due to rational agent withdrawal or capacity exhaustion.
-*   **Trace Replay & EVM Equivalence**: Execution traces can be replayed step-by-step against Solidity contracts to detect model–EVM divergence. Coverage is expanding toward full scenario parity.
 
----
+- **State Machine Correctness**: Every transition is validated against the protocol model.
+- **Invariant Enforcement**: Critical properties (e.g. bond liquidity, withdrawal safety, fee caps, time-locks) are continuously checked.
+- **Accounting Integrity**: Funds are conserved and reconciled across all transitions.
+- **Adversarial Liveness**: Detects conditions where funds can become stuck due to rational or malicious behaviour.
+- **Deterministic Replay**: All scenarios are reproducible and can be replayed step-by-step.
+- **Model ↔ EVM Equivalence (ongoing)**: Execution traces are validated against Solidity implementations.
 
-## 🔬 The Phase Z Discovery
-During a baseline sweep, the simulator identified a critical **liquidity leak** in the automated timeout logic. The system transitioned to a terminal state but failed to reconcile the underlying protocol balances.
+## Key Features
 
-We have published the standardized traces for this discovery to demonstrate the simulator's diagnostic power:
-1.  **[Known Failure Trace](examples/cdrs/phase-z-known-failure.trace.json)**: Reproduces the multi-escrow liquidity leak.
-2.  **[Fixed Regression Trace](examples/cdrs/phase-z-fixed-regression.trace.json)**: Verifies the fix via the **Reconciliation Mandate**.
+- **Deterministic Fixture System**: Composable scenario suites for regression testing and protocol exploration.
+- **Golden Snapshotting**: Detects behavioural drift across protocol changes.
+- **Invariant-Driven Testing**: Failures are defined by violated guarantees, not just incorrect outputs.
 
----
+## Example: Phase Z Discovery
 
-## 🌐 CDRS v0.1
-This project includes an early reference implementation of the [Common Dispute Resolution Standard (CDRS) v0.1](spec/cdrs-v0.1.md)
+The system identified a critical liquidity reconciliation failure in timeout handling:
 
----
+- Protocol reached a terminal state
+- Underlying balances were not fully reconciled
+- Result: hidden loss of funds across multiple escrows
+
+This was reproduced and fixed using deterministic traces:
+
+- Known failure: `examples/cdrs/phase-z-known-failure.trace.json`
+- Verified fix: `examples/cdrs/phase-z-fixed-regression.trace.json`
 
 ## Current Status
-*   **Strong**: Transition correctness, 13 core protocol invariants, and Trace Equivalence (Clojure ↔ EVM) are verified and passing.
-*   **Ongoing**: Multi-agent equilibrium modeling, parameter sensitivity sweeps, and standard generalization.
 
----
+- ✅ Core invariant suite passing
+- ✅ Fixture-based scenario system operational
+- ✅ Golden snapshot regression framework active
+- ✅ Python ↔ gRPC integration validated
+
+## In progress
+
+- Multi-agent adversarial dynamics
+- Parameter sensitivity and equilibrium analysis
+- Expanded EVM trace equivalence
 
 ## Quick Start
 
-### 1. Run the Adversarial Suite
-Requires the gRPC state machine server:
+### Run validation suite
 ```bash
-# Start the server
+# Start simulation engine
 clojure -M:run -- -S --port 7070 &
 
-# Run scenarios
-cd python && python invariant_suite.py
+# Run fixture suites
+cd python
+python invariant_suite.py
 ```
 
-### 2. Verify Trace Equivalence
-Verify model traces against live Solidity:
+### Verify Solidity equivalence
 ```bash
-# From the sew-protocol repository
+# From sew-protocol repo
 forge test --match-test test_trace_equivalence
 ```
 
----
+## Documentation
+- `fixtures/README.md` — fixture composition and schema
+- `docs/testing/` — validation coverage and status
+- `docs/scenarios.md` — scenario index and protocol properties
 
-## 🔍 Evidence & Scenarios
+## Positioning
 
-| Scenario | Status | CDRS Trace |
-|----------|--------|----------------|
-| **F3 — Governance Sandwich** | ✅ PASS | [Forensic Trace](docs/evidence/detailed/F3-governance-sandwich.md) |
-| **F7 — Profit-Threshold Strike** | ✅ PASS | [Forensic Trace](docs/evidence/detailed/F7-profit-threshold-strike.md) |
-| **Phase Z — Liveness Failure** | ✅ FIXED | **[Gold Artifact](examples/cdrs/phase-z-fixed-regression.trace.json)** |
-
-See **[Full Scenario Index](docs/scenarios.md)** for all 33 verified protocol properties.
+This repository provides:
+- A validation layer for the SEW Protocol
+- A framework for adversarial protocol testing
+- A reference implementation of dispute resolution under real-world conditions

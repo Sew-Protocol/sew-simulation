@@ -12,7 +12,7 @@
             [resolver-sim.contract-model.diff  :as diff]
             [resolver-sim.contract-model.replay :as replay]
             [resolver-sim.io.scenarios          :as scenarios]
-            [resolver-sim.io.trace-metadata     :as meta])
+            [resolver-sim.contract-model.trace-metadata     :as meta])
   (:gen-class))
 
 ;; ---------------------------------------------------------------------------

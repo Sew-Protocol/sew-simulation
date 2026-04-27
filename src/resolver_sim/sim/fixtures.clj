@@ -2,7 +2,8 @@
   "Recursive fixture loader and composer for deterministic simulation suites.
 
    Handles loading EDN/JSON files from fixtures/ based on keyword namespaces.
-   Implements canonical action mapping and golden report generation."
+   Implements canonical action mapping, golden report generation, and
+   trace minimisation integration."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.walk :as walk]
@@ -12,10 +13,11 @@
             [resolver-sim.contract-model.invariants :as inv]
             [resolver-sim.contract-model.diff :as diff]
             [resolver-sim.canonical.actions :as canon]
-            [resolver-sim.sim.minimizer :as minimizer]))
+            [resolver-sim.sim.minimizer :as minimizer]
+            [clojure.pprint :as pp]))
 
 ;; ---------------------------------------------------------------------------
-;; Canonical Action Mapping (delegated to resolver-sim.canonical.actions)
+;; Canonical Action Mapping
 ;; ---------------------------------------------------------------------------
 
 (def impl->canonical
@@ -61,9 +63,15 @@
 
      (map? x)
      (reduce-kv (fn [m k v]
-                  (assoc m k (if (contains? #{:suite/id :protocol/id :state/id :authority/id :threshold/id :actor/id :token/id} k)
-                               v
-                               (compose-suite v seen))))
+                  (let [ns-str (when (keyword? k) (namespace k))]
+                    (when (and ns-str
+                               (not (contains? #{nil "suite" "protocol" "state" "authority"
+                                                 "threshold" "actor" "token"} ns-str)))
+                      (throw (ex-info "Unrecognized fixture namespace keyword"
+                                      {:key k :namespace ns-str})))
+                    (assoc m k (if (contains? #{:suite/id :protocol/id :state/id :authority/id :threshold/id :actor/id :token/id} k)
+                                 v
+                                 (compose-suite v seen)))))
                 {} x)
 
      (vector? x)
@@ -72,20 +80,38 @@
      :else x)))
 
 ;; ---------------------------------------------------------------------------
-;; Validation & Reports
+;; Validation & Golden Reports
 ;; ---------------------------------------------------------------------------
 
 (defn- validate-thresholds
+  "Check replay metrics against a thresholds map.
+
+   Supported keys:
+     :solvency :strict  — fails if any invariant-violations > 0
+     :max-resolver-profit-ev N  — fails if resolver-profit-ev exceeds N
+                                   (Monte Carlo metric; skipped in replay context)
+     :min-detection-rate N  — fails if detection-rate falls below N
+                               (Monte Carlo metric; skipped in replay context)"
   [result thresholds]
-  (let [violations (atom [])]
+  (let [violations (atom [])
+        metrics    (:metrics result {})]
     (when (and (= :strict (:solvency thresholds))
-               (pos? (get-in result [:metrics :invariant-violations] 0)))
+               (pos? (get metrics :invariant-violations 0)))
       (swap! violations conj {:type :solvency-violation :detail "Strict solvency check failed"}))
+    (when-let [max-profit (:max-resolver-profit-ev thresholds)]
+      (when-let [profit (get metrics :resolver-profit-ev)]
+        (when (> profit max-profit)
+          (swap! violations conj {:type :profit-ev-exceeded
+                                  :detail (str "resolver-profit-ev " profit " > " max-profit)}))))
+    (when-let [min-detection (:min-detection-rate thresholds)]
+      (when-let [rate (get metrics :detection-rate)]
+        (when (< rate min-detection)
+          (swap! violations conj {:type :detection-rate-below-minimum
+                                  :detail (str "detection-rate " rate " < " min-detection)}))))
     {:ok? (empty? @violations)
      :violations @violations}))
 
 (defn- generate-golden-report
-  "Generate a summary report suitable for golden snapshotting."
   [suite-id result]
   (let [last-entry (last (:trace result))
         final-hash (get-in last-entry [:projection-hash])]
@@ -95,44 +121,69 @@
      :metrics (:metrics result)
      :outcome (:outcome result)}))
 
+(defn- save-golden-report
+  [suite-key result]
+  (let [path (str "fixtures/golden/" (name (:trace-id result)) ".report.edn")]
+    (with-open [w (io/writer path)]
+      (pp/pprint (:golden-report result) w))))
+
+(defn- compare-golden-report
+  [suite-key result]
+  (let [path (str "fixtures/golden/" (name (:trace-id result)) ".report.edn")
+        golden (edn/read-string (slurp path))
+        report (:golden-report result)]
+    (if (= golden report)
+      {:ok? true}
+      {:ok? false :expected golden :actual report})))
+
 (defn run-suite
-  [suite-key]
-  (let [suite (compose-suite (load-fixture suite-key))
-        traces (:traces suite [])
-        thresholds (:thresholds suite {})
-        proto (:protocol suite)
-        state (:state suite)
-        authority (:authority suite)
-        actors (:actors suite)
-        results (mapv (fn [trace]
-                        (let [effective-trace (cond-> trace
-                                                proto (assoc :protocol-params proto)
-                                                state (assoc :initial-block-time (:block-time state 1000))
-                                                authority (assoc :authority-params authority)
-                                                actors (assoc :agents (vec (concat (:agents trace []) actors))))
-                              res (replay/replay-scenario effective-trace)]
-                          {:trace-id (:scenario-id trace)
-                           :outcome (:outcome res)
-                           :metrics (:metrics res)
-                           :threshold-validation (validate-thresholds res thresholds)
-                           :golden-report (generate-golden-report suite-key res)}))
-                      traces)
-        all-ok? (every? (fn [r] (and (= :pass (:outcome r))
-                                     (:ok? (:threshold-validation r))))
-                        results)]
-    {:suite-id suite-key
-     :ok? all-ok?
-     :results results}))
+  "Execute a suite fixture: compose, replay traces, validate thresholds, and optionally save or verify golden reports."
+  ([suite-key] (run-suite suite-key nil))
+  ([suite-key mode]
+   (let [suite (compose-suite (load-fixture suite-key))
+         traces (:traces suite [])
+         thresholds (:thresholds suite {})
+         proto (:protocol suite)
+         state (:state suite)
+         authority (:authority suite)
+         actors (:actors suite)
+         token (:token suite)
+         results (mapv (fn [trace]
+                         (let [effective-trace (cond-> trace
+                                                 proto (assoc :protocol-params proto)
+                                                 state (assoc :initial-block-time (:block-time state 1000))
+                                                 authority (assoc :authority-params authority)
+                                                 actors (assoc :agents (vec (concat (:agents trace []) actors)))
+                                                 token (assoc :token-params token))
+                               res (replay/replay-scenario effective-trace)
+                               report (generate-golden-report suite-key res)
+                               comparison (when (= mode :verify) (compare-golden-report suite-key {:trace-id (:scenario-id trace) :golden-report report}))]
+                           (when (= mode :save) (save-golden-report suite-key {:trace-id (:scenario-id trace) :golden-report report}))
+                           {:trace-id (:scenario-id trace)
+                            :outcome (:outcome res)
+                            :metrics (:metrics res)
+                            :threshold-validation (validate-thresholds res thresholds)
+                            :golden-report report
+                            :golden-comparison comparison}))
+                       traces)
+         all-ok? (every? (fn [r] (and (= :pass (:outcome r))
+                                      (:ok? (:threshold-validation r))
+                                      (if (= mode :verify) (:ok? (:golden-comparison r)) true)))
+                         results)]
+     {:suite-id suite-key
+      :ok? all-ok?
+      :results results})))
 
 ;; ---------------------------------------------------------------------------
-;; Trace Minimisation
+;; Trace Minimisation Interface
 ;; ---------------------------------------------------------------------------
 
 (defn minimise-suite
-  "Run the minimizer on all failing traces in a suite, generating minimized
-   versions for closer analysis and fixture consolidation.
-   
-   Returns {:suite-id kw :minimized [{:trace-id :target-invariant :event-count}]}"
+  "Minimize all failing traces in a suite to their smallest subset that still
+   triggers target-invariant.  Only traces that fail with :invariant-violation
+   are minimized; passing traces and structural failures are skipped.
+
+   Returns {:suite-id kw :target-invariant kw :minimized-count int :results [...]}"
   [suite-key target-invariant]
   (let [suite (compose-suite (load-fixture suite-key))
         traces (:traces suite [])
@@ -152,28 +203,14 @@
                    (= :invariant-violation (:halt-reason replay-result)))
           (let [minimized (minimizer/minimize effective-trace target-invariant)]
             (swap! results conj
-                   {:trace-id (:scenario-id effective-trace)
-                    :target-invariant target-invariant
-                    :event-count (count (:events minimized))
+                   {:trace-id             (:scenario-id effective-trace)
+                    :target-invariant     target-invariant
+                    :event-count          (count (:events minimized))
                     :original-event-count (count (:events effective-trace))
-                    :reduction (- (count (:events effective-trace)) (count (:events minimized)))
-                    :minimized-trace minimized})))))
-    
-    {:suite-id suite-key
+                    :reduction            (- (count (:events effective-trace))
+                                             (count (:events minimized)))
+                    :minimized-trace      minimized})))))
+    {:suite-id         suite-key
      :target-invariant target-invariant
-     :minimized-count (count @results)
-     :results @results}))
-
-(defn save-minimized-trace
-  "Save a minimized trace to the fixtures/traces/ directory.
-   
-   Returns {:ok? bool :path str :error kw}"
-  [{:keys [trace-id minimized-trace]}]
-  (let [path (str "fixtures/traces/" (name trace-id) ".minimized.trace.json")]
-    (try
-      (with-open [w (io/writer path)]
-        (json/write minimized-trace w :key-fn name :value-fn (fn [k v] (if (keyword? v) (name v) v))))
-      {:ok? true :path path}
-      (catch Exception e
-        {:ok? false :error :write-failed :detail (.getMessage e)}))))
-
+     :minimized-count  (count @results)
+     :results          @results}))

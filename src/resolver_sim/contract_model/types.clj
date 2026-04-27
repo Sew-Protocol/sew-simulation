@@ -64,11 +64,12 @@
      :recipient-status  — keyword, default :none"
   [{:keys [token to from amount-after-fee dispute-resolver
            auto-release-time auto-cancel-time
-           escrow-state sender-status recipient-status]}]
+           escrow-state sender-status recipient-status initial-fee]}]
   {:token             token
    :to                to
    :from              from
    :amount-after-fee  (long amount-after-fee)
+   :initial-fee       (or initial-fee 0)
    :dispute-resolver  dispute-resolver
    :auto-release-time (or auto-release-time 0)
    :auto-cancel-time  (or auto-cancel-time 0)
@@ -173,6 +174,8 @@
     :escrow-settings     {}
     :total-held          {}
     :total-fees          {}
+    :total-released      {}   ; {token-addr nat-int} — cumulative AFAs finalized via release
+    :total-refunded      {}   ; {token-addr nat-int} — cumulative AFAs finalized via refund
     :pending-settlements {}
     :module-snapshots    {}
     :dispute-timestamps  {}
