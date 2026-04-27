@@ -15,31 +15,45 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- run-one
-  "Run a single scenario map.  Returns {:pass? bool :result result}."
+  "Run a single scenario map.  Returns {:pass? bool :expected-fail? bool :result result}.
+
+   When :expected-fail? is true on the scenario, the test passes only when the
+   replay outcome is :fail (the invariant is expected to fire)."
   [scenario]
-  (let [result (replay/replay-scenario scenario)
-        pass?  (= :pass (:outcome result))]
-    {:pass? pass? :result result}))
+  (let [result        (replay/replay-scenario scenario)
+        expected-fail (boolean (:expected-fail? scenario false))
+        outcome       (:outcome result)
+        pass?         (if expected-fail
+                        (= :fail outcome)
+                        (= :pass outcome))]
+    {:pass? pass? :expected-fail? expected-fail :result result}))
 
 (defn- run-entry
   "Run a registry entry (single scenario or [s12a s12b] pair).
-   Returns {:pass? bool :steps int :reverts int :violations int :details [...]}."
+   Returns {:pass? bool :expected-fail? bool :steps int :reverts int :violations int :details [...]}."
   [entry]
   (if (map? entry)
-    (let [{:keys [pass? result]} (run-one entry)]
-      {:pass?      pass?
-       :steps      (:events-processed result 0)
-       :reverts    (get-in result [:metrics :reverts] 0)
-       :violations (get-in result [:metrics :invariant-violations] 0)
-       :details    [result]})
-    ;; Paired scenario: both must pass
-    (let [results (mapv run-one entry)
-          all-ok  (every? :pass? results)]
-      {:pass?      all-ok
-       :steps      (reduce + (map #(get-in % [:result :events-processed] 0) results))
-       :reverts    (reduce + (map #(get-in % [:result :metrics :reverts] 0) results))
-       :violations (reduce + (map #(get-in % [:result :metrics :invariant-violations] 0) results))
-       :details    (mapv :result results)})))
+    (let [{:keys [pass? expected-fail? result]} (run-one entry)]
+      {:pass?          pass?
+       :expected-fail? expected-fail?
+       :steps          (:events-processed result 0)
+       :reverts        (get-in result [:metrics :reverts] 0)
+       ;; Expected-fail scenarios are supposed to trigger the invariant — don't count as a violation.
+       :violations     (if expected-fail? 0 (get-in result [:metrics :invariant-violations] 0))
+       :details        [result]})
+    ;; Paired scenario: both must pass (expected-fail? propagates from the first sub-scenario)
+    (let [results    (mapv run-one entry)
+          all-ok     (every? :pass? results)
+          any-xfail  (boolean (some :expected-fail? results))]
+      {:pass?          all-ok
+       :expected-fail? any-xfail
+       :steps          (reduce + (map #(get-in % [:result :events-processed] 0) results))
+       :reverts        (reduce + (map #(get-in % [:result :metrics :reverts] 0) results))
+       :violations     (reduce + (map #(if (:expected-fail? %)
+                                         0
+                                         (get-in % [:result :metrics :invariant-violations] 0))
+                                      results))
+       :details        (mapv :result results)})))
 
 ;; ---------------------------------------------------------------------------
 ;; Public API
@@ -69,8 +83,11 @@
     (println (apply str (repeat w "═")))
     (println (format "  %-47s %5s  %7s  %s" "Scenario" "steps" "reverts" "status"))
     (println (str "  " (apply str (repeat (- w 2) "─"))))
-    (doseq [{:keys [name pass? steps reverts violations]} results]
-      (let [status (if pass? "✓ PASS" "✗ FAIL")
+    (doseq [{:keys [name pass? expected-fail? steps reverts violations]} results]
+      (let [status (cond
+                     (and pass? expected-fail?) "✓ XFAIL"
+                     pass?                      "✓ PASS"
+                     :else                      "✗ FAIL")
             extra  (when (pos? violations) (format "  violations=%d" violations))]
         (println (format "  %s  %-45s %5d  %7d%s"
                          status name steps reverts (or extra "")))))

@@ -604,6 +604,29 @@
      :violations (vec violations)}))
 
 ;; ---------------------------------------------------------------------------
+;; Cross-world: Fee Monotonicity
+;;
+;; Protocol fees should never decrease between transitions.  A decrease would
+;; indicate that fees are being withdrawn via the contract model (which has no
+;; withdraw-fees action) or that accounting has a bug that reduces fees.
+;; ---------------------------------------------------------------------------
+
+(defn fees-monotone?
+  "True when total-fees for every token does not decrease across a transition.
+   Fee withdrawals are not modelled in the contract layer, so any decrease is
+   a bug or an unauthenticated drain."
+  [world-before world-after]
+  (let [all-tokens (into #{} (concat (keys (:total-fees world-before))
+                                     (keys (:total-fees world-after))))
+        violations (for [token all-tokens
+                         :let [fee-before (get (:total-fees world-before) token 0)
+                               fee-after  (get (:total-fees world-after)  token 0)]
+                         :when (< fee-after fee-before)]
+                     {:token token :fee-before fee-before :fee-after fee-after})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
 ;; Invariant 22: Token Tax Reconciliation
 ;;
 ;; Ensure the protocol accounts for balance loss when handling Fee-on-Transfer (FoT) tokens.
@@ -861,7 +884,9 @@
                  :time-lock-integrity
                  (time-lock-integrity? world-before world-after)
                  :token-tax-reconciliation
-                 (token-tax-reconciliation? world-before world-after)}
+                 (token-tax-reconciliation? world-before world-after)
+                 :fees-monotone
+                 (fees-monotone? world-before world-after)}
         all?    (every? #(:holds? %) (vals results))]
     {:all-hold? all?
      :results   results}))

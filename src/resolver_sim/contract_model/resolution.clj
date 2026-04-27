@@ -20,22 +20,26 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- finalize-release [world workflow-id]
-  (let [et    (t/get-transfer world workflow-id)
-        token (:token et)
-        amt   (:amount-after-fee et)]
+  (let [et      (t/get-transfer world workflow-id)
+        token   (:token et)
+        amt     (:amount-after-fee et)
+        fot-bps (get-in world [:token-fot-bps token] 0)
+        net-amt (- amt (t/compute-fee amt fot-bps))]
     (-> world
         (acct/sub-held token amt)
-        (acct/record-released token amt)
+        (acct/record-released token net-amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :released))))
 
 (defn- finalize-refund [world workflow-id]
-  (let [et    (t/get-transfer world workflow-id)
-        token (:token et)
-        amt   (:amount-after-fee et)]
+  (let [et      (t/get-transfer world workflow-id)
+        token   (:token et)
+        amt     (:amount-after-fee et)
+        fot-bps (get-in world [:token-fot-bps token] 0)
+        net-amt (- amt (t/compute-fee amt fot-bps))]
     (-> world
         (acct/sub-held token amt)
-        (acct/record-refunded token amt)
+        (acct/record-refunded token net-amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :refunded))))
 

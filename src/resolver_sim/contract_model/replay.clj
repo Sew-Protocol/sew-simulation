@@ -723,7 +723,18 @@
             context     (build-context agent-list pp)
             agent-index (:agent-index context)
             init-time   (get scenario :initial-block-time 1000)
-            world0      (t/empty-world init-time)
+            ;; Collect unique token addresses referenced in events to apply FoT
+            token-params    (:token-params scenario)
+            fot-bps         (when token-params (get token-params :fee-on-transfer 0))
+            scenario-tokens (into #{}
+                                  (keep #(get-in % [:params :token])
+                                        (:events scenario)))
+            world-base      (t/empty-world init-time)
+            world0          (if (and fot-bps (pos? fot-bps) (seq scenario-tokens))
+                              (reduce (fn [w tok] (assoc-in w [:token-fot-bps tok] fot-bps))
+                                      world-base
+                                      scenario-tokens)
+                              world-base)
             events      (sort-by :seq (:events scenario))]
         (loop [world        world0
                events       events

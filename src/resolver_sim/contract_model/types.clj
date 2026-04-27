@@ -199,6 +199,7 @@
     :senior-bonds        {}   ; {addr {:coverage-max nat-int :reserved-coverage nat-int}}
     :resolver-frozen-until {} ; {addr nat-int} — resolver freeze expiry (0 = not frozen)
     :resolver-epoch-slashed {} ; {addr {:epoch-start nat-int :amount nat-int}} — per-epoch slash cap
+    :token-fot-bps          {} ; {token-addr nat-int} — Fee-on-Transfer BPS per token (0 = normal ERC20)
     :block-time          block-time}))
 
 ;; ---------------------------------------------------------------------------

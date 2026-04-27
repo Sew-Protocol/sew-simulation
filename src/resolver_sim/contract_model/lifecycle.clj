@@ -45,26 +45,35 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- finalize-release
-  "Internal: transition to :released, update accounting."
+  "Internal: transition to :released, update accounting.
+   If the token has a Fee-on-Transfer (FoT) tax configured on the world, only the
+   net amount (after tax) is recorded as released; the full AFA is still removed
+   from held.  The gap is the unexplained drain that token-tax-reconciliation? catches."
   [world workflow-id]
-  (let [et    (t/get-transfer world workflow-id)
-        token (:token et)
-        amt   (:amount-after-fee et)]
+  (let [et      (t/get-transfer world workflow-id)
+        token   (:token et)
+        amt     (:amount-after-fee et)
+        fot-bps (get-in world [:token-fot-bps token] 0)
+        net-amt (- amt (t/compute-fee amt fot-bps))]
     (-> world
         (acct/sub-held token amt)
-        (acct/record-released token amt)
+        (acct/record-released token net-amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :released))))
 
 (defn- finalize-refund
-  "Internal: transition to :refunded, update accounting."
+  "Internal: transition to :refunded, update accounting.
+   If the token has a Fee-on-Transfer (FoT) tax configured on the world, only the
+   net amount (after tax) is recorded as refunded; the gap triggers token-tax-reconciliation?."
   [world workflow-id]
-  (let [et    (t/get-transfer world workflow-id)
-        token (:token et)
-        amt   (:amount-after-fee et)]
+  (let [et      (t/get-transfer world workflow-id)
+        token   (:token et)
+        amt     (:amount-after-fee et)
+        fot-bps (get-in world [:token-fot-bps token] 0)
+        net-amt (- amt (t/compute-fee amt fot-bps))]
     (-> world
         (acct/sub-held token amt)
-        (acct/record-refunded token amt)
+        (acct/record-refunded token net-amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :refunded))))
 
