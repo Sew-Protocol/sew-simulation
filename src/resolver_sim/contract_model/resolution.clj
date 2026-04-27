@@ -280,6 +280,10 @@
     (not (:exists (t/get-pending world workflow-id)))
     (t/fail :no-resolution-to-challenge)
 
+    ;; Appeal window has closed — the pending settlement is now executable.
+    (>= (:block-time world) (:appeal-deadline (t/get-pending world workflow-id)))
+    (t/fail :appeal-window-expired)
+
     (nil? escalation-fn)
     (t/fail :escalation-not-configured)
 
@@ -301,7 +305,9 @@
                                (cancel-pending-on-escalation workflow-id)
                                (assoc-in [:dispute-levels workflow-id] new-level)
                                (assoc-in [:escrow-transfers workflow-id :dispute-resolver]
-                                         new-resolver))]
+                                         new-resolver)
+                               (assoc-in [:last-escalation-block-time workflow-id]
+                                         (:block-time world)))]
           (assoc (t/ok world')
                  :new-level    new-level
                  :new-resolver new-resolver))))))
@@ -422,6 +428,10 @@
     (not (:exists (t/get-pending world workflow-id)))
     (t/fail :no-resolution-to-appeal)
 
+    ;; Appeal window has closed — the pending settlement is now executable.
+    (>= (:block-time world) (:appeal-deadline (t/get-pending world workflow-id)))
+    (t/fail :appeal-window-expired)
+
     (nil? escalation-fn)
     (t/fail :escalation-not-configured)
 
@@ -443,7 +453,11 @@
                                (cancel-pending-on-escalation workflow-id)
                                (assoc-in [:dispute-levels workflow-id] new-level)
                                (assoc-in [:escrow-transfers workflow-id :dispute-resolver]
-                                         new-resolver))]
+                                         new-resolver)
+                               ;; Track when this escalation occurred so time-lock-integrity?
+                               ;; can detect two escalations within the same block.
+                               (assoc-in [:last-escalation-block-time workflow-id]
+                                         (:block-time world)))]
           (assoc (t/ok world')
                  :new-level    new-level
                  :new-resolver new-resolver))))))

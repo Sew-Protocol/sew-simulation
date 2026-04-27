@@ -537,15 +537,16 @@
 ;; ---------------------------------------------------------------------------
 
 (defn time-lock-integrity?
-  "True when no workflow has undergone two state-changing transitions
-   (raiseDispute -> Escalation) in the same block time.
-   
-   Relaxation: only enforced when block-time > 0 (to permit old test
-   scenarios that use 0 as a sentinel or do everything in one block).
-   
-   Symmetry Exception: we permit escalation (level 0 -> 1) in the same block
-   as raiseDispute (level nil -> 0), but block level 1 -> 2 in the same block
-   as any previous level change."
+  "True when no workflow has undergone two escalations in the same block.
+
+   The check is enforced when block-time > 0 (to permit legacy test scenarios
+   that use 0 as a sentinel or collapse everything into one block).
+
+   Each successful escalate-dispute / challenge-resolution stores the block-time
+   of the escalation under [:last-escalation-block-time wf].  A violation fires
+   when a second escalation on the same workflow happens in the same block as the
+   first (i.e. :last-escalation-block-time carried forward from world-before
+   equals bt-after of the new transition)."
   [world-before world-after]
   (let [bt-after (:block-time world-after)]
     (if (zero? bt-after)
@@ -554,10 +555,12 @@
             (for [[wf level-after] (:dispute-levels world-after)
                   :let [level-before (t/dispute-level world-before wf)]
                   :when (> level-after level-before)
-                  :let [bt-before (:block-time world-before)]
-                  ;; We block if level-after > 1 (meaning it's not the first escalation)
-                  ;; OR if level-before was already > 0 (meaning we're escalating twice).
-                  :when (and (> level-after 1) (= bt-before bt-after))]
+                  ;; world-before carries the block-time of the *previous* escalation
+                  ;; (stored by escalate-dispute / challenge-resolution).  If that
+                  ;; previous escalation also happened in bt-after, we have a
+                  ;; same-block double-escalation.
+                  :let [prev-esc-bt (get-in world-before [:last-escalation-block-time wf])]
+                  :when (and (some? prev-esc-bt) (= prev-esc-bt bt-after))]
               {:workflow-id wf :level-before level-before :level-after level-after :block-time bt-after})]
         {:holds?     (empty? violations)
          :violations (vec violations)}))))
