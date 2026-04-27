@@ -1820,3 +1820,118 @@
    ["S39  dr3-senior-coverage-delegation"               s39]
    ["S40  dr3-freeze-post-slash"                        s40]
    ["S41  dr3-reversal-slash-disabled"                  s41]])
+
+;; ---------------------------------------------------------------------------
+;; Scenario type registry
+;;
+;; Maps scenario-id → {:scenario/type kw :adversary? bool
+;;                      :adversary/type kw :adversary/traits #{kw}}
+;;
+;; This is the authoritative source for scenario classification metadata.
+;; invariant-runner merges this into run results for queryable output.
+;; trace_metadata/classify-scenario uses scenario-id as a fallback signal.
+;; ---------------------------------------------------------------------------
+
+(def scenario-type-registry
+  "Type metadata for all S01–S41 invariant scenarios, keyed by scenario-id."
+  {;; ── Baseline: standard happy-path protocol flows ───────────────────────
+   "s01-baseline-happy-path"                {:scenario/type :baseline}
+   "s02-dr3-dispute-release"                {:scenario/type :baseline}
+   "s03-dr3-dispute-refund"                 {:scenario/type :baseline}
+   "s04-dispute-timeout-autocancel"         {:scenario/type :baseline}
+   "s05-pending-settlement-execute"         {:scenario/type :baseline}
+   "s06-mutual-cancel"                      {:scenario/type :baseline}
+   "s13-pending-settlement-refund"          {:scenario/type :baseline}
+   "s16-ieo-create-release"                 {:scenario/type :baseline}
+   "s17-ieo-dispute-no-resolver-timeout"    {:scenario/type :baseline}
+   "s18-dr3-kleros-l0-resolves"             {:scenario/type :baseline}
+
+   ;; ── Edge-case: permission checks, boundary conditions, state guards ────
+   "s07-unauthorized-resolver-rejected"     {:scenario/type :edge-case}
+   "s08-state-machine-attack-gauntlet"      {:scenario/type :edge-case}
+   "s10-double-finalize-rejected"           {:scenario/type :edge-case}
+   "s11-zero-fee-edge-case"                 {:scenario/type :edge-case}
+   "s12a-snapshot-isolation-fee-zero"             {:scenario/type :edge-case}
+   "s12b-snapshot-isolation-fee-500"              {:scenario/type :edge-case}
+   "s14-dr3-module-authorized"              {:scenario/type :edge-case}
+   "s15-dr3-module-unauthorized-rejected"   {:scenario/type :edge-case}
+   "s19-dr3-kleros-escalation-rejected-l0-resolves" {:scenario/type :edge-case}
+   "s20-dr3-kleros-max-escalation-guard"    {:scenario/type :edge-case}
+   "s21-dr3-kleros-pending-cleared-on-escalation"   {:scenario/type :edge-case}
+   "s22-status-leak-agree-cancel-over-dispute" {:scenario/type :edge-case}
+   "s23-preemptive-escalation-blocked"      {:scenario/type :edge-case}
+
+   ;; ── Stress: solvency, multi-escrow, depletion ─────────────────────────
+   "s09-multi-escrow-solvency"              {:scenario/type :stress}
+   "s24-resolver-stake-depletion-cascade"   {:scenario/type :stress}
+   "s38-dr3-bond-mix-valid"                 {:scenario/type :stress}
+   "s39-dr3-senior-coverage-delegation"     {:scenario/type :stress}
+   "s40-dr3-freeze-post-slash"              {:scenario/type :stress}
+   "s41-dr3-reversal-slash-disabled"        {:scenario/type :stress}
+
+   ;; ── Adversarial: profit-maximizer ─────────────────────────────────────
+   "s25-profit-maximizer-slash-lifecycle"
+   {:scenario/type    :adversarial
+    :adversary/type   :profit-maximizer
+    :adversary/traits #{:multi-step :capital-efficient}}
+
+   "s34-profit-maximizer-unchallenged-slash"
+   {:scenario/type    :adversarial
+    :adversary/type   :profit-maximizer
+    :adversary/traits #{:stealthy :capital-efficient}}
+
+   "s35-profit-maximizer-governance-wins-appeal"
+   {:scenario/type    :adversarial
+    :adversary/type   :profit-maximizer
+    :adversary/traits #{:adaptive :multi-step}}
+
+   "s36-profit-maximizer-pre-window-execute-rejected"
+   {:scenario/type    :adversarial
+    :adversary/type   :profit-maximizer
+    :adversary/traits #{:capital-efficient}}
+
+   "s37-profit-maximizer-two-resolver-split-outcomes"
+   {:scenario/type    :adversarial
+    :adversary/type   :profit-maximizer
+    :adversary/traits #{:multi-step :high-capital}}
+
+   ;; ── Adversarial: forking-strategist ───────────────────────────────────
+   "s26-forking-strategist-l1-reversal"
+   {:scenario/type    :adversarial
+    :adversary/type   :forking-strategist
+    :adversary/traits #{:multi-step :adaptive}}
+
+   "s27-forking-strategist-l2-fork"
+   {:scenario/type    :adversarial
+    :adversary/type   :forking-strategist
+    :adversary/traits #{:multi-step :adaptive}}
+
+   "s28-forking-strategist-late-escalation-rejected"
+   {:scenario/type    :adversarial
+    :adversary/type   :forking-strategist
+    :adversary/traits #{:multi-step}}
+
+   "s29-forking-strategist-seller-escalates"
+   {:scenario/type    :adversarial
+    :adversary/type   :forking-strategist
+    :adversary/traits #{:multi-step :reactive}}
+
+   "s30-forking-strategist-double-loss"
+   {:scenario/type    :adversarial
+    :adversary/type   :forking-strategist
+    :adversary/traits #{:multi-step :adaptive}}
+
+   "s31-forking-strategist-all-levels-confirm"
+   {:scenario/type    :adversarial
+    :adversary/type   :forking-strategist
+    :adversary/traits #{:multi-step :high-capital}}
+
+   "s32-forking-strategist-premature-settlement-rejected"
+   {:scenario/type    :adversarial
+    :adversary/type   :forking-strategist
+    :adversary/traits #{:multi-step}}
+
+   "s33-forking-strategist-two-escrow-fork-isolation"
+   {:scenario/type    :adversarial
+    :adversary/type   :forking-strategist
+    :adversary/traits #{:multi-step :capital-efficient}}})

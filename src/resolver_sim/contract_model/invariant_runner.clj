@@ -1,12 +1,16 @@
 (ns resolver-sim.contract-model.invariant-runner
-  "In-process runner for the S01–S23 deterministic invariant scenarios.
+  "In-process runner for the S01–S41 deterministic invariant scenarios.
 
    Runs every scenario in invariant-scenarios/all-scenarios against
    replay/replay-scenario, reports pass/fail per entry, and returns a
    summary map suitable for CLI consumption.
 
    S12 is a paired scenario (vector of two maps); it passes only when
-   both sub-scenarios pass."
+   both sub-scenarios pass.
+
+   Each result entry is enriched with type metadata from
+   invariant-scenarios/scenario-type-registry (:scenario/type,
+   :adversary/type, :adversary/traits) for queryable output."
   (:require [resolver-sim.contract-model.replay            :as replay]
             [resolver-sim.contract-model.invariant-scenarios :as sc]))
 
@@ -60,13 +64,19 @@
 ;; ---------------------------------------------------------------------------
 
 (defn run-all
-  "Run all S01–S23 invariant scenarios.  Returns a summary map:
+  "Run all S01–S41 invariant scenarios.  Returns a summary map:
      {:passed int :total int :elapsed-ms long :results [{entry-result}]}
-   where each entry-result adds :name and the keys from run-entry."
+   where each entry-result adds :name, :scenario/type, and optional
+   :adversary/type / :adversary/traits from the scenario-type-registry."
   []
   (let [t0      (System/currentTimeMillis)
         results (mapv (fn [[name entry]]
-                        (merge {:name name} (run-entry entry)))
+                        (let [entry-result (run-entry entry)
+                              sid          (if (map? entry)
+                                             (:scenario-id entry)
+                                             (:scenario-id (first entry)))
+                              type-meta    (get sc/scenario-type-registry sid {})]
+                          (merge {:name name} type-meta entry-result)))
                       sc/all-scenarios)
         elapsed (- (System/currentTimeMillis) t0)]
     {:passed    (count (filter :pass? results))
