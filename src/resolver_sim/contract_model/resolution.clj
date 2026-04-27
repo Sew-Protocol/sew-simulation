@@ -86,6 +86,7 @@
                                 {:resolver        prev-resolver
                                  :amount          slash-amt
                                  :status          :executed
+                                 :reason          :reversal
                                  :proposed-at     now
                                  :appeal-deadline 0
                                  :appeal-bond-held 0
@@ -98,6 +99,7 @@
                 (assoc-in world [:pending-fraud-slashes slash-id]
                           {:resolver         prev-resolver
                            :amount           slash-amt
+                           :reason           :reversal
                            :status           :pending
                            :proposed-at      now
                            :appeal-deadline  (+ now gov-delay)
@@ -543,12 +545,15 @@
        (t/fail :timelock-not-expired)
 
        :else
-       (let [resolver (:resolver pending)
-             amount   (:amount pending)
-             world'   (-> world
-                          (assoc-in [:pending-fraud-slashes slash-id :status] :executed)
-                          (reg/slash-resolver-stake resolver amount)
-                          :world)]
+       (let [resolver        (:resolver pending)
+             amount          (:amount pending)
+             freeze-duration 259200                ; 72 hours in seconds
+             world'          (-> world
+                                 (assoc-in [:pending-fraud-slashes slash-id :status] :executed)
+                                 (reg/slash-resolver-stake resolver amount)
+                                 :world
+                                 (assoc-in [:resolver-frozen-until resolver]
+                                           (+ (:block-time world) freeze-duration)))]
          (t/ok world'))))))
 
 ;; ---------------------------------------------------------------------------

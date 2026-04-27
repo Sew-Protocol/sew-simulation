@@ -680,6 +680,133 @@
      :violations (vec violations)}))
 
 ;; ---------------------------------------------------------------------------
+;; Invariant 24: Slash distribution consistent
+;;
+;; Every unit of stake slashed via bond-slashed must be accounted for in
+;; bond-distribution (insurance + protocol + burned).  The three buckets
+;; must sum to the total of all bond-slashed amounts.
+;; ---------------------------------------------------------------------------
+
+(defn slash-distribution-consistent?
+  "True when the global bond-distribution totals equal the sum of all bond-slashed amounts.
+   Enforces that every slashed bond was distributed somewhere (insurance, protocol, or burned)
+   rather than disappearing."
+  [world]
+  (let [bd          (:bond-distribution world {:insurance 0 :protocol 0 :burned 0})
+        dist-total  (+ (:insurance bd 0) (:protocol bd 0) (:burned bd 0))
+        slash-total (reduce + 0 (vals (:bond-slashed world {})))]
+    (if (zero? slash-total)
+      {:holds? true :violations []}
+      (if (= dist-total slash-total)
+        {:holds? true :violations []}
+        {:holds?     false
+         :violations [{:dist-total dist-total :slash-total slash-total}]}))))
+
+;; ---------------------------------------------------------------------------
+;; Invariant 25: Resolver bond mix valid (80/20 stable/SEW)
+;;
+;; Every resolver with a registered bond must hold at least 80% stable and
+;; at most 20% SEW by value.  Uses integer BPS arithmetic (no floating point).
+;; ---------------------------------------------------------------------------
+
+(defn resolver-bond-mix-valid?
+  "True when every resolver's bond satisfies the 80/20 stable/SEW mix rule.
+   Mirrors StakingModuleInvariants: stable >= 80%, SEW <= 20%."
+  [world]
+  (let [violations
+        (for [[addr bond] (:resolver-bonds world {})
+              :let [stable (:stable bond 0)
+                    sew    (:sew bond 0)
+                    total  (+ stable sew)]
+              :when (pos? total)
+              :when (< (* stable 10000) (* total 8000))]
+          {:resolver addr :stable stable :sew sew :total total})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
+;; Invariant 26: Senior coverage not exceeded
+;;
+;; No senior bond may have reserved-coverage greater than its coverage-max.
+;; ---------------------------------------------------------------------------
+
+(defn senior-coverage-not-exceeded?
+  "True when no senior bond has reserved coverage exceeding its maximum available coverage.
+   Mirrors StakingModuleInvariants: reserved <= max."
+  [world]
+  (let [violations
+        (for [[addr bond] (:senior-bonds world {})
+              :let [reserved (:reserved-coverage bond 0)
+                    maximum  (:coverage-max bond 0)]
+              :when (> reserved maximum)]
+          {:senior addr :reserved reserved :coverage-max maximum})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
+;; Invariant 27: Resolver not frozen on assign
+;;
+;; No :disputed escrow may be assigned to a resolver whose freeze window has
+;; not yet expired.
+;; ---------------------------------------------------------------------------
+
+(defn resolver-not-frozen-on-assign?
+  "True when no :disputed escrow is currently assigned to a frozen resolver.
+   Mirrors SlashingModuleInvariants: frozen resolver cannot receive new assignments."
+  [world]
+  (let [bt         (:block-time world 0)
+        frozen-map (:resolver-frozen-until world {})
+        violations
+        (for [[wf et] (:escrow-transfers world)
+              :when (= :disputed (:escrow-state et))
+              :let [resolver (:dispute-resolver et)
+                    frozen-until (get frozen-map resolver 0)]
+              :when (> frozen-until bt)]
+          {:workflow-id wf :resolver resolver :frozen-until frozen-until :block-time bt})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
+;; Invariant 28: Slash epoch cap respected (20% per epoch)
+;;
+;; Total slashing recorded in :resolver-epoch-slashed must not exceed 20% of
+;; the resolver's current stake for any resolver.
+;; ---------------------------------------------------------------------------
+
+(defn slash-epoch-cap-respected?
+  "True when no resolver's total slashing in the current epoch exceeds 20% of their stake.
+   Mirrors SlashingModuleInvariants: resolver slash cap per epoch is 20% (v3)."
+  [world]
+  (let [violations
+        (for [[addr epoch-data] (:resolver-epoch-slashed world {})
+              :let [epoch-amt (:amount epoch-data 0)
+                    stake     (get (:resolver-stakes world) addr 0)]
+              :when (pos? stake)
+              :when (> (* epoch-amt 10000) (* stake 2000))]
+          {:resolver addr :epoch-amount epoch-amt :stake stake})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
+;; Invariant 29: Reversal slash disabled (DR3 v3)
+;;
+;; In DR3 v3 the slashForReversal amount is 0 bps.  Any slash in
+;; :pending-fraud-slashes with :reason :reversal must therefore have amount = 0.
+;; ---------------------------------------------------------------------------
+
+(defn reversal-slash-disabled?
+  "True when no reversal slash has a non-zero amount.
+   Mirrors SlashingModuleInvariants: reversal slashing is disabled in DR3 v3."
+  [world]
+  (let [violations
+        (for [[slash-id slash] (:pending-fraud-slashes world {})
+              :when (= :reversal (:reason slash))
+              :when (pos? (:amount slash 0))]
+          {:slash-id slash-id :amount (:amount slash)})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
 ;; Composite: check all world-level invariants
 ;; ---------------------------------------------------------------------------
 
@@ -705,7 +832,13 @@
                   :fee-cap                       (fee-cap-holds? world)
                   :no-stale-automatable-escrows  (no-stale-automatable-escrows? world)
                   :conservation-of-funds         (conservation-of-funds? world)
-                  :dispute-resolution-path       (dispute-resolution-path-exists? world)}
+                  :dispute-resolution-path       (dispute-resolution-path-exists? world)
+                  :slash-distribution-consistent (slash-distribution-consistent? world)
+                  :resolver-bond-mix-valid        (resolver-bond-mix-valid? world)
+                  :senior-coverage-not-exceeded   (senior-coverage-not-exceeded? world)
+                  :resolver-not-frozen-on-assign  (resolver-not-frozen-on-assign? world)
+                  :slash-epoch-cap-respected      (slash-epoch-cap-respected? world)
+                  :reversal-slash-disabled        (reversal-slash-disabled? world)}
          all?    (every? #(:holds? %) (vals results))]
      {:all-hold? all?
       :results   results})))

@@ -1613,6 +1613,165 @@
      :params {:workflow-id "wf1"}}]})
 
 ;; ---------------------------------------------------------------------------
+;; S38 — DR3 resolver bond 80/20 mix invariant holds
+;;
+;; A resolver registers a valid bond mix (80% stable, 20% SEW) and completes
+;; a full dispute lifecycle.  The resolver-bond-mix-valid? invariant is checked
+;; after every step and must hold throughout.
+;;
+;; Invariants exercised:
+;;   resolver-bond-mix-valid?  — 8000 stable + 2000 SEW = exactly 80/20
+;;   solvency-holds?           — full dispute with appeal window
+;;   conservation-of-funds?   — AFA released; resolver stake intact
+;; ---------------------------------------------------------------------------
+
+(def s38
+  {:scenario-id     "s38-dr3-bond-mix-valid"
+   :schema-version  "1.0"
+   :initial-block-time 1000
+   :agents          [{:id "buyer"    :address "0xbuyer"    :type "honest"}
+                     {:id "seller"   :address "0xseller"   :type "honest"}
+                     {:id "resolver" :address "0xresolver" :type "resolver"}
+                     {:id "keeper"   :address "0xkeeper"   :type "keeper"}]
+   :protocol-params appeal
+   :events
+   [{:seq 0 :time 1000 :agent "resolver" :action "register_stake"
+     :params {:amount 10000}}
+    {:seq 1 :time 1000 :agent "resolver" :action "register_resolver_bond"
+     :params {:stable 8000 :sew 2000}}
+    {:seq 2 :time 1000 :agent "buyer" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 5000
+              :custom-resolver "0xresolver"}
+     :save-wf-as "wf0"}
+    {:seq 3 :time 1060 :agent "buyer" :action "raise_dispute"
+     :params {:workflow-id "wf0"}}
+    {:seq 4 :time 1120 :agent "resolver" :action "execute_resolution"
+     :params {:workflow-id "wf0" :is-release true :resolution-hash "0xhash"}}
+    {:seq 5 :time 1241 :agent "keeper" :action "execute_pending_settlement"
+     :params {:workflow-id "wf0"}}]})
+
+;; ---------------------------------------------------------------------------
+;; S39 — DR3 senior coverage delegation at capacity
+;;
+;; A senior resolver registers with coverage-max=10000.  A junior delegates
+;; in two tranches (8000 + 2000) reaching exactly the maximum.  The
+;; senior-coverage-not-exceeded? invariant must hold throughout (reserved
+;; equals but never exceeds the maximum).
+;;
+;; Invariants exercised:
+;;   senior-coverage-not-exceeded?  — reserved grows to exactly coverage-max
+;; ---------------------------------------------------------------------------
+
+(def s39
+  {:scenario-id     "s39-dr3-senior-coverage-delegation"
+   :schema-version  "1.0"
+   :initial-block-time 1000
+   :agents          [{:id "senior" :address "0xsenior" :type "resolver"}
+                     {:id "junior" :address "0xjunior" :type "resolver"}]
+   :protocol-params dr3
+   :allow-open-disputes? true
+   :events
+   [{:seq 0 :time 1000 :agent "senior" :action "register_senior_bond"
+     :params {:coverage-max 10000}}
+    {:seq 1 :time 1000 :agent "junior" :action "delegate_to_senior"
+     :params {:senior-addr "0xsenior" :coverage 8000}}
+    {:seq 2 :time 1001 :agent "junior" :action "delegate_to_senior"
+     :params {:senior-addr "0xsenior" :coverage 2000}}]})
+
+;; ---------------------------------------------------------------------------
+;; S40 — DR3 freeze recorded after fraud slash (no-assignment after freeze)
+;;
+;; After a fraud slash is executed, the resolver is frozen until
+;; block-time + 259200 (72 h).  No new escrow is assigned to the frozen
+;; resolver so resolver-not-frozen-on-assign? holds throughout.  The scenario
+;; verifies the freeze is correctly recorded and that the invariant passes when
+;; the protocol correctly avoids assigning new work to the frozen resolver.
+;;
+;; Invariants exercised:
+;;   resolver-not-frozen-on-assign?  — frozen resolver has no :disputed escrows
+;;   slash-status-consistent?        — slash transitions pending → executed
+;;   no-auto-fraud-execute?          — slash required explicit post-deadline call
+;; ---------------------------------------------------------------------------
+
+(def s40
+  {:scenario-id     "s40-dr3-freeze-post-slash"
+   :schema-version  "1.0"
+   :initial-block-time 1000
+   :agents          [{:id "buyer"      :address "0xbuyer"    :type "honest"}
+                     {:id "seller"     :address "0xseller"   :type "honest"}
+                     {:id "resolver"   :address "0xresolver" :type "resolver"}
+                     {:id "governance" :address "0xgov"      :type "governance"}
+                     {:id "keeper"     :address "0xkeeper"   :type "keeper"}]
+   :protocol-params appeal
+   :events
+   [{:seq 0 :time 1000 :agent "resolver" :action "register_stake"
+     :params {:amount 10000}}
+    {:seq 1 :time 1000 :agent "buyer" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 5000
+              :custom-resolver "0xresolver"}
+     :save-wf-as "wf0"}
+    {:seq 2 :time 1060 :agent "buyer" :action "raise_dispute"
+     :params {:workflow-id "wf0"}}
+    {:seq 3 :time 1120 :agent "resolver" :action "execute_resolution"
+     :params {:workflow-id "wf0" :is-release true :resolution-hash "0xhash"}}
+    ;; Governance proposes slash. Slash appeal-deadline = 1130+120 = 1250.
+    {:seq 4 :time 1130 :agent "governance" :action "propose_fraud_slash"
+     :params {:workflow-id "wf0" :resolver-addr "0xresolver" :amount 500}}
+    ;; Settle the escrow first (pending deadline = 1120+120 = 1240 ≤ 1241).
+    ;; Once settled, the escrow is no longer :disputed, so executing the slash
+    ;; and freezing the resolver does NOT trigger resolver-not-frozen-on-assign?.
+    {:seq 5 :time 1241 :agent "keeper" :action "execute_pending_settlement"
+     :params {:workflow-id "wf0"}}
+    ;; After appeal window (1250): execute slash → resolver frozen until 1255+259200.
+    ;; No :disputed escrows remain, so resolver-not-frozen-on-assign? holds.
+    {:seq 6 :time 1255 :agent "governance" :action "execute_fraud_slash"
+     :params {:workflow-id "wf0"}}]})
+
+;; ---------------------------------------------------------------------------
+;; S41 — DR3 reversal slash disabled (reversal-slash-bps = 0)
+;;
+;; A challenge escalates a dispute from L0 to L1.  The L1 resolver issues the
+;; opposite decision (is-release=false vs L0's is-release=true), triggering
+;; the reversal path.  With reversal-slash-bps=0 (v3 default) no slash amount
+;; is created, so reversal-slash-disabled? holds throughout.
+;;
+;; Invariants exercised:
+;;   reversal-slash-disabled?    — no reversal slash entry has amount > 0
+;;   escalation-level-monotonic? — level grows 0 → 1 after challenge
+;;   solvency-holds?             — full lifecycle through L1 decision + settlement
+;; ---------------------------------------------------------------------------
+
+(def s41
+  {:scenario-id     "s41-dr3-reversal-slash-disabled"
+   :schema-version  "1.0"
+   :initial-block-time 1000
+   :agents          [{:id "buyer"      :address "0xbuyer"   :type "honest"}
+                     {:id "seller"     :address "0xseller"  :type "honest"}
+                     {:id "l0"         :address "0xl0"      :type "resolver"}
+                     {:id "l1"         :address "0xl1"      :type "resolver"}
+                     {:id "challenger" :address "0xchall"   :type "honest"}
+                     {:id "keeper"     :address "0xkeeper"  :type "keeper"}]
+   :protocol-params kleros-appeal
+   :events
+   [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 5000}
+     :save-wf-as "wf0"}
+    {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
+     :params {:workflow-id "wf0"}}
+    ;; L0 resolves with release → pending settlement, deadline = 1120+60 = 1180
+    {:seq 2 :time 1120 :agent "l0" :action "execute_resolution"
+     :params {:workflow-id "wf0" :is-release true :resolution-hash "0xhash-l0"}}
+    ;; Challenger disputes within the window (1130 < 1180) → level 0→1, new resolver = 0xl1
+    {:seq 3 :time 1130 :agent "challenger" :action "challenge_resolution"
+     :params {:workflow-id "wf0"}}
+    ;; L1 resolves with refund (opposite of L0) → reversal path fires with slash-bps=0
+    {:seq 4 :time 1200 :agent "l1" :action "execute_resolution"
+     :params {:workflow-id "wf0" :is-release false :resolution-hash "0xhash-l1"}}
+    ;; Keeper settles after L1 pending deadline (1200+60=1260)
+    {:seq 5 :time 1261 :agent "keeper" :action "execute_pending_settlement"
+     :params {:workflow-id "wf0"}}]})
+
+;; ---------------------------------------------------------------------------
 ;; Scenario registry
 ;; ---------------------------------------------------------------------------
 
@@ -1656,4 +1815,8 @@
    ["S34  profit-maximizer-unchallenged-slash"          s34]
    ["S35  profit-maximizer-governance-wins-appeal"      s35]
    ["S36  profit-maximizer-pre-window-execute-rejected" s36]
-   ["S37  profit-maximizer-two-resolver-split-outcomes" s37]])
+   ["S37  profit-maximizer-two-resolver-split-outcomes" s37]
+   ["S38  dr3-bond-mix-valid"                           s38]
+   ["S39  dr3-senior-coverage-delegation"               s39]
+   ["S40  dr3-freeze-post-slash"                        s40]
+   ["S41  dr3-reversal-slash-disabled"                  s41]])

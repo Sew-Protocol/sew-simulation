@@ -13,6 +13,10 @@
       :module-snapshots    {workflow-id  ModuleSnapshot-map}
       :dispute-timestamps  {workflow-id  nat-int}   ; block.timestamp of raiseDispute
       :claimable           {workflow-id {addr nat-int}}
+      :resolver-bonds      {addr {:stable nat-int :sew nat-int}} ; DR3 80/20 mix
+      :senior-bonds        {addr {:coverage-max nat-int :reserved-coverage nat-int}}
+      :resolver-frozen-until {addr nat-int}          ; freeze expiry (0 = not frozen)
+      :resolver-epoch-slashed {addr {:epoch-start nat-int :amount nat-int}}
       :block-time          nat-int}                  ; injected clock
 
    Every operation function signature:
@@ -191,6 +195,10 @@
     :bond-fees           {}   ; {token amount}
     :bond-slashed        {}   ; {workflow-id amount}
     :bond-distribution   {:insurance 0 :protocol 0 :burned 0} ; 50/30/20 split
+    :resolver-bonds      {}   ; {addr {:stable nat-int :sew nat-int}} — DR3 80/20 mix invariant
+    :senior-bonds        {}   ; {addr {:coverage-max nat-int :reserved-coverage nat-int}}
+    :resolver-frozen-until {} ; {addr nat-int} — resolver freeze expiry (0 = not frozen)
+    :resolver-epoch-slashed {} ; {addr {:epoch-start nat-int :amount nat-int}} — per-epoch slash cap
     :block-time          block-time}))
 
 ;; ---------------------------------------------------------------------------

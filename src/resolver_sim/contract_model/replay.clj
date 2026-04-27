@@ -393,6 +393,45 @@
       (let [amount (get-in event [:params :amount] 0)]
         (t/ok (reg/register-stake world (:address ar) amount))))))
 
+(defmethod apply-action "register_resolver_bond"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (let [p      (:params event)
+            stable (get p :stable 0)
+            sew    (get p :sew 0)]
+        (t/ok (assoc-in world [:resolver-bonds (:address ar)]
+                        {:stable stable :sew sew}))))))
+
+(defmethod apply-action "register_senior_bond"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (let [p            (:params event)
+            coverage-max (get p :coverage-max 0)]
+        (t/ok (assoc-in world [:senior-bonds (:address ar)]
+                        {:coverage-max coverage-max :reserved-coverage 0}))))))
+
+(defmethod apply-action "delegate_to_senior"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (let [p           (:params event)
+            senior-addr (:senior-addr p)
+            coverage    (:coverage p 0)
+            senior-bond (get-in world [:senior-bonds senior-addr])]
+        (if (nil? senior-bond)
+          (t/fail :senior-not-registered)
+          (let [new-reserved (+ (:reserved-coverage senior-bond) coverage)
+                max-coverage (:coverage-max senior-bond)]
+            (if (> new-reserved max-coverage)
+              (t/fail :senior-coverage-exceeded)
+              (t/ok (assoc-in world [:senior-bonds senior-addr :reserved-coverage]
+                              new-reserved)))))))))
+
 (defmethod apply-action "propose_fraud_slash"
   [{:keys [agent-index]} world event]
   (let [ar (resolve-address agent-index (:agent event))]
