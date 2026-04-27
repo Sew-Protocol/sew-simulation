@@ -559,6 +559,9 @@
     (not= :disputed (t/escrow-state world workflow-id))
     (t/fail :transfer-not-in-dispute)
 
+    (:exists (t/get-pending world workflow-id))
+    (t/fail :resolution-already-pending)
+
     (or (nil? new-resolver) (= "" new-resolver))
     (t/fail :invalid-new-resolver)
 
