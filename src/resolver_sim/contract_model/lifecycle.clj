@@ -333,18 +333,17 @@
     (t/fail :dispute-timeout-not-exceeded)
 
     :else
-    (let [et      (t/get-transfer world workflow-id)
-          resolver (:dispute-resolver et)
-          ;; Timeout slash = entire amount-after-fee slashed as timeout
-          slash-amt (:amount-after-fee et)
-          
-          world' (-> world
-                     ;; 1. Slash the resolver stake, if one is assigned
-                     (cond-> (and resolver (not= resolver "0x0000000000000000000000000000000000000000"))
-                             (reg/slash-resolver-stake resolver slash-amt))
-                     ;; 2. Perform reconciliation
-                     (acct/distribute-slashed-funds slash-amt)
-                     ;; 3. Finalize: this updates :total-held and state to :refunded
-                     (finalize-refund workflow-id)
-                     (update :dispute-timestamps dissoc workflow-id))]
+    (let [et             (t/get-transfer world workflow-id)
+          resolver        (:dispute-resolver et)
+          slash-amt       (:amount-after-fee et)
+          has-resolver?   (and resolver
+                               (not= resolver "0x0000000000000000000000000000000000000000"))
+          ;; slash-resolver-stake returns {:ok bool :world world'} — unwrap before threading
+          world-slashed   (if has-resolver?
+                            (:world (reg/slash-resolver-stake world resolver slash-amt))
+                            world)
+          world'          (-> world-slashed
+                              (acct/distribute-slashed-funds slash-amt)
+                              (finalize-refund workflow-id)
+                              (update :dispute-timestamps dissoc workflow-id))]
       (t/ok world'))))

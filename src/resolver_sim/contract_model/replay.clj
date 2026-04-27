@@ -692,13 +692,28 @@
                metrics      (zero-metrics)
                wf-alias-map {}]
           (if (empty? events)
-            {:outcome          :pass
-             :scenario-id      (:scenario-id scenario)
-             :events-processed (count trace)
-             :halted-at-seq    nil
-             :halt-reason      nil
-             :trace            trace
-             :metrics          metrics}
+            ;; End-of-scenario liveness check: all disputes must be resolved
+            ;; unless the scenario explicitly opts out with :allow-open-disputes?
+            (let [open-disputes (when-not (:allow-open-disputes? scenario)
+                                  (vec (for [[wf et] (:escrow-transfers world)
+                                             :when (= :disputed (:escrow-state et))]
+                                         wf)))]
+              (if (seq open-disputes)
+                {:outcome          :fail
+                 :scenario-id      (:scenario-id scenario)
+                 :events-processed (count trace)
+                 :halted-at-seq    nil
+                 :halt-reason      :open-disputes-at-end
+                 :detail           {:open-disputes open-disputes}
+                 :trace            trace
+                 :metrics          metrics}
+                {:outcome          :pass
+                 :scenario-id      (:scenario-id scenario)
+                 :events-processed (count trace)
+                 :halted-at-seq    nil
+                 :halt-reason      nil
+                 :trace            trace
+                 :metrics          metrics}))
             (let [raw-event   (first events)
                   alias-res   (resolve-wf-alias raw-event wf-alias-map)]
               (if-not (:ok alias-res)

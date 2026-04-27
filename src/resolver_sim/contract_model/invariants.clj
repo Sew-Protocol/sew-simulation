@@ -474,23 +474,31 @@
 ;; ---------------------------------------------------------------------------
 
 (defn no-withdrawal-during-dispute?
-  "True when any resolver who decreased their stake between world-before
-   and world-after has no active disputes in world-before."
+  "True when no resolver voluntarily withdrew stake while they had active disputes.
+
+   Protocol-mandated slashes (tracked in :resolver-slash-total) are excluded:
+   only the portion of a stake drop that exceeds net slashing in this step
+   is treated as a voluntary withdrawal."
   [world-before world-after]
-  (let [resolvers-who-withdrew
+  (let [voluntary-withdrawers
         (for [[addr stake-before] (:resolver-stakes world-before)
-              :let [stake-after (get (:resolver-stakes world-after) addr 0)]
-              :when (< stake-after stake-before)]
+              :let [stake-after    (get (:resolver-stakes world-after) addr 0)
+                    slashed-before (get (:resolver-slash-total world-before) addr 0)
+                    slashed-after  (get (:resolver-slash-total world-after) addr 0)
+                    net-slashed    (- slashed-after slashed-before)
+                    ;; Voluntary drop = reduction beyond what the protocol slashed this step
+                    voluntary-drop (- (- stake-before stake-after) net-slashed)]
+              :when (pos? voluntary-drop)]
           addr)
         violations
-        (for [addr resolvers-who-withdrew
+        (for [addr voluntary-withdrawers
               :let [active-disputes
-                    (filter (fn [[wf et]]
+                    (filter (fn [[_ et]]
                               (and (= :disputed (:escrow-state et))
                                    (= addr (:dispute-resolver et))))
                             (:escrow-transfers world-before))]
               :when (seq active-disputes)]
-          {:resolver addr :active-disputes (map first active-disputes)})]
+          {:resolver addr :active-disputes (mapv first active-disputes)})]
     {:holds?     (empty? violations)
      :violations (vec violations)}))
 
@@ -633,6 +641,42 @@
      :violations (vec violations)}))
 
 ;; ---------------------------------------------------------------------------
+;; Invariant 23: Dispute resolution path exists (structural liveness)
+;;
+;; Every :disputed escrow must have at least one configured mechanism that can
+;; terminate it.  An escrow with no mechanism is permanently locked — a
+;; deadlock the protocol cannot recover from.
+;;
+;; The four mechanisms (any one is sufficient):
+;;   1. Assigned resolver   — :dispute-resolver on EscrowTransfer is non-nil
+;;   2. Resolution module   — :resolution-module in ModuleSnapshot is non-nil
+;;   3. Dispute timeout     — :max-dispute-duration > 0 in snapshot (keeper can auto-cancel)
+;;   4. Pending settlement  — a settlement already exists and can be executed
+;;
+;; This is a necessary but not sufficient condition for eventual resolution.
+;; Sufficiency is enforced at the scenario level by the end-of-scenario liveness
+;; check in replay/replay-scenario (scenarios without :allow-open-disputes? true
+;; must have all disputes resolved before the event list is exhausted).
+;; ---------------------------------------------------------------------------
+
+(defn dispute-resolution-path-exists?
+  "True when every :disputed escrow has at least one termination mechanism.
+   A dispute with no mechanism is a permanent deadlock."
+  [world]
+  (let [violations
+        (for [[wf et] (:escrow-transfers world)
+              :when (= :disputed (:escrow-state et))
+              :let [snap     (t/get-snapshot world wf)
+                    has-path? (or (some? (:dispute-resolver et))
+                                  (some? (:resolution-module snap))
+                                  (pos? (get snap :max-dispute-duration 0))
+                                  (:exists (t/get-pending world wf)))]
+              :when (not has-path?)]
+          {:workflow-id wf})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
 ;; Composite: check all world-level invariants
 ;; ---------------------------------------------------------------------------
 
@@ -657,7 +701,8 @@
                   :bond-slash-bounded            (bond-slash-bounded? world)
                   :fee-cap                       (fee-cap-holds? world)
                   :no-stale-automatable-escrows  (no-stale-automatable-escrows? world)
-                  :conservation-of-funds         (conservation-of-funds? world)}
+                  :conservation-of-funds         (conservation-of-funds? world)
+                  :dispute-resolution-path       (dispute-resolution-path-exists? world)}
          all?    (every? #(:holds? %) (vals results))]
      {:all-hold? all?
       :results   results})))

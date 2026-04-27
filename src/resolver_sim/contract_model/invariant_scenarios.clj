@@ -33,6 +33,13 @@
 (def ^:private timeout
   {:resolver-fee-bps 150 :appeal-window-duration 0 :max-dispute-duration 300})
 
+(def ^:private stake-cascade
+  ;; Zero fee so AFA = amount; short timeout for quick testing.
+  ;; resolver-bond-bps=0 skips the creation-time stake-capacity guard,
+  ;; letting us register stake separately and observe it deplete under slashing.
+  {:resolver-fee-bps 0 :max-dispute-duration 300
+   :dispute-resolver "0xresolver" :resolver-bond-bps 0})
+
 (def ^:private appeal
   {:resolver-fee-bps 150 :appeal-window-duration 120 :max-dispute-duration 600})
 
@@ -576,9 +583,10 @@
 ;; ---------------------------------------------------------------------------
 
 (def s20
-  {:scenario-id     "s20-dr3-kleros-max-escalation-guard"
-   :schema-version  "1.0"
-   :initial-block-time 1000
+  {:scenario-id          "s20-dr3-kleros-max-escalation-guard"
+   :schema-version       "1.0"
+   :allow-open-disputes? true ; intentionally tests guard logic; dispute is never resolved
+   :initial-block-time   1000
    :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"}
                      {:id "seller"     :address "0xseller" :type "honest"}
                      {:id "l2resolver" :address "0xl2"     :type "resolver"}]
@@ -644,9 +652,10 @@
 ;; ---------------------------------------------------------------------------
 
 (def s22
-  {:scenario-id     "s22-status-leak-agree-cancel-over-dispute"
-   :schema-version  "1.0"
-   :initial-block-time 1000
+  {:scenario-id          "s22-status-leak-agree-cancel-over-dispute"
+   :schema-version       "1.0"
+   :allow-open-disputes? true ; intentionally stops after raising the dispute (regression test for status clearing)
+   :initial-block-time   1000
    :agents          [{:id "buyer"  :address "0xbuyer"  :type "honest"}
                      {:id "seller" :address "0xseller" :type "honest"}]
    :protocol-params dr3
@@ -695,6 +704,66 @@
      :params {:workflow-id "wf0"}}]})
 
 ;; ---------------------------------------------------------------------------
+;; S24 — resolver stake depletion cascade
+;;
+;; One resolver (stake=3000) is assigned to three concurrent escrows (AFA=2000 each).
+;; All three disputes timeout. Each auto-cancel slashes the resolver's remaining stake:
+;;   wf0: slashes 2000 → stake 3000→1000  (full slash)
+;;   wf1: slashes 2000 → stake 1000→0     (partial: only 1000 available)
+;;   wf2: slashes 2000 → stake 0→0        (zero: nothing left to slash)
+;;
+;; Exercises:
+;;   - solvency-holds? at each step (strict = on total-held vs live-sum)
+;;   - conservation-of-funds? after all three auto-cancels
+;;     (0 held + 0 released + 6000 refunded = 6000 deposited)
+;;   - held-non-negative? / sub-held assert survives all three finalizations
+;;   - slash-resolver-stake saturation: min(stake, slash) never goes negative
+;; ---------------------------------------------------------------------------
+
+(def s24
+  {:scenario-id        "s24-resolver-stake-depletion-cascade"
+   :schema-version     "1.0"
+   :initial-block-time 1000
+   :agents             [{:id "buyer0"   :address "0xbuyer0"   :type "honest"}
+                        {:id "buyer1"   :address "0xbuyer1"   :type "honest"}
+                        {:id "buyer2"   :address "0xbuyer2"   :type "honest"}
+                        {:id "seller"   :address "0xseller"   :type "honest"}
+                        {:id "resolver" :address "0xresolver" :type "resolver"}
+                        {:id "keeper"   :address "0xkeeper"   :type "keeper"}]
+   :protocol-params    stake-cascade
+   :events
+   [;; Resolver registers stake before any escrow is opened
+    {:seq 0 :time 1000 :agent "resolver" :action "register_stake"
+     :params {:amount 3000}}
+    {:seq 1 :time 1000 :agent "buyer0" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 2000}
+     :save-wf-as "wf0"}
+    {:seq 2 :time 1000 :agent "buyer1" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 2000}
+     :save-wf-as "wf1"}
+    {:seq 3 :time 1000 :agent "buyer2" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 2000}
+     :save-wf-as "wf2"}
+    {:seq 4 :time 1060 :agent "buyer0" :action "raise_dispute"
+     :params {:workflow-id "wf0"}}
+    {:seq 5 :time 1060 :agent "buyer1" :action "raise_dispute"
+     :params {:workflow-id "wf1"}}
+    {:seq 6 :time 1060 :agent "buyer2" :action "raise_dispute"
+     :params {:workflow-id "wf2"}}
+    ;; Early attempt: 240 s elapsed, need 300 → rejected
+    {:seq 7 :time 1300 :agent "keeper" :action "auto_cancel_disputed"
+     :params {:workflow-id "wf0"}}
+    ;; Timeout reached — full slash: resolver stake 3000 → 1000
+    {:seq 8 :time 1360 :agent "keeper" :action "auto_cancel_disputed"
+     :params {:workflow-id "wf0"}}
+    ;; Partial slash: only 1000 remains; actual_slashed=1000, stake 1000 → 0
+    {:seq 9 :time 1360 :agent "keeper" :action "auto_cancel_disputed"
+     :params {:workflow-id "wf1"}}
+    ;; Zero-stake slash: resolver exhausted; actual_slashed=0, stake stays 0
+    {:seq 10 :time 1360 :agent "keeper" :action "auto_cancel_disputed"
+     :params {:workflow-id "wf2"}}]})
+
+;; ---------------------------------------------------------------------------
 ;; Scenario registry
 ;; ---------------------------------------------------------------------------
 
@@ -724,4 +793,5 @@
    ["S20  dr3-kleros-max-escalation-guard"          s20]
    ["S21  dr3-kleros-pending-cleared-on-escalation" s21]
    ["S22  status-leak-agree-cancel-over-dispute"    s22]
-   ["S23  preemptive-escalation-blocked"            s23]])
+   ["S23  preemptive-escalation-blocked"            s23]
+   ["S24  resolver-stake-depletion-cascade"         s24]])
