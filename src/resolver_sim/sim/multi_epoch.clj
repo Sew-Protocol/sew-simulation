@@ -4,10 +4,15 @@
    - Gap #1: Sybil resistance (reputation accumulation)
    - Gap #2: Governance failure (detection decay scenarios)
    - Gap #3: Multi-year dynamics (proof of stability)
-   
-   Output: Per-resolver history + aggregated statistics"
+
+   Output: Per-resolver history + aggregated statistics + equity trajectories.
+
+   The :equity-trajectories key in the return value is a map
+   {resolver-id → [profit@epoch1 profit@epoch2 ...]} built by
+   resolver-sim.sim.trajectory/build-equity-trajectories."
   (:require [resolver-sim.sim.batch :as batch]
             [resolver-sim.sim.reputation :as rep]
+            [resolver-sim.sim.trajectory :as trajectory]
             [resolver-sim.model.rng :as rng]
             [clojure.set]))
 
@@ -137,66 +142,93 @@
     ; Initialize resolver cohort
     (let [initial-histories (rep/initialize-resolvers n-resolvers strategy-mix)
           
-          ; Run epoch loop
+          ; Run epoch loop — accumulate epoch summaries AND per-epoch profit snapshots.
+          ; A snapshot is {resolver-id → total-profit-at-end-of-epoch} and feeds
+          ; trajectory/build-equity-trajectories after the loop.
           result-accumulator
           (reduce (fn [acc epoch-num]
                     (let [[rng-1 rng-2] (rng/split-rng (:rng acc))
                           prev-histories (:histories acc initial-histories)
                           {:keys [epoch-summary updated-histories]}
                           (run-single-epoch rng-1 epoch-num prev-histories n-trials-per-epoch params)
-                          
+
+                          ; Snapshot cumulative profit for every resolver at this epoch end.
+                          profit-snapshot
+                          (reduce-kv (fn [m id r] (assoc m id (rep/cumulative-profit r)))
+                                     {} updated-histories)
+
                           _ (println (format "   Epoch %d: honest=%.0f, malice=%.0f, dominance=%.1f×"
-                                           epoch-num
-                                           (:honest-mean-profit epoch-summary)
-                                           (:malice-mean-profit epoch-summary)
-                                           (:dominance-ratio epoch-summary)))]
-                      
+                                             epoch-num
+                                             (:honest-mean-profit epoch-summary)
+                                             (:malice-mean-profit epoch-summary)
+                                             (:dominance-ratio epoch-summary)))]
+
                       (assoc acc
-                        :rng rng-2
-                        :epochs (cons epoch-summary (:epochs acc []))
-                        :histories updated-histories)))
-                  {:rng rng :epochs [] :histories initial-histories}
+                             :rng             rng-2
+                             :epochs          (cons epoch-summary (:epochs acc []))
+                             :histories       updated-histories
+                             :epoch-snapshots (conj (:epoch-snapshots acc []) profit-snapshot))))
+                  {:rng rng :epochs [] :histories initial-histories :epoch-snapshots []}
                   (range 1 (inc n-epochs)))
-          
-          epoch-results (reverse (:epochs result-accumulator []))
-          final-histories (:histories result-accumulator initial-histories)
-          
+
+          epoch-results    (reverse (:epochs result-accumulator []))
+          epoch-snapshots  (:epoch-snapshots result-accumulator [])
+          final-histories  (:histories result-accumulator initial-histories)
+          resolver-ids     (keys final-histories)
+
           ; Aggregate final statistics
           final-stats
-          (let [histories final-histories
+          (let [histories        final-histories
                 honest-resolvers (filter #(= :honest (:strategy (val %))) histories)
                 malice-resolvers (filter #(#{:malicious :lazy :collusive} (:strategy (val %))) histories)
-                
-                honest-profits (map #(rep/cumulative-profit (val %)) honest-resolvers)
-                malice-profits (map #(rep/cumulative-profit (val %)) malice-resolvers)
-                
+
+                honest-profits   (map #(rep/cumulative-profit (val %)) honest-resolvers)
+                malice-profits   (map #(rep/cumulative-profit (val %)) malice-resolvers)
+
                 honest-win-rates (map #(rep/win-rate (val %)) honest-resolvers)
                 malice-win-rates (map #(rep/win-rate (val %)) malice-resolvers)
-                
-                ; Estimate exits by checking which initial IDs are missing in final
-                initial-ids (set (keys initial-histories))
-                final-ids (set (keys histories))
-                total-exits (count (clojure.set/difference initial-ids final-ids))]
-            
-            {:final-resolver-count (count histories)
-             :total-resolver-exits total-exits
-             :honest-final-count (count honest-resolvers)
-             :malice-final-count (count malice-resolvers)
-             :honest-cumulative-profit (double (apply + (map #(rep/cumulative-profit (val %)) honest-resolvers)))
-             :malice-cumulative-profit (double (apply + (map #(rep/cumulative-profit (val %)) malice-resolvers)))
-             :honest-avg-win-rate (if (empty? honest-win-rates) 0.0 (double (/ (apply + honest-win-rates) (count honest-win-rates))))
-             :malice-avg-win-rate (if (empty? malice-win-rates) 0.0 (double (/ (apply + malice-win-rates) (count malice-win-rates))))
-             :honest-exit-rate (if (empty? honest-resolvers) 0.0 (double (/ total-exits n-resolvers)))
-             :malice-exit-rate (if (empty? malice-resolvers) 0.0 (double (/ total-exits (+ (count malice-resolvers) (count (filter #(#{:malicious :lazy :collusive} (:strategy (val %))) initial-histories))))))}),
-          
+
+                initial-ids      (set (keys initial-histories))
+                final-ids        (set (keys histories))
+                total-exits      (count (clojure.set/difference initial-ids final-ids))]
+
+            {:final-resolver-count       (count histories)
+             :total-resolver-exits       total-exits
+             :honest-final-count         (count honest-resolvers)
+             :malice-final-count         (count malice-resolvers)
+             :honest-cumulative-profit   (double (apply + (map #(rep/cumulative-profit (val %)) honest-resolvers)))
+             :malice-cumulative-profit   (double (apply + (map #(rep/cumulative-profit (val %)) malice-resolvers)))
+             :honest-avg-win-rate        (if (empty? honest-win-rates) 0.0
+                                           (double (/ (apply + honest-win-rates) (count honest-win-rates))))
+             :malice-avg-win-rate        (if (empty? malice-win-rates) 0.0
+                                           (double (/ (apply + malice-win-rates) (count malice-win-rates))))
+             :honest-exit-rate           (if (empty? honest-resolvers) 0.0
+                                           (double (/ total-exits n-resolvers)))
+             :malice-exit-rate           (if (empty? malice-resolvers) 0.0
+                                           (double (/ total-exits
+                                                      (+ (count malice-resolvers)
+                                                         (count (filter #(#{:malicious :lazy :collusive}
+                                                                           (:strategy (val %)))
+                                                                        initial-histories))))))})
+
+          ; Build trajectory data using the shared trajectory namespace.
+          equity-trajectories          (trajectory/build-equity-trajectories epoch-snapshots resolver-ids)
+          strategy-spread-trajectories (trajectory/strategy-spread-trajectory final-histories epoch-snapshots)
+
           result
-          {:scenario-id (:scenario-id params "phase-j-unnamed")
-           :n-epochs n-epochs
+          {:scenario-id        (:scenario-id params "phase-j-unnamed")
+           :n-epochs           n-epochs
            :n-trials-per-epoch n-trials-per-epoch
            :initial-resolver-count n-resolvers
-           :epoch-results (or epoch-results [])
+           :epoch-results      (or epoch-results [])
            :resolver-histories final-histories
-           :aggregated-stats final-stats}]
+           :aggregated-stats   final-stats
+           ; --- trajectory output (T1b / T1c) ---
+           :equity-trajectories          equity-trajectories
+           :strategy-spread-trajectories strategy-spread-trajectories
+           :trajectory/meta              {:type        :trajectory/equity
+                                          :epoch-count n-epochs
+                                          :unit        :profit}}]
       
       (println "")
       (println (format "✓ Phase J complete. Final state:"))
