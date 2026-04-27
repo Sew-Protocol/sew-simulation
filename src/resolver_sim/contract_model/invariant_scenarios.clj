@@ -764,6 +764,133 @@
      :params {:workflow-id "wf2"}}]})
 
 ;; ---------------------------------------------------------------------------
+;; S25 — Profit-Maximizer: fraud-slash lifecycle
+;;
+;; Adversarial actor: governance that proposes a speculative fraud slash to
+;; extract value from a resolver, then tries to execute it after losing the
+;; appeal.
+;;
+;; Sequence:
+;;   1. Buyer creates escrow (8000 USDC, appeal-window=120).
+;;   2. Buyer raises dispute; resolver submits a release decision
+;;      → pending (deadline = 1120+120 = 1240).
+;;   3. Governance proposes a fraud slash against the resolver (amount=500)
+;;      → slash is :pending (appeal-deadline = 1130+120 = 1250).
+;;   4. Resolver appeals the slash within the window.
+;;      → slash status: :appealed.
+;;   5. Governance resolves the appeal in the resolver's favour (upheld?=true)
+;;      → slash status: :reversed.
+;;   6. Governance attempts to execute the reversed slash
+;;      → rejected (:slash-already-reversed).
+;;   7. Keeper executes the original pending settlement after deadline.
+;;      → escrow :released.
+;;
+;; Expected: PASS.
+;;
+;; Invariants exercised:
+;;   slash-status-consistent? — slash transitions pending→appealed→reversed
+;;   no-auto-fraud-execute?   — slash went through proper pending window
+;;   appeal-bond-conserved?   — no negative bond amounts anywhere
+;;   conservation-of-funds?   — 0 held + AFA released + 0 refunded = AFA deposited
+;;   terminal-states-unchanged? — once released, stays released
+;; ---------------------------------------------------------------------------
+
+(def s25
+  {:scenario-id     "s25-profit-maximizer-slash-lifecycle"
+   :schema-version  "1.0"
+   :initial-block-time 1000
+   :agents          [{:id "buyer"      :address "0xbuyer"     :type "honest"}
+                     {:id "seller"     :address "0xseller"    :type "honest"}
+                     {:id "resolver"   :address "0xresolver"  :type "resolver"}
+                     {:id "governance" :address "0xgov"       :type "governance"}
+                     {:id "keeper"     :address "0xkeeper"    :type "keeper"}]
+   :protocol-params appeal ; appeal-window=120s, fee-bps=150
+   :events
+   [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 8000
+              :custom-resolver "0xresolver"}
+     :save-wf-as "wf0"}
+    {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
+     :params {:workflow-id "wf0"}}
+    ;; Resolver submits decision → pending (deadline = 1120+120 = 1240)
+    {:seq 2 :time 1120 :agent "resolver" :action "execute_resolution"
+     :params {:workflow-id "wf0" :is-release true :resolution-hash "0xhash"}}
+    ;; Governance proposes a fraud slash (profit-maximizer trying to penalise resolver)
+    ;; slash appeal-deadline = 1130 + 120 (appeal-window-duration from snapshot) = 1250
+    {:seq 3 :time 1130 :agent "governance" :action "propose_fraud_slash"
+     :params {:workflow-id "wf0" :resolver-addr "0xresolver" :amount 500}}
+    ;; Resolver appeals the slash within the window
+    {:seq 4 :time 1140 :agent "resolver" :action "appeal_slash"
+     :params {:workflow-id "wf0"}}
+    ;; Governance resolves the appeal: resolver wins (upheld?=true → slash :reversed)
+    {:seq 5 :time 1160 :agent "governance" :action "resolve_appeal"
+     :params {:workflow-id "wf0" :upheld? true}}
+    ;; Governance tries to execute the reversed slash → rejected (:slash-already-reversed)
+    {:seq 6 :time 1200 :agent "governance" :action "execute_fraud_slash"
+     :params {:workflow-id "wf0"}}
+    ;; Keeper executes the pending settlement after its deadline (1240)
+    {:seq 7 :time 1250 :agent "keeper" :action "execute_pending_settlement"
+     :params {:workflow-id "wf0"}}]})
+
+;; ---------------------------------------------------------------------------
+;; S26 — Forking-Strategist: L0→L1 decision reversal
+;;
+;; Adversarial actor: buyer who escalates strategically after losing at L0,
+;; gambling that a different L1 resolver will fork to the opposite outcome.
+;;
+;; Sequence:
+;;   1. Buyer creates escrow (6000 USDC, kleros appeal-window=60s).
+;;   2. Buyer raises dispute.
+;;   3. L0 resolver rules :release (in favour of seller).
+;;      → pending (deadline = 1120+60 = 1180).
+;;   4. Buyer (forking strategist) escalates before the deadline, posting a
+;;      challenge bond (100 USDC default) → level 0→1, new-resolver=0xl1.
+;;   5. L1 resolver rules :refund (opposite of L0 = the "fork").
+;;      → new pending (deadline = 1190+60 = 1250).
+;;   6. Keeper executes the pending settlement after the L1 deadline.
+;;      → escrow :refunded.
+;;
+;; Expected: PASS — the protocol handles a cross-level decision fork correctly.
+;;
+;; Invariants exercised:
+;;   escalation-level-monotonic?       — level advances 0→1, never goes back
+;;   finalization-accounting-correct?  — L1 refund recorded despite L0 release vote
+;;   conservation-of-funds?            — 0 held + 0 released + AFA refunded = AFA deposited
+;;   token-tax-reconciliation?         — delta-held matches delta-refunded exactly
+;;   fee-cap-holds?                    — escrow-fee + challenge-bond ≤ original amount
+;;   terminal-states-unchanged?        — once :refunded, stays :refunded
+;; ---------------------------------------------------------------------------
+
+(def s26
+  {:scenario-id     "s26-forking-strategist-l1-reversal"
+   :schema-version  "1.0"
+   :initial-block-time 1000
+   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"} ; escalates strategically
+                     {:id "seller"     :address "0xseller" :type "honest"}
+                     {:id "l0resolver" :address "0xl0"     :type "resolver"}
+                     {:id "l1resolver" :address "0xl1"     :type "resolver"}
+                     {:id "keeper"     :address "0xkeeper" :type "keeper"}]
+   :protocol-params kleros-appeal ; fee-bps=150, appeal-window=60s, kleros escalation-resolvers
+   :events
+   [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 6000}
+     :save-wf-as "wf0"}
+    {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
+     :params {:workflow-id "wf0"}}
+    ;; L0 rules in favour of seller (release). Pending deadline = 1120+60 = 1180.
+    {:seq 2 :time 1120 :agent "l0resolver" :action "execute_resolution"
+     :params {:workflow-id "wf0" :is-release true :resolution-hash "0xl0hash"}}
+    ;; Buyer escalates before deadline (the fork attempt) → challenge bond posted, level 0→1
+    {:seq 3 :time 1130 :agent "buyer" :action "escalate_dispute"
+     :params {:workflow-id "wf0"}}
+    ;; L1 rules opposite (refund = the adversarial fork). Pending deadline = 1190+60 = 1250.
+    {:seq 4 :time 1190 :agent "l1resolver" :action "execute_resolution"
+     :params {:workflow-id "wf0" :is-release false :resolution-hash "0xl1hash"}}
+    ;; Keeper executes after L1 deadline → :refunded
+    {:seq 5 :time 1255 :agent "keeper" :action "execute_pending_settlement"
+     :params {:workflow-id "wf0"}}]})
+
+;; ---------------------------------------------------------------------------
 ;; Scenario registry
 ;; ---------------------------------------------------------------------------
 
@@ -794,4 +921,6 @@
    ["S21  dr3-kleros-pending-cleared-on-escalation" s21]
    ["S22  status-leak-agree-cancel-over-dispute"    s22]
    ["S23  preemptive-escalation-blocked"            s23]
-   ["S24  resolver-stake-depletion-cascade"         s24]])
+   ["S24  resolver-stake-depletion-cascade"         s24]
+   ["S25  profit-maximizer-slash-lifecycle"         s25]
+   ["S26  forking-strategist-l1-reversal"           s26]])
