@@ -1332,6 +1332,287 @@
      :params {:workflow-id "wf0"}}]})
 
 ;; ---------------------------------------------------------------------------
+;; S34 — Profit-Maximizer: unchallenged slash (resolver forfeits)
+;;
+;; The simplest profit-extraction path: governance proposes a fraud slash,
+;; the resolver chooses not to contest it, the appeal window closes, and
+;; governance executes.  No appeal is ever filed.
+;;
+;; Sequence:
+;;   1. Buyer creates escrow (8000 USDC, appeal-window=120 s).
+;;   2. Buyer raises dispute; resolver submits release decision.
+;;      Pending deadline = 1120+120 = 1240.
+;;   3. Governance proposes a fraud slash (amount=500).
+;;      Slash appeal-deadline = 1130+120 = 1250.
+;;   4. Resolver does NOT appeal.  The appeal window passes.
+;;   5. Governance executes the slash at t=1255 (>1250) → slash :executed;
+;;      resolver stake is debited by min(stake, 500).
+;;   6. Keeper executes the pending settlement → escrow :released.
+;;
+;; Expected: PASS — the unchallenged slash lifecycle completes without
+;; any invariant violation.  slash and escrow settlement are independent.
+;;
+;; Invariants exercised:
+;;   slash-status-consistent?     — slash pending→executed (no intermediate states)
+;;   no-auto-fraud-execute?        — execute happens after explicit timelock
+;;   conservation-of-funds?        — AFA released; slash operates on resolver-stakes
+;;   terminal-states-unchanged?    — once :released, stays :released
+;; ---------------------------------------------------------------------------
+
+(def s34
+  {:scenario-id     "s34-profit-maximizer-unchallenged-slash"
+   :schema-version  "1.0"
+   :initial-block-time 1000
+   :agents          [{:id "buyer"      :address "0xbuyer"    :type "honest"}
+                     {:id "seller"     :address "0xseller"   :type "honest"}
+                     {:id "resolver"   :address "0xresolver" :type "resolver"}
+                     {:id "governance" :address "0xgov"      :type "governance"}
+                     {:id "keeper"     :address "0xkeeper"   :type "keeper"}]
+   :protocol-params appeal ; appeal-window=120 s, fee-bps=150
+   :events
+   [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 8000
+              :custom-resolver "0xresolver"}
+     :save-wf-as "wf0"}
+    {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
+     :params {:workflow-id "wf0"}}
+    ;; Resolver submits decision → pending (deadline = 1120+120 = 1240)
+    {:seq 2 :time 1120 :agent "resolver" :action "execute_resolution"
+     :params {:workflow-id "wf0" :is-release true :resolution-hash "0xhash"}}
+    ;; Governance proposes slash. Slash appeal-deadline = 1130+120 = 1250.
+    {:seq 3 :time 1130 :agent "governance" :action "propose_fraud_slash"
+     :params {:workflow-id "wf0" :resolver-addr "0xresolver" :amount 500}}
+    ;; [Resolver does not appeal — forfeits.]
+    ;; Governance executes after appeal-deadline → slash :executed
+    {:seq 4 :time 1255 :agent "governance" :action "execute_fraud_slash"
+     :params {:workflow-id "wf0"}}
+    ;; Keeper settles the escrow (deadline 1240 has passed)
+    {:seq 5 :time 1260 :agent "keeper" :action "execute_pending_settlement"
+     :params {:workflow-id "wf0"}}]})
+
+;; ---------------------------------------------------------------------------
+;; S35 — Profit-Maximizer: governance wins the appeal
+;;
+;; Resolver contests the slash (appeals), but governance rejects the appeal
+;; (upheld?=false → slash reverts to :pending).  Governance then executes
+;; the confirmed slash after the original appeal-deadline.
+;;
+;; Sequence:
+;;   1. Buyer creates escrow (8000 USDC, appeal-window=120 s).
+;;   2. Buyer raises dispute; resolver submits release decision.
+;;      Pending deadline = 1120+120 = 1240.
+;;   3. Governance proposes slash (amount=500).
+;;      Slash appeal-deadline = 1130+120 = 1250.
+;;   4. Resolver appeals within the window → slash :appealed.
+;;   5. Governance resolves appeal with upheld?=false (appeal rejected).
+;;      → slash status reverts to :pending (same appeal-deadline = 1250).
+;;   6. Governance executes at t=1255 (>1250) → slash :executed.
+;;   7. Keeper settles the escrow → :released.
+;;
+;; Expected: PASS — full appeal cycle where governance prevails; resolver
+;; cannot replay the appeal; slash executes on the original timelock.
+;;
+;; Invariants exercised:
+;;   slash-status-consistent?     — pending→appealed→pending→executed
+;;   appeal-bond-conserved?       — bond amounts stay non-negative throughout
+;;   conservation-of-funds?       — AFA released; slash operates on resolver-stakes
+;;   terminal-states-unchanged?   — once :released, stays :released
+;; ---------------------------------------------------------------------------
+
+(def s35
+  {:scenario-id     "s35-profit-maximizer-governance-wins-appeal"
+   :schema-version  "1.0"
+   :initial-block-time 1000
+   :agents          [{:id "buyer"      :address "0xbuyer"    :type "honest"}
+                     {:id "seller"     :address "0xseller"   :type "honest"}
+                     {:id "resolver"   :address "0xresolver" :type "resolver"}
+                     {:id "governance" :address "0xgov"      :type "governance"}
+                     {:id "keeper"     :address "0xkeeper"   :type "keeper"}]
+   :protocol-params appeal ; appeal-window=120 s, fee-bps=150
+   :events
+   [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 8000
+              :custom-resolver "0xresolver"}
+     :save-wf-as "wf0"}
+    {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
+     :params {:workflow-id "wf0"}}
+    ;; Resolver submits decision → pending (deadline = 1120+120 = 1240)
+    {:seq 2 :time 1120 :agent "resolver" :action "execute_resolution"
+     :params {:workflow-id "wf0" :is-release true :resolution-hash "0xhash"}}
+    ;; Governance proposes slash. Slash appeal-deadline = 1130+120 = 1250.
+    {:seq 3 :time 1130 :agent "governance" :action "propose_fraud_slash"
+     :params {:workflow-id "wf0" :resolver-addr "0xresolver" :amount 500}}
+    ;; Resolver contests the slash within the window → :appealed
+    {:seq 4 :time 1140 :agent "resolver" :action "appeal_slash"
+     :params {:workflow-id "wf0"}}
+    ;; Governance rejects the appeal (upheld?=false) → slash returns to :pending
+    {:seq 5 :time 1160 :agent "governance" :action "resolve_appeal"
+     :params {:workflow-id "wf0" :upheld? false}}
+    ;; Governance executes after original appeal-deadline (1255 > 1250) → :executed
+    {:seq 6 :time 1255 :agent "governance" :action "execute_fraud_slash"
+     :params {:workflow-id "wf0"}}
+    ;; Keeper settles the escrow → :released
+    {:seq 7 :time 1260 :agent "keeper" :action "execute_pending_settlement"
+     :params {:workflow-id "wf0"}}]})
+
+;; ---------------------------------------------------------------------------
+;; S36 — Profit-Maximizer: pre-window execute rejected; retry succeeds
+;;
+;; Governance attempts to execute the slash before the appeal-deadline (the
+;; timelock) has expired.  The attempt is rejected with :timelock-not-expired.
+;; After the window closes, governance retries and the slash executes.
+;;
+;; Sequence:
+;;   1. Buyer creates escrow (8000 USDC, appeal-window=120 s).
+;;   2. Buyer raises dispute; resolver submits release decision.
+;;      Pending deadline = 1120+120 = 1240.
+;;   3. Governance proposes slash (amount=500).
+;;      Slash appeal-deadline = 1130+120 = 1250.
+;;   4. Governance immediately tries to execute at t=1135 (<1250)
+;;      → rejected (:timelock-not-expired).
+;;   5. Slash appeal-deadline passes; no appeal is filed.
+;;   6. Governance retries execute at t=1255 → slash :executed.
+;;   7. Keeper settles the escrow → :released.
+;;
+;; Expected: PASS — pre-window execution is cleanly rejected; state is
+;; unchanged; the retry after the deadline succeeds.
+;;
+;; Invariants exercised:
+;;   slash-status-consistent?     — slash stays :pending throughout (never aborted)
+;;   no-auto-fraud-execute?        — slash requires explicit post-timelock call
+;;   conservation-of-funds?        — AFA released; slash on resolver-stakes
+;;   terminal-states-unchanged?    — once :released, stays :released
+;; ---------------------------------------------------------------------------
+
+(def s36
+  {:scenario-id     "s36-profit-maximizer-pre-window-execute-rejected"
+   :schema-version  "1.0"
+   :initial-block-time 1000
+   :agents          [{:id "buyer"      :address "0xbuyer"    :type "honest"}
+                     {:id "seller"     :address "0xseller"   :type "honest"}
+                     {:id "resolver"   :address "0xresolver" :type "resolver"}
+                     {:id "governance" :address "0xgov"      :type "governance"}
+                     {:id "keeper"     :address "0xkeeper"   :type "keeper"}]
+   :protocol-params appeal ; appeal-window=120 s, fee-bps=150
+   :events
+   [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 8000
+              :custom-resolver "0xresolver"}
+     :save-wf-as "wf0"}
+    {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
+     :params {:workflow-id "wf0"}}
+    ;; Resolver submits decision → pending (deadline = 1120+120 = 1240)
+    {:seq 2 :time 1120 :agent "resolver" :action "execute_resolution"
+     :params {:workflow-id "wf0" :is-release true :resolution-hash "0xhash"}}
+    ;; Governance proposes slash. Slash appeal-deadline = 1130+120 = 1250.
+    {:seq 3 :time 1130 :agent "governance" :action "propose_fraud_slash"
+     :params {:workflow-id "wf0" :resolver-addr "0xresolver" :amount 500}}
+    ;; Governance attempts early execution (1135 < 1250) → rejected :timelock-not-expired
+    {:seq 4 :time 1135 :agent "governance" :action "execute_fraud_slash"
+     :params {:workflow-id "wf0"}}
+    ;; [Resolver does not appeal.  Appeal window passes.]
+    ;; Governance retries after deadline → slash :executed
+    {:seq 5 :time 1255 :agent "governance" :action "execute_fraud_slash"
+     :params {:workflow-id "wf0"}}
+    ;; Keeper settles the escrow → :released
+    {:seq 6 :time 1260 :agent "keeper" :action "execute_pending_settlement"
+     :params {:workflow-id "wf0"}}]})
+
+;; ---------------------------------------------------------------------------
+;; S37 — Profit-Maximizer: two resolvers slashed simultaneously, split outcomes
+;;
+;; Governance targets two resolvers in parallel.  Resolver-0 (on wf0) appeals
+;; and wins (slash reversed).  Resolver-1 (on wf1) forfeits (no appeal).
+;; After the window closes, governance attempts to execute both slashes:
+;; wf0 is rejected (:slash-already-reversed); wf1 executes.  Both escrows
+;; settle independently.
+;;
+;; Sequence:
+;;   1. Two escrows created with separate custom resolvers.
+;;   2. Both disputes raised; each resolver submits a release decision.
+;;      Both pending deadlines = 1120+120 = 1240.
+;;   3. Governance proposes slashes on both resolvers simultaneously.
+;;      Both slash appeal-deadlines = 1130+120 = 1250.
+;;   4. Resolver-0 appeals → wf0 slash :appealed.
+;;      Resolver-1 does NOT appeal (forfeits).
+;;   5. Governance resolves wf0 appeal with upheld?=true → wf0 slash :reversed.
+;;   6. After appeal-deadline:
+;;      - Governance tries to execute wf0 slash → rejected (:slash-already-reversed).
+;;      - Governance executes wf1 slash → :executed.
+;;   7. Keeper executes both pending settlements → wf0 :released, wf1 :released.
+;;
+;; Expected: PASS — slash operations on wf0 and wf1 are fully isolated;
+;; reversal on wf0 does not affect wf1; both escrows settle correctly.
+;;
+;; Invariants exercised:
+;;   slash-status-consistent?    — wf0: pending→appealed→reversed; wf1: pending→executed
+;;   solvency-holds?             — two escrows tracked independently
+;;   conservation-of-funds?      — (wf0 AFA + wf1 AFA) released = total deposited AFA
+;;   appeal-bond-conserved?      — wf0 bond intact after reversal; wf1 has no bond
+;;   terminal-states-unchanged?  — both escrows stay :released
+;; ---------------------------------------------------------------------------
+
+(def s37
+  {:scenario-id     "s37-profit-maximizer-two-resolver-split-outcomes"
+   :schema-version  "1.0"
+   :initial-block-time 1000
+   :agents          [{:id "buyer0"      :address "0xbuyer0"    :type "honest"}
+                     {:id "buyer1"      :address "0xbuyer1"    :type "honest"}
+                     {:id "seller"      :address "0xseller"    :type "honest"}
+                     {:id "resolver0"   :address "0xresolver0" :type "resolver"}
+                     {:id "resolver1"   :address "0xresolver1" :type "resolver"}
+                     {:id "governance"  :address "0xgov"       :type "governance"}
+                     {:id "keeper"      :address "0xkeeper"    :type "keeper"}]
+   :protocol-params appeal ; appeal-window=120 s, fee-bps=150
+   :events
+   [{:seq 0 :time 1000 :agent "buyer0" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 8000
+              :custom-resolver "0xresolver0"}
+     :save-wf-as "wf0"}
+    {:seq 1 :time 1000 :agent "buyer1" :action "create_escrow"
+     :params {:token "USDC" :to "0xseller" :amount 6000
+              :custom-resolver "0xresolver1"}
+     :save-wf-as "wf1"}
+    {:seq 2 :time 1060 :agent "buyer0" :action "raise_dispute"
+     :params {:workflow-id "wf0"}}
+    {:seq 3 :time 1060 :agent "buyer1" :action "raise_dispute"
+     :params {:workflow-id "wf1"}}
+    ;; wf0: resolver0 submits at t=1120 → pending deadline = 1120+120 = 1240.
+    ;; wf1: resolver1 submits at t=1125 → pending deadline = 1125+120 = 1245.
+    ;; Staggering the deadlines prevents both from being simultaneously stale
+    ;; when the keeper runs, satisfying the no-stale-automatable-escrows invariant.
+    {:seq 4 :time 1120 :agent "resolver0" :action "execute_resolution"
+     :params {:workflow-id "wf0" :is-release true :resolution-hash "0xr0hash"}}
+    {:seq 5 :time 1125 :agent "resolver1" :action "execute_resolution"
+     :params {:workflow-id "wf1" :is-release true :resolution-hash "0xr1hash"}}
+    ;; Governance proposes slashes on both. Slash deadlines = 1130+120 = 1250.
+    {:seq 6 :time 1130 :agent "governance" :action "propose_fraud_slash"
+     :params {:workflow-id "wf0" :resolver-addr "0xresolver0" :amount 500}}
+    {:seq 7 :time 1130 :agent "governance" :action "propose_fraud_slash"
+     :params {:workflow-id "wf1" :resolver-addr "0xresolver1" :amount 300}}
+    ;; Resolver-0 appeals within the window → wf0 slash :appealed
+    {:seq 8 :time 1140 :agent "resolver0" :action "appeal_slash"
+     :params {:workflow-id "wf0"}}
+    ;; [Resolver-1 does NOT appeal (forfeits).]
+    ;; Governance resolves wf0 appeal in resolver-0's favour → wf0 slash :reversed
+    {:seq 9 :time 1160 :agent "governance" :action "resolve_appeal"
+     :params {:workflow-id "wf0" :upheld? true}}
+    ;; wf0 pending deadline (1240) has passed; wf1 deadline (1245) has NOT yet.
+    ;; Settle wf0 now → no stale violation (wf1 is still within its window).
+    {:seq 10 :time 1241 :agent "keeper" :action "execute_pending_settlement"
+     :params {:workflow-id "wf0"}}
+    ;; After both slash and wf1 pending deadlines have passed:
+    ;; Governance tries to execute wf0 slash → rejected (:slash-already-reversed)
+    {:seq 11 :time 1255 :agent "governance" :action "execute_fraud_slash"
+     :params {:workflow-id "wf0"}}
+    ;; Governance executes wf1 slash (forfeited, status :pending) → :executed
+    {:seq 12 :time 1255 :agent "governance" :action "execute_fraud_slash"
+     :params {:workflow-id "wf1"}}
+    ;; Keeper settles wf1 (the only remaining pending settlement)
+    {:seq 13 :time 1260 :agent "keeper" :action "execute_pending_settlement"
+     :params {:workflow-id "wf1"}}]})
+
+;; ---------------------------------------------------------------------------
 ;; Scenario registry
 ;; ---------------------------------------------------------------------------
 
@@ -1371,4 +1652,8 @@
    ["S30  forking-strategist-double-loss"           s30]
    ["S31  forking-strategist-all-levels-confirm"    s31]
    ["S32  forking-strategist-premature-settlement-rejected" s32]
-   ["S33  forking-strategist-two-escrow-fork-isolation" s33]])
+   ["S33  forking-strategist-two-escrow-fork-isolation" s33]
+   ["S34  profit-maximizer-unchallenged-slash"          s34]
+   ["S35  profit-maximizer-governance-wins-appeal"      s35]
+   ["S36  profit-maximizer-pre-window-execute-rejected" s36]
+   ["S37  profit-maximizer-two-resolver-split-outcomes" s37]])
