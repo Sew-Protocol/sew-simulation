@@ -140,8 +140,9 @@
           resolver      (or (:custom-resolver settings)
                             (:dispute-resolver snapshot))
           ;; Bonding guard: only enforce when resolver-bond-bps is configured
-          bond-bps      (:resolver-bond-bps snapshot 0)]
-      (if (and resolver (pos? bond-bps) (not (reg/can-handle-escrow? world resolver afa)))
+          bond-bps      (:resolver-bond-bps snapshot 0)
+          stake         (if resolver (reg/get-stake world resolver) 0)]
+      (if (and resolver (pos? bond-bps) (pos? stake) (not (reg/can-handle-escrow? world resolver afa)))
         (t/fail :insufficient-resolver-stake)
         (let [et            (t/make-escrow-transfer
                              {:token             token

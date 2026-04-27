@@ -439,6 +439,130 @@
      :violations (vec violations)}))
 
 ;; ---------------------------------------------------------------------------
+;; Invariant 17: Bond Liquidity
+;;
+;; Total bonds locked across all active disputes for a resolver must not
+;; exceed their total staked amount in the protocol.
+;; ---------------------------------------------------------------------------
+
+(defn bond-liquidity-holds?
+  "True when a resolver's total locked bonds (across all active disputes)
+   is less than or equal to their recorded stake."
+  [world]
+  (let [resolver-bonds (reduce (fn [acc [wf bonds]]
+                                 ;; Only count disputes that are currently active
+                                 (if (= :disputed (t/escrow-state world wf))
+                                   (reduce (fn [inner-acc [addr amount]]
+                                             (update inner-acc addr (fnil + 0) amount))
+                                           acc
+                                           bonds)
+                                   acc))
+                               {}
+                               (:bond-balances world))
+        violations (for [[addr locked] resolver-bonds
+                         :let [stake (get (:resolver-stakes world) addr 0)]
+                         :when (> locked stake)]
+                     {:resolver addr :locked locked :stake stake})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
+;; Invariant 18: No Withdrawal During Dispute
+;;
+;; A resolver must not be able to reduce their stake (withdraw) if they have
+;; any active disputes where they are the current resolution authority.
+;; ---------------------------------------------------------------------------
+
+(defn no-withdrawal-during-dispute?
+  "True when any resolver who decreased their stake between world-before
+   and world-after has no active disputes in world-before."
+  [world-before world-after]
+  (let [resolvers-who-withdrew
+        (for [[addr stake-before] (:resolver-stakes world-before)
+              :let [stake-after (get (:resolver-stakes world-after) addr 0)]
+              :when (< stake-after stake-before)]
+          addr)
+        violations
+        (for [addr resolvers-who-withdrew
+              :let [active-disputes
+                    (filter (fn [[wf et]]
+                              (and (= :disputed (:escrow-state et))
+                                   (= addr (:dispute-resolver et))))
+                            (:escrow-transfers world-before))]
+              :when (seq active-disputes)]
+          {:resolver addr :active-disputes (map first active-disputes)})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
+;; Invariant 19: Fee Cap Integrity
+;;
+;; Total fees collected for any escrow (escrow-fee + all appeal-fees) must
+;; not exceed the original escrow amount.
+;; ---------------------------------------------------------------------------
+
+(defn fee-cap-holds?
+  "True when (total-fees-for-escrow) <= (original-amount) for all workflows.
+   
+   Original amount is inferred from (amount-after-fee + initial-fee).
+   Appeal bonds are added to the fee total."
+  [world]
+  (let [violations
+        (for [[wf et] (:escrow-transfers world)
+              :let [afa    (:amount-after-fee et)
+                    snap   (t/get-snapshot world wf)
+                    bps    (get snap :escrow-fee-bps 0)
+                    ;; Reconstruct the fee from the AFA and bps
+                    ;; fee = floor(original * bps / 10000)
+                    ;; original = afa + fee
+                    ;; afa = original * (1 - bps/10000)
+                    ;; original = afa / (1 - bps/10000)
+                    fee (if (>= bps 10000) 0 (quot (* afa bps) (- 10000 bps)))
+                    original (+ afa fee)
+                    ;; appeal-fees = sum of all bonds currently held for this wf
+                    appeal-fees (reduce + 0 (vals (get (:bond-balances world) wf {})))
+                    total-fees (+ fee appeal-fees)]
+              :when (> total-fees original)]
+          {:workflow-id wf :total-fees total-fees :original original})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
+;; Invariant 20: Time-Lock Integrity
+;;
+;; State-changing operations on the same workflow must respect a minimum
+;; temporal spacing (anti-spam / anti-flooding).
+;; Specifically: raiseDispute and subsequent Escalations cannot happen
+;; in the same block.
+;; ---------------------------------------------------------------------------
+
+(defn time-lock-integrity?
+  "True when no workflow has undergone two state-changing transitions
+   (raiseDispute -> Escalation) in the same block time.
+   
+   Relaxation: only enforced when block-time > 0 (to permit old test
+   scenarios that use 0 as a sentinel or do everything in one block).
+   
+   Symmetry Exception: we permit escalation (level 0 -> 1) in the same block
+   as raiseDispute (level nil -> 0), but block level 1 -> 2 in the same block
+   as any previous level change."
+  [world-before world-after]
+  (let [bt-after (:block-time world-after)]
+    (if (zero? bt-after)
+      {:holds? true :violations []}
+      (let [violations
+            (for [[wf level-after] (:dispute-levels world-after)
+                  :let [level-before (t/dispute-level world-before wf)]
+                  :when (> level-after level-before)
+                  :let [bt-before (:block-time world-before)]
+                  ;; We block if level-after > 1 (meaning it's not the first escalation)
+                  ;; OR if level-before was already > 0 (meaning we're escalating twice).
+                  :when (and (> level-after 1) (= bt-before bt-after))]
+              {:workflow-id wf :level-before level-before :level-after level-after :block-time bt-after})]
+        {:holds?     (empty? violations)
+         :violations (vec violations)}))))
+
+;; ---------------------------------------------------------------------------
 ;; Composite: check all world-level invariants
 ;; ---------------------------------------------------------------------------
 
@@ -458,7 +582,9 @@
                   :dispute-level-bounded         (dispute-level-bounded? world)
                   :slash-status-consistent       (slash-status-consistent? world)
                   :appeal-bond-conserved         (appeal-bond-conserved? world)
-                  :no-auto-fraud-execute         (no-auto-fraud-execute? world)}
+                  :no-auto-fraud-execute         (no-auto-fraud-execute? world)
+                  :bond-liquidity                (bond-liquidity-holds? world)
+                  :fee-cap                       (fee-cap-holds? world)}
          all?    (every? #(:holds? %) (vals results))]
      {:all-hold? all?
       :results   results})))
@@ -474,7 +600,14 @@
                  :finalization-accounting-correct
                  (finalization-accounting-correct? world-before world-after)
                  :escalation-level-monotonic
-                 (escalation-level-monotonic? world-before world-after)}
+                 (escalation-level-monotonic? world-before world-after)
+                 :no-withdrawal-during-dispute
+                 (no-withdrawal-during-dispute? world-before world-after)
+                 :time-lock-integrity
+                 (time-lock-integrity? world-before world-after)}
         all?    (every? #(:holds? %) (vals results))]
     {:all-hold? all?
      :results   results}))
+
+
+

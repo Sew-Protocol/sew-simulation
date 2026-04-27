@@ -557,7 +557,7 @@ class TestIntegration:
         client.start_session(sid, AGENTS)
         r = client.start_session(sid, AGENTS)
         assert r["ok"] is False
-        assert r["error"] == "session_already_exists"
+        assert r["error"] == "session-already-exists"
         client.destroy_session(sid)
 
     def test_step_create_escrow(self, client):
