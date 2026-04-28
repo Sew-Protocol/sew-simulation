@@ -1,4 +1,4 @@
-(ns resolver-sim.model.types
+(ns resolver-sim.stochastic.types
   "Core parameter schemas and types for the dispute resolution simulation."
   (:refer-clojure :exclude []))
 

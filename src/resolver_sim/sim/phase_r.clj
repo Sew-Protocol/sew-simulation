@@ -13,8 +13,8 @@
    
    Key insight: Economic incentives alone don't guarantee liveness.
    You need active participation ecosystem design."
-  (:require [resolver-sim.model.liveness-failures :as liveness]
-            [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.liveness-failures :as liveness]
+            [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine      :as engine]))
 
 ;; ============ Test 1: Opportunity Cost ============

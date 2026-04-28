@@ -8,7 +8,7 @@
   This test simulates attacker learning which of 10 categories are easiest
   to win in, then concentrating volume there."
   (:require [clojure.math :as math]
-            [resolver-sim.model.rng :as rng]
+            [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine      :as engine]))
 
 (defn simulate-category

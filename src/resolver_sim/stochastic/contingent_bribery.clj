@@ -1,4 +1,4 @@
-(ns resolver-sim.model.contingent-bribery
+(ns resolver-sim.stochastic.contingent-bribery
   "Phase P: Contingent bribery market modeling.
    
    Model: Attacker offers 'Vote X, or we collateralize in escrow'

@@ -1,7 +1,7 @@
 (ns resolver-sim.sim.sweep
   "Parameter sweep runner for sensitivity analysis."
   (:require [resolver-sim.sim.batch :as batch]
-            [resolver-sim.model.rng :as rng]))
+            [resolver-sim.stochastic.rng :as rng]))
 
 (defn cartesian-product
   "Generate Cartesian product of sequences."

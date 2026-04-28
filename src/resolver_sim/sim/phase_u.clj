@@ -16,7 +16,7 @@
    - Strategy convergence (do they pick one winning strategy?)
    - Governance lag (can updates outpace learning?)
    - Budget efficiency (cost per successful attack)"
-  (:require [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine      :as engine]))
 
 ;; ============ Simple Adaptive Attacker ============

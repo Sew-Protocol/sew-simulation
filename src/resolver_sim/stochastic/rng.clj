@@ -1,4 +1,4 @@
-(ns resolver-sim.model.rng
+(ns resolver-sim.stochastic.rng
   "RNG management and seeding strategy.
    
    Uses SplittableRandom for parallel determinism.

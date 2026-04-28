@@ -19,11 +19,11 @@
      {:phase/id :phase-ah
       :trajectory/classes [:equity-divergence :strategy-spread]}
 
-   Parameters: params/phase-ah-trajectory-sweep.edn
+   Parameters: data/params/phase-ah-trajectory-sweep.edn
    Entry point: (run-phase-ah params)"
   (:require [resolver-sim.sim.multi-epoch :as me]
             [resolver-sim.sim.trajectory :as trajectory]
-            [resolver-sim.model.rng :as rng]))
+            [resolver-sim.stochastic.rng :as rng]))
 
 (def phase-metadata
   {:phase/id          :phase-ah
@@ -106,7 +106,7 @@
 (defn run-phase-ah
   "Run Phase AH: sweep over n-epochs-sweep × strategy-mixes.
 
-   params — loaded from params/phase-ah-trajectory-sweep.edn.
+   params — loaded from data/params/phase-ah-trajectory-sweep.edn.
    Returns a result map with :pass?, per-trial results, and phase metadata."
   [params]
   (println "\n📈 Running Phase AH: Equity Divergence Sweep")

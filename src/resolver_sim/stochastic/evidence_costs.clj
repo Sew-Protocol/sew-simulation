@@ -1,4 +1,4 @@
-(ns resolver-sim.model.evidence-costs
+(ns resolver-sim.stochastic.evidence-costs
   "Evidence verification costs and load-dependent strategy selection.
    
    Phase P Lite: Adds attention budget constraint to break infinite-capacity assumption.
@@ -8,8 +8,8 @@
    
    Also models: evidence forgery cost < verification cost for hard cases.
    This creates an asymmetry where attackers can forge faster than honest can verify."
-  (:require [resolver-sim.model.difficulty :as diff]
-            [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.stochastic.difficulty :as diff]
+            [resolver-sim.stochastic.rng :as rng]))
 
 ;; === Effort Budget Constraints ===
 

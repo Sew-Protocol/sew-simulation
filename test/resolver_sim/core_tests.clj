@@ -1,9 +1,9 @@
 (ns resolver-sim.core-tests
   (:require [clojure.test :refer [deftest is testing]]
-            [resolver-sim.model.types :as types]
-            [resolver-sim.model.economics :as econ]
-            [resolver-sim.model.dispute :as dispute]
-            [resolver-sim.model.rng :as rng]))
+            [resolver-sim.stochastic.types :as types]
+            [resolver-sim.stochastic.economics :as econ]
+            [resolver-sim.stochastic.dispute :as dispute]
+            [resolver-sim.stochastic.rng :as rng]))
 
 (deftest fee-calculation-test
   (testing "Fee calculation"

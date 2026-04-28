@@ -31,13 +31,13 @@
             [resolver-sim.sim.phase-x          :as phase-x]
             [resolver-sim.sim.adversarial :as adversarial]
             [resolver-sim.server.grpc          :as grpc]
-            [resolver-sim.model.rng :as rng]
+            [resolver-sim.stochastic.rng :as rng]
             [clojure.tools.cli :refer [parse-opts]])
   (:gen-class))
 
 (def cli-options
   [["-p" "--params PATH" "Path to params.edn file"
-    :default "params/baseline.edn"]
+    :default "data/params/baseline.edn"]
    ["-o" "--output DIR" "Output directory for results"
     :default "results"]
    ["-s" "--sweep" "Run strategy sweep (honest, lazy, malicious, collusive)"]
@@ -85,8 +85,8 @@
         options-summary
         ""
         "Examples:"
-        "  clojure -M:run -p params/baseline.edn"
-        "  clojure -M:run -p params/cartel.edn -s  # sweep strategies"
+        "  clojure -M:run -p data/params/baseline.edn"
+        "  clojure -M:run -p data/params/cartel.edn -s  # sweep strategies"
         "  clojure -M:run -S                        # start gRPC server on port 7070"
         "  clojure -M:run -S --port 9090            # start gRPC server on port 9090"]
        (clojure.string/join "\n")))
@@ -427,7 +427,7 @@
 
           (try
             (println "Loading params from:" (:params options))
-            (let [params    (params/validate-and-merge (:params options))
+            (let [params    (data/params/validate-and-merge (:params options))
                   output    (:output options)
                   phase-key (some #(when (get options %) %) (keys phase-runners))
                   [label run-fn] (get phase-runners phase-key)]

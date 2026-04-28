@@ -139,7 +139,7 @@ and unit tests without a live XTDB instance.
 ## Evaluation pipeline (statistical simulation)
 
 ```
-params/*.edn
+data/params/*.edn
   ↓  io/params.clj  (load + validate + merge defaults)
 Validated params map
   ↓  core.clj  (CLI dispatch)

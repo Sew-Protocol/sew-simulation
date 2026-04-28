@@ -1,4 +1,4 @@
-(ns resolver-sim.model.resolver-ring
+(ns resolver-sim.stochastic.resolver-ring
   "Resolver collusion ring simulation (Phase F).
    
    Models a coordinated group of resolvers:
@@ -11,10 +11,10 @@
    - Catch rate = % of disputes where ring is caught
    - Member states = individual bond remaining per resolver")
 
-(require '[resolver-sim.model.delegation :as delegation]
-         '[resolver-sim.model.dispute :as dispute]
-         '[resolver-sim.model.rng :as rng]
-         '[resolver-sim.model.economics :as econ])
+(require '[resolver-sim.stochastic.delegation :as delegation]
+         '[resolver-sim.stochastic.dispute :as dispute]
+         '[resolver-sim.stochastic.rng :as rng]
+         '[resolver-sim.stochastic.economics :as econ])
 
 (defn create-ring
   "Create a resolver ring with given structure.

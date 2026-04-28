@@ -1,4 +1,4 @@
-(ns resolver-sim.model.delegation
+(ns resolver-sim.stochastic.delegation
   "Delegation and multi-resolver collusion mechanics (Phase F).
    
    Key concepts:

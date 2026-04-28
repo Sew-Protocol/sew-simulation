@@ -7,8 +7,8 @@
    - Attacker budget: [0%, 10%, 25%]
    
    Returns comprehensive heatmap of dominance ratios"
-  (:require [resolver-sim.model.rng :as rng]
-            [resolver-sim.model.difficulty :as diff]
+  (:require [resolver-sim.stochastic.rng :as rng]
+            [resolver-sim.stochastic.difficulty :as diff]
             [clojure.string :as str]
             [resolver-sim.sim.engine :as engine]))
 

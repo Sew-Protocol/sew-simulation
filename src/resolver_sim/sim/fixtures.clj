@@ -1,7 +1,7 @@
 (ns resolver-sim.sim.fixtures
   "Recursive fixture loader and composer for deterministic simulation suites.
 
-   Handles loading EDN/JSON files from fixtures/ based on keyword namespaces.
+   Handles loading EDN/JSON files from data/fixtures/ based on keyword namespaces.
    Implements canonical action mapping, golden report generation, and
    trace minimisation integration."
   (:require [clojure.edn :as edn]
@@ -35,8 +35,8 @@
         nm (name k)
         ext (if (= ns "traces") ".trace.json" ".edn")]
     (if ns
-      (str "fixtures/" ns "/" nm ext)
-      (str "fixtures/" nm ext))))
+      (str "data/fixtures/" ns "/" nm ext)
+      (str "data/fixtures/" nm ext))))
 
 (defn load-fixture
   [k]
@@ -124,13 +124,13 @@
 
 (defn- save-golden-report
   [suite-key result]
-  (let [path (str "fixtures/golden/" (name (:trace-id result)) ".report.edn")]
+  (let [path (str "data/fixtures/golden/" (name (:trace-id result)) ".report.edn")]
     (with-open [w (io/writer path)]
       (pp/pprint (:golden-report result) w))))
 
 (defn- compare-golden-report
   [suite-key result]
-  (let [path (str "fixtures/golden/" (name (:trace-id result)) ".report.edn")
+  (let [path (str "data/fixtures/golden/" (name (:trace-id result)) ".report.edn")
         golden (edn/read-string (slurp path))
         report (:golden-report result)]
     (if (= golden report)
@@ -221,12 +221,12 @@
 ;; ---------------------------------------------------------------------------
 
 (defn list-suites
-  "Scan fixtures/suites/ and return a map of suite-key → top-level metadata.
+  "Scan data/fixtures/suites/ and return a map of suite-key → top-level metadata.
    Does not recursively compose fixtures; returns only the declared suite keys
    (:suite/id :suite/title :suite/purpose :suite/class :suite/criticality
    :suite/prevents) without loading traces or thresholds."
   []
-  (let [suites-dir (io/file "fixtures/suites")]
+  (let [suites-dir (io/file "data/fixtures/suites")]
     (->> (.listFiles suites-dir)
          (filter #(str/ends-with? (.getName %) ".edn"))
          (map (fn [f]

@@ -13,7 +13,7 @@
 
    If correctness drops below 75% under realistic loads, the system
    needs attention-reward design changes before 90% confidence is claimed."
-  (:require [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine      :as engine]))
 
 ;; ============ Dispute Complexity Distribution ============

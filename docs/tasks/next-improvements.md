@@ -1,7 +1,7 @@
   1. High-Priority Infrastructure & Documentation
-   * Finalise README.md & fixtures/README.md: These are now structurally complete, but the content in docs/ and the repo-level documentation should reflect the new
+   * Finalise README.md & data/fixtures/README.md: These are now structurally complete, but the content in docs/ and the repo-level documentation should reflect the new
      abstraction layer (DisputeProtocol kernel vs. SEW plugin).
-   * Suite Manifest: Create the fixtures/suites/manifest.edn as a single registry file, making it easy for users to list and discover all available suites.
+   * Suite Manifest: Create the data/fixtures/suites/manifest.edn as a single registry file, making it easy for users to list and discover all available suites.
    * Determinism Proof: Execute the "Double Run" check (run-suite twice, byte-compare golden/ reports) and document the result as a guarantee.
 
   2. Trace Minimisation (Refining Implementation)
@@ -21,8 +21,8 @@
    * Outcome & Integrity Mapping: Fully integrate the Resolution Trace Metadata (:outcome, :integrity, :failure) into the run-suite reporter.
 
   5. Roadmap Coverage & Testing
-   * Coverage Manifest: Populate the "Coverage Manifest" in fixtures/README.md with:
+   * Coverage Manifest: Populate the "Coverage Manifest" in data/fixtures/README.md with:
        - Covered: Escrow lifecycle, Baseline timeout, Escalation spam.
        - In Progress: Resolver withdrawal guard, Fee cap breaches.
        - Backlog: Collusion rings, Token pathologies (FoT), Cross-vault leakage.
-   * Golden Snapshot Discipline: Formally define the "Reviewer-only" update rule for fixtures/golden/ files to prevent drift from being accidentally blessed.
+   * Golden Snapshot Discipline: Formally define the "Reviewer-only" update rule for data/fixtures/golden/ files to prevent drift from being accidentally blessed.

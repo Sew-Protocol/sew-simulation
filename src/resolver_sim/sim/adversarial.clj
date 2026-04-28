@@ -1,7 +1,7 @@
 (ns resolver-sim.sim.adversarial
   "Adversarial parameter search with Production Threat Envelope (PTE)."
   (:require [resolver-sim.sim.batch :as batch]
-            [resolver-sim.model.rng :as rng]))
+            [resolver-sim.stochastic.rng :as rng]))
 
 (def pte-v1
   {:resolver-fee-bps [100 300]

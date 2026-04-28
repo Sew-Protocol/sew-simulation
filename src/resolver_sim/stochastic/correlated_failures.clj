@@ -1,4 +1,4 @@
-(ns resolver-sim.model.correlated-failures
+(ns resolver-sim.stochastic.correlated-failures
   "Model correlated resolver behavior and shared failure modes.
    
    Single-resolver assumption: Each resolver decides independently.
@@ -11,7 +11,7 @@
    
    This creates phase transitions: System gracefully degrades with
    diversity, but collapses at certain correlation thresholds."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.stochastic.rng :as rng]))
 
 ;; ============ Correlation Models ============
 

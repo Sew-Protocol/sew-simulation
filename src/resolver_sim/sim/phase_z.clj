@@ -8,7 +8,7 @@
 
    Failure signal: trust drops below exit threshold → participation cascades
    downward → security threshold breached."
-  (:require [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine :as engine]))
 
 ;; ============ Trust Index Model (Pure) ============

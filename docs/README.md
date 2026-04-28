@@ -12,7 +12,7 @@ This directory contains the complete simulation analysis and validation document
 **Deploying to production?** Follow this order:
 1. Review `FINDINGS_SUMMARY.md` for overall security assessment
 2. Check `phase-i-automatic-detection.md` for activation instructions
-3. Run scenarios from `../params/` to validate before deployment
+3. Run scenarios from `../data/params/` to validate before deployment
 
 ---
 
@@ -89,12 +89,12 @@ Detection Rate | Slash Multiplier | Malice Profit | Status
 
 ### "I'm deploying to mainnet"
 → Read: phase-i-automatic-detection.md (activation instructions)  
-→ Run: `clojure -M:run -- -p params/phase-i-all-mechanisms.edn`  
+→ Run: `clojure -M:run -- -p data/params/phase-i-all-mechanisms.edn`  
 → Verify: Malice profit should be -199 (system safe)
 
 ### "I'm debugging why fraud isn't deterred"
 → Check: simulation-checklist.md section 3 (adversarial scenarios)  
-→ Run: `clojure -M:run -- -p params/phase-i-2d-all-mechanisms.edn -s`  
+→ Run: `clojure -M:run -- -p data/params/phase-i-2d-all-mechanisms.edn -s`  
 → Analyze: 2D break-even surface to find your parameters
 
 ### "I want the full academic treatment"
@@ -114,11 +114,11 @@ Detection Rate | Slash Multiplier | Malice Profit | Status
 5. Monitor malicious attempts (should drop to zero)
 
 ### To Validate Before Deployment
-1. Run baseline (unchanged from Phase H): `clojure -M:run -- -p params/baseline.edn`
+1. Run baseline (unchanged from Phase H): `clojure -M:run -- -p data/params/baseline.edn`
    - Expect: 150 honest, 150 malice (Phase H baseline)
-2. Run Phase I single scenario: `clojure -M:run -- -p params/phase-i-all-mechanisms.edn`
+2. Run Phase I single scenario: `clojure -M:run -- -p data/params/phase-i-all-mechanisms.edn`
    - Expect: 150 honest, -199 malice (deeply safe)
-3. Run 2D sweep: `clojure -M:run -- -p params/phase-i-2d-all-mechanisms.edn -s`
+3. Run 2D sweep: `clojure -M:run -- -p data/params/phase-i-2d-all-mechanisms.edn -s`
    - Expect: 25 combinations, all showing unprofitable fraud above 10% detection
 
 ### To Understand The Security Improvement

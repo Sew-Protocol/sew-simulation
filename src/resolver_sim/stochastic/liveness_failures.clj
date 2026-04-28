@@ -1,4 +1,4 @@
-(ns resolver-sim.model.liveness-failures
+(ns resolver-sim.stochastic.liveness-failures
   "Model participation and liveness failures in decentralized dispute resolution.
    
    Critical insight: System can be economically sound but still fail because
@@ -11,7 +11,7 @@
    4. Participation spiral (fewer resolvers → slower → more leave)
    
    Based on: Market microstructure, participation games, reflexivity."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.stochastic.rng :as rng]))
 
 ;; ============ Juror Participation Model ============
 

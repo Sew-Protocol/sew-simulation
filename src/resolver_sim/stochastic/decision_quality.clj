@@ -1,4 +1,4 @@
-(ns resolver-sim.model.decision-quality
+(ns resolver-sim.stochastic.decision-quality
   "Per-round decision quality under time pressure and evidence constraints.
    
    Models the sequential appeal system where each round has different:
@@ -8,7 +8,7 @@
    
    This replaces the invalid parallel-panel herding model with realistic
    sequential appeal dynamics."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.stochastic.rng :as rng]))
 
 ;; ============ Round Configurations ============
 

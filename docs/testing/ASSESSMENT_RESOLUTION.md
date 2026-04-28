@@ -94,7 +94,7 @@
 - ✅ Execution time: 2.4 seconds (excellent scaling)
 
 **Evidence**:
-- 2D sweep results (`params/phase-i-2d-all-mechanisms.edn`):
+- 2D sweep results (`data/params/phase-i-2d-all-mechanisms.edn`):
   - 25 combos tested (5% to 30% detection)
   - All show unprofitable fraud above 10% detection
   - Break-even surface clearly identified

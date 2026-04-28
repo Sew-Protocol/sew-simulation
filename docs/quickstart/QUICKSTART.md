@@ -1,28 +1,23 @@
 # Quick Start: Dispute Resolver Simulation
 
-## Running Your First Simulation
+## 🚀 Running Your First Simulation
 
 ### Option 1: Using the Wrapper Script (Recommended)
 ```bash
-cd ~/Code/sew-simulation
+# Quick validation check (all phases, ~4 mins)
+./test-all.sh
 
-# Single scenario (baseline parameters)
-./run.sh -p params/baseline.edn
-
-# Strategy sweep (test honest vs malicious vs lazy)
-./run.sh -p params/baseline.edn -s
+# Run a specific scenario suite
+./run.sh -p data/params/baseline.edn
 ```
 
 ### Option 2: Direct Clojure Command
 ```bash
-# Single scenario
-clojure -M:run -- -p params/baseline.edn
+# Run in-process invariant validation (S01–S41)
+clojure -M:run -- --invariants
 
-# Strategy sweep
-clojure -M:run -- -p params/baseline.edn -s
-
-# Help
-clojure -M:run -- --help
+# Run Monte Carlo simulation with strategy sweep
+clojure -M:run -- -p data/params/baseline.edn -s
 ```
 
 ## Understanding Results
@@ -44,44 +39,21 @@ The simulation outputs three files to `results/TIMESTAMP_scenario_id/`:
 - Higher = safer (attacks are caught)
 - Lower = more efficient (fewer disputes)
 
-## Scenarios
+## Scenarios & Suites
 
-### Baseline (baseline.edn)
-Standard parameters: 1.5% fee, 7% bond, 2.5× slashing
-- 1000 trials
-- Tests standard resolver behavior
+Scenarios are defined in `data/params/` (Monte Carlo) and `data/fixtures/` (Deterministic).
 
-### Whale Attack (whale-attack.edn)
-Large escrows + organized malice
-- 2000 trials (more variance)
-- Single scenario run only
-- Tests economics under extreme amounts
+### Main Scenarios
+- **baseline.edn**: Standard parameters (1.5% fee, 7% bond, 2.5× slashing).
+- **whale-attack.edn**: Large escrows + organized malice.
+- **cartel.edn**: Parameter sweep for fee/bond/slashing optimization.
+- **sybil-re-entry.edn**: Long-term reputation vs sybil identities (Phase J).
 
-### Cartel (cartel.edn)
-Multi-dimensional parameter sweep
-- 500 trials per scenario
-- Parameter ranges: fee, bond, slashing
-- Finds optimal parameter combinations
-- **WIP**: Sweep runner needs grid implementation
-
-### Stress Tests
-- **bribery.edn**: Attackers have extra capital
-- **sybil.edn**: Many fake resolvers in network
-
-## Interpreting CSV Output
-
+### Deterministic Suites
+```bash
+# Run all invariant scenarios
+clojure -M -e "(require '[resolver-sim.sim.fixtures :as f])(f/run-suite :suites/all-invariants)"
 ```
-strategy,n_trials,honest_mean,honest_std,...,dominance_ratio
-:honest,1000,150.00,0.00,...,1.00
-:lazy,1000,150.00,145.98,...,1.09
-:malicious,1000,150.00,437.76,...,4.58
-```
-
-For each strategy:
-- **honest_mean**: Average fee earned
-- **honest_std**: Profit variance (0 for honest = deterministic)
-- **malice_mean**: Average payout after slashing
-- **dominance_ratio**: How many times better honest is
 
 ## Testing
 
@@ -92,81 +64,42 @@ All tests pass using the utility script:
 
 Tests cover:
 - Fee & bond calculations
-- RNG determinism (critical for reproducibility)
+- RNG determinism (reproducibility)
 - Honest vs malicious dominance
-- Parameter validation
-
-## Next Steps
-
-1. **Export CSV & plot in Python**
-   ```bash
-   python3 -c "import pandas as pd; df = pd.read_csv('results/*/results.csv'); print(df)"
-   ```
-
-2. **Generate Clerk report**
-   ```bash
-   clojure -M:clerk
-   # Open http://localhost:7888
-   ```
-
-3. **Run full cartel sweep** (4×4×4 = 64 scenarios, WIP)
-   ```bash
-   ./run.sh -p params/cartel.edn
-   ```
-
-4. **Validate with Foundry**
-   Use recommended parameters from simulation in contract invariant tests
+- State machine invariants
 
 ## Architecture Overview
 
 ```
 src/resolver_sim/
-  model/
-    types.clj       - Parameter schemas & validation
-    rng.clj         - Deterministic RNG (SplittableRandom)
-    economics.clj   - Profit calculations
-    dispute.clj     - Single dispute resolution
-  sim/
-    batch.clj       - N trials → aggregated stats
-    sweep.clj       - Parameter sweep runner
-  io/
-    params.clj      - Load & validate EDN params
-    results.clj     - Export to CSV/EDN/JSON
+  contract_model/   - State machine, invariants, and replay engine
+  stochastic/       - Statistical models (rng, difficulty, decision quality)
+  sim/              - Monte Carlo simulation phases and harness
+  protocols/        - DisputeProtocol interface and implementations (SEW)
+  io/               - Parameter loading and result serialisation
   core.clj          - CLI entry point
 ```
 
-**Key principle**: Model functions are pure (no side effects). RNG is explicit parameter.
+**Key principle**: All logic in `contract_model` and `stochastic` is pure (no side effects). RNG is explicitly passed as a parameter.
 
 ## Reproducibility Guarantees
 
-Same seed + params = **exact same results**, byte-for-byte.
+**Same seed + params = exact same results, byte-for-byte.**
 
 This works because:
 1. RNG seeding is deterministic (SplittableRandom)
 2. Trial ordering doesn't affect aggregates (commutative)
 3. All params are snapshots (including git commit in metadata)
 
-Run the same scenario 100 times, get identical CSV output.
-
-## Performance
-
-- **1000 trials**: ~2-3 seconds
-- **10,000 trials**: ~20-30 seconds
-- Parallelism: Sequential for reproducibility (can pmap if needed)
-
 ## Troubleshooting
 
 **"No such file or directory"**
-- Make sure you're in ~/Code/sew-simulation when running ./run.sh
-- Or use absolute path: ~/Code/sew-simulation/run.sh -p params/baseline.edn
+- Make sure you're in the project root when running scripts.
+- Check that paths start with `data/params/` or `data/fixtures/`.
 
 **Results look wrong (e.g., honest_mean = 0)**
-- Check parameter file has required keys
-- Validate with: ./run.sh -p params/baseline.edn (no -s flag for single scenario)
-
-**CSV shows NaN or Infinity**
-- Dominance ratio can be Infinity if malice_mean = 0
-- This is correct (honest infinitely better)
+- Check that the parameter file has required keys.
+- Ensure the gRPC server is NOT required for the command you are running (most commands are in-process).
 
 **Permission denied on run.sh**
-- Make it executable: chmod +x ~/Code/sew-simulation/run.sh
+- Make it executable: `chmod +x run.sh test-all.sh`

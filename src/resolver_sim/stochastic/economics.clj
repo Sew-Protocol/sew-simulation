@@ -1,8 +1,8 @@
-(ns resolver-sim.model.economics
+(ns resolver-sim.stochastic.economics
   "Payoff and economic functions.
    
    All functions are pure: no side effects, deterministic given inputs."
-  (:require [resolver-sim.model.rng :as rng])
+  (:require [resolver-sim.stochastic.rng :as rng])
   (:import [java.math BigDecimal]))
 
 (defn calculate-fee

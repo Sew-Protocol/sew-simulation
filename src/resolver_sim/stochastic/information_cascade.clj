@@ -1,4 +1,4 @@
-(ns resolver-sim.model.information-cascade
+(ns resolver-sim.stochastic.information-cascade
   "Information cascade dynamics in sequential appeal system.
    
    Models: When later reviewers see prior decisions, they may:
@@ -8,7 +8,7 @@
    
    This is NOT the herding cascade from Phase P (which doesn't apply to sequential).
    Instead: Models information asymmetry and reputational pressure."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.stochastic.rng :as rng]))
 
 ;; ============ Information Cascade Theory ============
 

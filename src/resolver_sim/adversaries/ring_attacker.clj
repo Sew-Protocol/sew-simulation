@@ -23,7 +23,7 @@
   (:require [resolver-sim.adversaries.strategy :as strategy]
             [resolver-sim.sim.multi-epoch :as me]
             [resolver-sim.sim.trajectory :as trajectory]
-            [resolver-sim.model.rng :as rng]))
+            [resolver-sim.stochastic.rng :as rng]))
 
 ;; ---------------------------------------------------------------------------
 ;; RingAttacker — implements the Adversary protocol
@@ -106,7 +106,7 @@
 (defn run-ring-sweep
   "Sweep ring-size ∈ ring-sizes and return per-ring-size trajectory data.
 
-   params — see params/phase-ah-trajectory-sweep.edn for field reference.
+   params — see data/params/phase-ah-trajectory-sweep.edn for field reference.
    ring-sizes — vector of sizes to sweep (default [2 3 5 8 13]).
 
    Returns:

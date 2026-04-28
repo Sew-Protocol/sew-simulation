@@ -1,4 +1,4 @@
-(ns resolver-sim.model.difficulty
+(ns resolver-sim.stochastic.difficulty
   "Dispute difficulty distribution and effects on accuracy/detection.
    
    Phase P Lite: Adds heterogeneous dispute difficulty to break uniform-case assumptions.
@@ -6,7 +6,7 @@
    Key insight: Attackers target the hard/ambiguous cases (5% tail) where detection
    is -80% lower than easy cases. Current model averages over all cases, hiding
    tail vulnerability."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.stochastic.rng :as rng]))
 
 ;; === Difficulty Distribution ===
 

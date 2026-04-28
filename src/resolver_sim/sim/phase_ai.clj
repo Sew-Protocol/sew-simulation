@@ -19,10 +19,10 @@
      {:phase/id :phase-ai
       :trajectory/classes [:displacement :equity-divergence]}
 
-   Parameters: params/phase-ai-escalation-trap.edn
+   Parameters: data/params/phase-ai-escalation-trap.edn
    Entry point: (run-phase-ai params)"
   (:require [resolver-sim.sim.trajectory :as trajectory]
-            [resolver-sim.model.rng :as rng]))
+            [resolver-sim.stochastic.rng :as rng]))
 
 (def phase-metadata
   {:phase/id           :phase-ai
@@ -96,7 +96,7 @@
 (defn run-phase-ai
   "Run Phase AI: Escalation Trap simulation.
 
-   params — loaded from params/phase-ai-escalation-trap.edn.
+   params — loaded from data/params/phase-ai-escalation-trap.edn.
    Returns a result map with :pass?, :displacement-trajectory, and phase metadata."
   [params]
   (println "\n🪤  Running Phase AI: Escalation Trap")

@@ -1,4 +1,4 @@
-(ns resolver-sim.model.bribery-markets
+(ns resolver-sim.stochastic.bribery-markets
   "Model contingent and advanced bribery strategies.
    
    Extends simple 'bribe with fixed cost' to more realistic models:
@@ -7,7 +7,7 @@
    - Budget recycling: Reuse failed bribe capital
    
    Based on: Kleros yellow paper, game theory of bribery."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.stochastic.rng :as rng]))
 
 ;; ============ Bribery Models ============
 

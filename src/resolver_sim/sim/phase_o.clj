@@ -9,7 +9,7 @@
   - Track pool composition over 10 epochs
   - Test 4 scenarios: baseline, governance failure, fraud spike, recovery"
   (:require [resolver-sim.sim.batch :as batch]
-            [resolver-sim.model.rng :as rng]
+            [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine      :as engine]))
 
 ;;;; ============================================================================

@@ -18,7 +18,7 @@
 
    Pass threshold: ≥80% of resolver capital correctly preserved across
    false-positive scenarios."
-  (:require [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine      :as engine]))
 
 ;; ---------------------------------------------------------------------------

@@ -26,7 +26,7 @@
    Protocol constants (from DRMStorageBase.sol):
      emaAlphaBps            = 1000   (10%)
      minEmaScoreThreshold   = 500000 / 1e6 = 0.50  (normalised)"
-  (:require [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine :as engine]))
 
 ;; ---------------------------------------------------------------------------
