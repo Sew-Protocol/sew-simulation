@@ -5,13 +5,13 @@
             [resolver-sim.contract-model.invariant-scenarios :as sc]))
 
 (deftest test-registry-size
-  "all-scenarios must contain exactly 23 entries."
-  (is (= 23 (count sc/all-scenarios))))
+  "all-scenarios must contain exactly 41 entries."
+  (is (= 41 (count sc/all-scenarios))))
 
-(deftest test-run-all-23-of-23
+(deftest test-run-all-41-of-41
   "Every deterministic scenario must pass in-process."
   (let [{:keys [passed total results]} (runner/run-all)]
-    (is (= 23 total))
+    (is (= 41 total))
     (is (= passed total))
     (testing "no invariant violations in any scenario"
       (is (every? #(zero? (:violations %)) results)))))

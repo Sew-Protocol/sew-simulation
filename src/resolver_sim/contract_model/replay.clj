@@ -46,9 +46,9 @@
             [resolver-sim.contract-model.resolution    :as res]
             [resolver-sim.contract-model.registry      :as reg]
             [resolver-sim.contract-model.authority     :as auth]
-            [resolver-sim.contract-model.trace-metadata            :as meta]
-
-            [resolver-sim.contract-model.invariants :as inv]))
+            [resolver-sim.contract-model.trace-metadata :as meta]
+            [resolver-sim.contract-model.invariants    :as inv]
+            [resolver-sim.engine.protocol              :as engine]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -807,3 +807,197 @@
   "Serialize a replay result to a JSON string."
   [result]
   (json/write-str result :key-fn kw->json-key :value-fn kw-val->str))
+
+;; ---------------------------------------------------------------------------
+;; Protocol adapter surface
+;;
+;; These thin public wrappers expose the private apply-action multimethod and
+;; invariant-check functions to DisputeProtocol implementations (e.g. SEWProtocol
+;; in resolver-sim.protocols.sew) without making the internals globally public.
+;; They must not be used outside of protocol adapter code.
+;; ---------------------------------------------------------------------------
+
+(defn sew-dispatch-action
+  "Delegate to the SEW apply-action multimethod.
+   For use by SEWProtocol only — not part of the general public API."
+  [context world event]
+  (apply-action context world event))
+
+(defn sew-check-invariants-single
+  "Delegate to the SEW single-world invariant checks.
+   For use by SEWProtocol only — not part of the general public API."
+  [world]
+  (check-invariants-single world))
+
+(defn sew-check-invariants-transition
+  "Delegate to the SEW cross-world invariant checks.
+   For use by SEWProtocol only — not part of the general public API."
+  [world-before world-after]
+  (check-invariants-transition world-before world-after))
+
+;; ---------------------------------------------------------------------------
+;; Protocol-aware step processor (private — used by replay-with-protocol)
+;; ---------------------------------------------------------------------------
+
+(defn- process-step-with-protocol
+  "Like process-step but dispatches through a DisputeProtocol implementor."
+  [protocol context world event]
+  (let [event-time (:time event)
+        now        (:block-time world)]
+
+    (if (< event-time now)
+      {:ok?    true
+       :world  world
+       :trace-entry {:seq             (:seq event)
+                     :time            event-time
+                     :agent           (:agent event)
+                     :action          (:action event)
+                     :result          :rejected
+                     :error           :time-regression
+                     :extra           nil
+                     :invariants-ok?  true
+                     :violations      nil
+                     :trace-metadata  {:transition/type (meta/transition-type (:action event))
+                                       :effect/type     :effect/revert
+                                       :resolution/path (meta/resolution-path (:action event))}
+                     :world           (world-snapshot world)
+                     :projection      (diff/projection world)
+                     :projection-hash (diff/projection-hash world)}
+       :halted? false}
+
+      (let [world-t    (if (> event-time now) (assoc world :block-time event-time) world)
+            result     (try
+                         (engine/dispatch-action protocol context world-t event)
+                         (catch Exception e
+                           {:ok false :error :dispatch-exception
+                            :detail {:message (.getMessage e)}}))
+            ok?        (:ok result)
+            world-next (if ok? (:world result) world-t)
+            inv-single (when ok? (engine/check-invariants-single    protocol world-next))
+            inv-trans  (when ok? (engine/check-invariants-transition protocol world-t world-next))
+            violated?  (and ok? (not (and (:ok? inv-single) (:ok? inv-trans))))
+            all-violations (when violated?
+                             (merge
+                              (when-not (:ok? inv-single) (:violations inv-single))
+                              (when-not (:ok? inv-trans)  (:violations inv-trans))))]
+        {:ok?    (and ok? (not violated?))
+         :world  (if violated? world-t world-next)
+         :trace-entry
+         {:seq            (:seq event)
+          :time           event-time
+          :agent          (:agent event)
+          :action         (:action event)
+          :result         (cond violated? :invariant-violated ok? :ok :else :rejected)
+          :error          (when-not ok? (:error result))
+          :extra          (:extra result)
+          :invariants-ok? (if ok? (and (:ok? inv-single) (:ok? inv-trans)) true)
+          :violations     all-violations
+          :trace-metadata {:transition/type (meta/transition-type (:action event))
+                           :effect/type     (meta/effect-type (cond violated?          :invariant-violated
+                                                                    ok?               :ok
+                                                                    :else             :rejected))
+                           :resolution/path (meta/resolution-path (:action event))}
+          :world          (world-snapshot (if violated? world-t world-next))
+          :projection     (diff/projection (if violated? world-t world-next))
+          :projection-hash (diff/projection-hash (if violated? world-t world-next))}
+         :halted? violated?}))))
+
+;; ---------------------------------------------------------------------------
+;; Public: replay-with-protocol
+;; ---------------------------------------------------------------------------
+
+(defn replay-with-protocol
+  "Like replay-scenario but dispatches through a DisputeProtocol implementor.
+
+   All generic machinery (validation, world initialisation, alias resolution,
+   metrics, trace output shape) is shared with replay-scenario.  Only action
+   dispatch and invariant checks are delegated to the protocol.
+
+   protocol — an implementation of resolver-sim.engine.protocol/DisputeProtocol
+   scenario — a parsed scenario map (v1 schema)
+
+   Returns the same result shape as replay-scenario."
+  [protocol scenario]
+  (let [validation (validate-scenario scenario)]
+    (if-not (:ok validation)
+      {:outcome          :invalid
+       :scenario-id      (:scenario-id scenario)
+       :events-processed 0
+       :halted-at-seq    nil
+       :halt-reason      (:error validation)
+       :detail           (:detail validation)
+       :trace            []
+       :metrics          (zero-metrics)}
+
+      (let [agent-list      (:agents scenario)
+            pp              (get scenario :protocol-params {})
+            context         (engine/build-execution-context protocol agent-list pp)
+            agent-index     (:agent-index context)
+            init-time       (get scenario :initial-block-time 1000)
+            token-params    (:token-params scenario)
+            fot-bps         (when token-params (get token-params :fee-on-transfer 0))
+            scenario-tokens (into #{} (keep #(get-in % [:params :token]) (:events scenario)))
+            world-base      (t/empty-world init-time)
+            world0          (if (and fot-bps (pos? fot-bps) (seq scenario-tokens))
+                              (reduce (fn [w tok] (assoc-in w [:token-fot-bps tok] fot-bps))
+                                      world-base scenario-tokens)
+                              world-base)
+            events          (sort-by :seq (:events scenario))]
+        (loop [world        world0
+               events       events
+               trace        []
+               metrics      (zero-metrics)
+               wf-alias-map {}]
+          (if (empty? events)
+            (let [open-disputes (when-not (:allow-open-disputes? scenario)
+                                  (vec (for [[wf et] (:escrow-transfers world)
+                                             :when (= :disputed (:escrow-state et))]
+                                         wf)))]
+              (if (seq open-disputes)
+                {:outcome          :fail
+                 :scenario-id      (:scenario-id scenario)
+                 :events-processed (count trace)
+                 :halted-at-seq    nil
+                 :halt-reason      :open-disputes-at-end
+                 :detail           {:open-disputes open-disputes}
+                 :trace            trace
+                 :metrics          metrics}
+                {:outcome          :pass
+                 :scenario-id      (:scenario-id scenario)
+                 :events-processed (count trace)
+                 :halted-at-seq    nil
+                 :halt-reason      nil
+                 :trace            trace
+                 :metrics          metrics}))
+            (let [raw-event (first events)
+                  alias-res (resolve-wf-alias raw-event wf-alias-map)]
+              (if-not (:ok alias-res)
+                {:outcome          :invalid
+                 :scenario-id      (:scenario-id scenario)
+                 :events-processed (count trace)
+                 :halted-at-seq    (:seq raw-event)
+                 :halt-reason      :unresolved-alias
+                 :detail           (dissoc alias-res :ok)
+                 :trace            trace
+                 :metrics          metrics}
+                (let [event       (:event alias-res)
+                      step        (process-step-with-protocol protocol context world event)
+                      entry       (:trace-entry step)
+                      new-trace   (conj trace entry)
+                      new-metrics (accum-metrics metrics event entry agent-index)
+                      new-alias-map
+                      (if (and (= "create_escrow" (:action event))
+                               (= :ok (:result entry))
+                               (:save-wf-as raw-event))
+                        (assoc wf-alias-map (:save-wf-as raw-event)
+                               (get-in entry [:extra :workflow-id]))
+                        wf-alias-map)]
+                  (if (:halted? step)
+                    {:outcome          :fail
+                     :scenario-id      (:scenario-id scenario)
+                     :events-processed (count new-trace)
+                     :halted-at-seq    (:seq event)
+                     :halt-reason      :invariant-violation
+                     :trace            new-trace
+                     :metrics          (update new-metrics :invariant-violations inc)}
+                    (recur (:world step) (rest events) new-trace new-metrics new-alias-map)))))))))))
