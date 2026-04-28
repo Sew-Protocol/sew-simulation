@@ -17,7 +17,7 @@
    Hypothesis to confirm:
      With floor-reviews-per-epoch ≥ 1 per 5 disputes, attacker win rate < 20%
      across all governance bandwidth scenarios."
-  (:require [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine      :as engine]))
 
 ;; ---------------------------------------------------------------------------

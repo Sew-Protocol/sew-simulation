@@ -12,7 +12,7 @@
 
      run-epoch-simulation — drive an epoch-state simulation to completion
      run-sweep            — run multiple epoch simulations under a common label"
-  (:require [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.io.results :as results]))
 
 ;; ---------------------------------------------------------------------------

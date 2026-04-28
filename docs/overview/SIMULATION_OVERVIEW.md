@@ -40,13 +40,13 @@ clojure -M:test  # Verify environment (optional)
 ### Run Simulations
 ```bash
 # Single scenario (baseline parameters)
-clojure -M:run -p params/baseline.edn
+clojure -M:run -p data/params/baseline.edn
 
 # Compare all 4 strategies
-clojure -M:run -p params/baseline.edn -s
+clojure -M:run -p data/params/baseline.edn -s
 
 # Large escrow scenario (whale attack)
-clojure -M:run -p params/whale-attack.edn
+clojure -M:run -p data/params/whale-attack.edn
 
 # Results appear in: results/TIMESTAMP_scenario_id/
 # - summary.edn: Full statistics
@@ -111,10 +111,10 @@ Same seed + params = **identical CSV output** (deterministic)
 
 ```bash
 # Verify reproducibility
-clojure -M:run -p params/baseline.edn > run1.log
+clojure -M:run -p data/params/baseline.edn > run1.log
 CSV1=$(ls -t results/*/results.csv | head -1)
 
-clojure -M:run -p params/baseline.edn > run2.log
+clojure -M:run -p data/params/baseline.edn > run2.log
 CSV2=$(ls -t results/*/results.csv | head -1)
 
 # Should be identical (except timestamps)
@@ -164,7 +164,7 @@ Fast enough for interactive parameter exploration.
 5. Scales at whale-level ($100k escrows)
 
 **To verify**: 
-- Clone repo, run `clojure -M:run -p params/baseline.edn -s`
+- Clone repo, run `clojure -M:run -p data/params/baseline.edn -s`
 - Compare CSV output to published baseline
 - Run tests: `clojure -M:test -e "(do ...)"`
 

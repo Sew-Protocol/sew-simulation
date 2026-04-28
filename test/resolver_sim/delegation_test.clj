@@ -1,7 +1,7 @@
 (ns resolver-sim.delegation-test
   (:require [clojure.test :refer [deftest is testing]]
-            [resolver-sim.model.delegation :as delegation]
-            [resolver-sim.model.resolver-ring :as ring]))
+            [resolver-sim.stochastic.delegation :as delegation]
+            [resolver-sim.stochastic.resolver-ring :as ring]))
 
 (deftest test-delegation-registry
   (testing "Create resolver registry with senior and juniors"

@@ -31,7 +31,7 @@ Takes ~15 minutes. Generates detailed HTML/markdown reports.
 
 ### Baseline (control scenario)
 ```bash
-clojure -M:run -- -p params/baseline.edn
+clojure -M:run -- -p data/params/baseline.edn
 ```
 Expected output:
 - Honest profit: 150.00
@@ -40,7 +40,7 @@ Expected output:
 
 ### Phase I: Detection Mechanisms (1D sweep)
 ```bash
-clojure -M:run -- -p params/phase-i-all-mechanisms.edn -s
+clojure -M:run -- -p data/params/phase-i-all-mechanisms.edn -s
 ```
 Expected output:
 - All strategies pass
@@ -48,13 +48,13 @@ Expected output:
 
 ### Phase I: 2D Sensitivity Sweep
 ```bash
-clojure -M:run -- -p params/phase-i-2d-all-mechanisms.edn -s
+clojure -M:run -- -p data/params/phase-i-2d-all-mechanisms.edn -s
 ```
 Sweeps detection vs slash multiplier combinations.
 
 ### Phase H: Realistic Bond Mechanics
 ```bash
-clojure -M:run -- -p params/phase-h-realistic-mechanics.edn
+clojure -M:run -- -p data/params/phase-h-realistic-mechanics.edn
 ```
 Expected output:
 - Escape: BLOCKED (freeze + unstaking + appeal)
@@ -62,7 +62,7 @@ Expected output:
 
 ### Phase G: 2D Parameter Sweep
 ```bash
-clojure -M:run -- -p params/phase-g-sensitivity-2d.edn -s
+clojure -M:run -- -p data/params/phase-g-sensitivity-2d.edn -s
 ```
 Identifies break-even point: 10% detection + 2.5× slash
 
@@ -70,16 +70,16 @@ Identifies break-even point: 10% detection + 2.5× slash
 
 ```bash
 # Baseline (control - no detection decay)
-clojure -M:run -- -p params/phase-j-baseline-stable.edn -m
+clojure -M:run -- -p data/params/phase-j-baseline-stable.edn -m
 
 # Governance decay (50% detection loss per epoch)
-clojure -M:run -- -p params/phase-j-governance-decay.edn -m
+clojure -M:run -- -p data/params/phase-j-governance-decay.edn -m
 
 # Governance failure (detection → 0 at epoch 5)
-clojure -M:run -- -p params/phase-j-governance-failure.edn -m
+clojure -M:run -- -p data/params/phase-j-governance-failure.edn -m
 
 # Sybil re-entry test
-clojure -M:run -- -p params/phase-j-sybil-re-entry.edn -m
+clojure -M:run -- -p data/params/phase-j-sybil-re-entry.edn -m
 ```
 
 Expected Phase J output (all scenarios):
@@ -150,7 +150,7 @@ ps aux | grep clojure
 free -h
 
 # Try with smaller parameter set
-clojure -M:run -p params/baseline.edn
+clojure -M:run -p data/params/baseline.edn
 ```
 
 ---
@@ -161,7 +161,7 @@ clojure -M:run -p params/baseline.edn
 Usage: clojure -M:run [options]
 
 Options:
-  -p, --params PATH  params/baseline.edn  Path to params.edn file
+  -p, --params PATH  data/params/baseline.edn  Path to params.edn file
   -o, --output DIR   results              Output directory for results
   -s, --sweep                             Run strategy sweep
   -m, --multi-epoch                       Run Phase J multi-epoch simulation
@@ -170,7 +170,7 @@ Options:
 
 **Important**: Use `--` before arguments when using wrapper scripts:
 ```bash
-clojure -M:run -- -p params/phase-i.edn -s
+clojure -M:run -- -p data/params/phase-i.edn -s
 #                 ^^^ Required separator
 ```
 
@@ -192,10 +192,10 @@ Phase J multi-epoch simulation now integrated into main CLI:
 
 ```bash
 # Run baseline (stable) scenario
-clojure -M:run -- -p params/phase-j-baseline-stable.edn -m
+clojure -M:run -- -p data/params/phase-j-baseline-stable.edn -m
 
 # Run governance failure test
-clojure -M:run -- -p params/phase-j-governance-failure.edn -m -o my-results/
+clojure -M:run -- -p data/params/phase-j-governance-failure.edn -m -o my-results/
 ```
 
 Output includes:

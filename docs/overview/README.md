@@ -23,10 +23,10 @@ clojure -M:test
 ./run-dr2.sh
 
 # Run a single scenario
-clojure -M:run params/baseline.edn
+clojure -M:run data/params/baseline.edn
 
 # Run parameter sweep
-clojure -M:sweep params/stress/cartel.edn
+clojure -M:sweep data/params/stress/cartel.edn
 
 # Generate report
 clojure -M:clerk
@@ -44,7 +44,7 @@ clojure -M:fmt
 - **src/resolver_sim/sim/** — Trial + batch + sweep orchestration
 - **src/resolver_sim/io/** — Parameter loading, result serialization (EDN/CSV)
 - **test/** — Unit tests + property-based invariants
-- **params/** — EDN scenario definitions (baseline, whale-attack, cartel, etc.)
+- **data/params/** — EDN scenario definitions (baseline, whale-attack, cartel, etc.)
 - **results/** — Generated outputs (gitignored)
 - **notebooks/** — Clerk reports for analysis + visualization
 
@@ -119,11 +119,11 @@ The simulation supports three DR phases:
 
 Most users should start with DR3 (`./run-dr3.sh`) - the fully decentralized system.
 
-See `params/PHASES.md` for detailed phase comparison and feature movement guide.
+See `data/params/PHASES.md` for detailed phase comparison and feature movement guide.
 
 ### Other Scenarios
 
-See `params/` directory:
+See `data/params/` directory:
 
 - `baseline.edn` — DR3: Full system (10% bond, 2.5% fee, progressive slashing)
 - `dr1-fee-only.edn` — DR1: Fee-only (0% bond, no slashing)
@@ -157,11 +157,11 @@ Results are timestamped and gitignored.
 
 ```bash
 # 1. Check baseline
-clojure -M:run params/baseline.edn
+clojure -M:run data/params/baseline.edn
 # Outputs: results/2026-02-11_baseline/
 
 # 2. Run parameter sweep
-clojure -M:sweep params/stress/cartel.edn
+clojure -M:sweep data/params/stress/cartel.edn
 # Outputs: results/2026-02-11_cartel_sweep/sweep.csv
 
 # 3. Analyze in Python (optional)
@@ -212,7 +212,7 @@ Then in nREPL:
 (require '[resolver-sim.io.params :as params])
 
 ; Load params
-(def baseline (params/load-edn "params/baseline.edn"))
+(def baseline (data/params/load-edn "data/params/baseline.edn"))
 
 ; Run one trial
 (trial/run-trial (java.util.SplittableRandom. 42) baseline)

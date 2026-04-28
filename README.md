@@ -46,8 +46,8 @@ The system identified a critical liquidity reconciliation failure in timeout han
 
 This was reproduced and fixed using deterministic traces:
 
-- Known failure: `examples/cdrs/phase-z-known-failure.trace.json`
-- Verified fix: `examples/cdrs/phase-z-fixed-regression.trace.json`
+- Known failure: `data/fixtures/traces/regression/phase-z-known-failure.trace.json`
+- Verified fix: `data/fixtures/traces/regression/phase-z-fixed-regression.trace.json`
 
 ## Current Status
 
@@ -90,7 +90,7 @@ forge test --match-test test_trace_equivalence
 ```
 
 ## Documentation
-- `fixtures/README.md` — fixture composition and schema
+- `data/fixtures/README.md` — fixture composition and schema
 - `docs/testing/` — validation coverage and status
 - `docs/scenarios.md` — scenario index and protocol properties
 

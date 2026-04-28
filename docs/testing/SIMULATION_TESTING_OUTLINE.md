@@ -131,7 +131,7 @@ We've mathematically proven (with high statistical confidence) that:
 
 **To Verify**:
 1. Clone the code repository
-2. Run: `clojure -M:run -p params/baseline.edn`
+2. Run: `clojure -M:run -p data/params/baseline.edn`
 3. Check CSV output against published results
 4. Results should match exactly (same seed ensures reproducibility)
 

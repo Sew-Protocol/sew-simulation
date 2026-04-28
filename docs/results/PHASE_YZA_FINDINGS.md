@@ -320,9 +320,9 @@ The +5–7% confidence uplift comes from closing the three realism gaps. The P�
 - `src/resolver_sim/sim/phase_y.clj` — Phase Y test harness
 - `src/resolver_sim/sim/phase_z.clj` — Phase Z test harness
 - `src/resolver_sim/sim/phase_aa.clj` — Phase AA test harness
-- `params/phase-y-evidence-fog.edn` — Phase Y params
-- `params/phase-z-legitimacy.edn` — Phase Z params
-- `params/phase-aa-governance.edn` — Phase AA params
-- Run: `clojure -M:run -- -p params/phase-y-evidence-fog.edn -Y`
-- Run: `clojure -M:run -- -p params/phase-z-legitimacy.edn -Z`
-- Run: `clojure -M:run -- -p params/phase-aa-governance.edn -A`
+- `data/params/phase-y-evidence-fog.edn` — Phase Y params
+- `data/params/phase-z-legitimacy.edn` — Phase Z params
+- `data/params/phase-aa-governance.edn` — Phase AA params
+- Run: `clojure -M:run -- -p data/params/phase-y-evidence-fog.edn -Y`
+- Run: `clojure -M:run -- -p data/params/phase-z-legitimacy.edn -Z`
+- Run: `clojure -M:run -- -p data/params/phase-aa-governance.edn -A`

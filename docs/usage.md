@@ -89,7 +89,7 @@ clojure -M:run -- -S --port 7070
 ### Run a single trial
 
 ```bash
-clojure -M:run -- -p params/baseline.edn
+clojure -M:run -- -p data/params/baseline.edn
 ```
 
 ### Run with XTDB persistence
@@ -97,7 +97,7 @@ clojure -M:run -- -p params/baseline.edn
 Requires XTDB on localhost:5432.
 
 ```bash
-clojure -M:run -- -p params/baseline.edn --db
+clojure -M:run -- -p data/params/baseline.edn --db
 ```
 
 ---
@@ -133,14 +133,14 @@ scripts/monte-carlo/run-adversarial.sh
 ### Run a specific phase
 
 ```bash
-clojure -M:run -- -p params/phase-g-slashing-delays.edn
-clojure -M:run -- -p params/phase-j-baseline-stable.edn -m   # multi-epoch
-clojure -M:run -- -p params/phase-o-baseline.edn -O           # market exit
+clojure -M:run -- -p data/params/phase-g-slashing-delays.edn
+clojure -M:run -- -p data/params/phase-j-baseline-stable.edn -m   # multi-epoch
+clojure -M:run -- -p data/params/phase-o-baseline.edn -O           # market exit
 ```
 
 ### Parameter files
 
-All EDN parameter files are in `params/`. Use `params/phase-o-baseline.edn` as the canonical template for the required schema.
+All EDN parameter files are in `data/params/`. Use `data/params/phase-o-baseline.edn` as the canonical template for the required schema.
 
 ### Results
 

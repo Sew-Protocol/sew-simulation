@@ -7,10 +7,10 @@
    - Escalation economics (not panel voting)
    
    This replaces Phase P Lite which modeled wrong system architecture."
-  (:require [resolver-sim.model.rng :as rng]
-            [resolver-sim.model.decision-quality :as dq]
-            [resolver-sim.model.information-cascade :as ic]
-            [resolver-sim.model.escalation-economics :as ee]
+  (:require [resolver-sim.stochastic.rng :as rng]
+            [resolver-sim.stochastic.decision-quality :as dq]
+            [resolver-sim.stochastic.information-cascade :as ic]
+            [resolver-sim.stochastic.escalation-economics :as ee]
             [resolver-sim.sim.engine :as engine]))
 
 ;; ============ Test Parameters ============

@@ -1,4 +1,4 @@
-(ns resolver-sim.model.evidence-spoofing
+(ns resolver-sim.stochastic.evidence-spoofing
   "Model information asymmetry and evidence spoofing attacks.
    
    Realistic model:
@@ -9,7 +9,7 @@
    - Resolvers have limited attention budgets
    
    Based on: Epistemic game theory, information cascades, attention economics."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.stochastic.rng :as rng]))
 
 ;; ============ Evidence Production ============
 

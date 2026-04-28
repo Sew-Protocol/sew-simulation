@@ -6,7 +6,7 @@
   (:require [resolver-sim.sim.batch :as batch]
             [resolver-sim.sim.reputation :as rep]
             [resolver-sim.sim.governance-delay :as gov-delay]
-            [resolver-sim.model.rng :as rng]
+            [resolver-sim.stochastic.rng :as rng]
             [clojure.set]))
 
 ;;;; ============================================================================

@@ -6,7 +6,7 @@ A **statistical simulation** of the SEW decentralised dispute-resolution protoco
 plus a **live contract model** that simulates actual contract execution.
 
 Two distinct modes:
-- **Statistical model** (`sim/`, `model/`) — Monte Carlo sweeps over protocol
+- **Statistical model** (`sim/`, `stochastic/`) — Monte Carlo sweeps over protocol
   parameter space; tests falsifiable hypotheses about resolver incentives.
 - **Live simulation** (`contract_model/`) — deterministic execution of SEW
   contract state machines against adversarial strategies; records outcomes to XTDB.
@@ -19,7 +19,7 @@ Two distinct modes:
 - Hypotheses are falsifiable — every phase produces a pass/fail result with a
   specific threshold, not a qualitative judgement
 - The contract model mirrors the on-chain spec exactly; divergence is a bug
-- Params live in EDN files under `params/`; results are written to `results/`
+- Params live in EDN files under `data/params/`; results are written to `results/`
 
 ---
 
@@ -48,7 +48,7 @@ protocols/          ← pluggable protocol interface + implementations
   sew.clj             SEWProtocol — wraps contract_model/* for use with replay-with-protocol
   dummy.clj           DummyProtocol — always-pass proof-of-concept
 
-model/              ← statistical/economic models (pure functions)
+stochastic/              ← statistical/economic models (pure functions)
   economics.clj, dispute.clj, decision_quality.clj, ...
 
 sim/                ← simulation phases (pure sweeps over params)
@@ -102,11 +102,11 @@ These must not be violated as the project grows:
 | `contract_model/*` | other `contract_model/*`, `protocols/protocol` | `db/*`, `io/*`, `evaluation.*` |
 | `protocols/sew` | `contract_model/*`, `protocols/protocol` | `sim/*`, `db/*`, `io/*` |
 | `protocols/dummy` | `protocols/protocol` | everything else |
-| `model/*` | nothing outside `model/` | everything else |
-| `sim/*` | `contract_model/*`, `model/*`, `governance/*`, `adversaries/*`, `oracle/*` | `db/*`, `io/*` |
-| `governance/*`, `adversaries/*`, `oracle/*` | `model/*` only | `db/*`, `io/*` |
+| `stochastic/*` | nothing outside `stochastic/` | everything else |
+| `sim/*` | `contract_model/*`, `stochastic/*`, `governance/*`, `adversaries/*`, `oracle/*` | `db/*`, `io/*` |
+| `governance/*`, `adversaries/*`, `oracle/*` | `stochastic/*` only | `db/*`, `io/*` |
 | `db/*` | `contract_model/*`, `evaluation.xtdb` | `sim/*` |
-| `io/*` | `model/*`, `sim/*` | `db/*` |
+| `io/*` | `stochastic/*`, `sim/*` | `db/*` |
 | `core.clj` | everything | — |
 
 The key invariant: **the functional core is testable without a running XTDB instance
@@ -127,7 +127,7 @@ or filesystem.** `db/` and `io/` are the only namespaces with side effects.
 src/resolver_sim/         ← Clojure namespace root (resolver-sim.*)
   contract_model/         pure contract mechanics (~15 files)
   protocols/              DisputeProtocol interface + SEW/Dummy implementations
-  model/                  pure statistical/economic models (~17 files)
+  stochastic/                  pure statistical/economic models (~17 files)
   sim/                    simulation phases + phase infrastructure (~38 files)
   governance/             pure governance rule models
   adversaries/            adversary strategy models
@@ -142,6 +142,11 @@ src/resolver_sim/         ← Clojure namespace root (resolver-sim.*)
     results.clj
   server/                 gRPC server + session management
   core.clj
+
+data/                     ← Static and simulation data
+  params/                 Monte Carlo parameter definitions (EDN)
+  fixtures/               Deterministic test scenarios and suites (EDN/JSON)
+    traces/               Execution traces for replay and regression
 ```
 
 > **Why `resolver_sim/sim/`?** The outer `resolver_sim/` is the Clojure toolchain
@@ -160,9 +165,9 @@ sim/
   batch.clj, sweep.clj, waterfall.clj, engine.clj   (shared infrastructure)
 ```
 
-**`model/` develops two distinct sub-domains** — e.g. economic models vs.
-adversarial models — split into `model/economic/` and `model/adversarial/`.
-Do not split until the sub-domain boundary is clear; a flat `model/` is correct
+**`stochastic/` develops two distinct sub-domains** — e.g. economic models vs.
+adversarial models — split into `stochastic/economic/` and `stochastic/adversarial/`.
+Do not split until the sub-domain boundary is clear; a flat `stochastic/` is correct
 for ≤20 files.
 
 **New XTDB tables** (governance events, metrics snapshots, etc.) — add new files
@@ -190,7 +195,7 @@ og/eval-engine {:local/root "../og/eval-engine"}
 **Only `resolver-sim.db.*` may import `evaluation.xtdb`** (or its future home
 `evaluation.db.xtdb` when eval-engine restructures its own shell layer).
 
-This import must never appear in `contract_model/`, `sim/`, `model/`, or any
+This import must never appear in `contract_model/`, `sim/`, `stochastic/`, or any
 other core namespace.
 
 When eval-engine moves `xtdb.clj` → `evaluation/db/xtdb.clj`, update:
@@ -229,8 +234,8 @@ When eval-engine moves `xtdb.clj` → `evaluation/db/xtdb.clj`, update:
 
 ## Params and results
 
-- Params files live in `params/` as EDN; must include full schema (use
-  `params/phase-o-baseline.edn` as the canonical template)
+- Params files live in `data/params/` as EDN; must include full schema (use
+  `data/params/phase-o-baseline.edn` as the canonical template)
 - Results are written to `results/` (gitignored; use `git add -f` to force-track)
 - Docs live in `docs/results/` (also gitignored; force-add when recording findings)
 
@@ -243,7 +248,7 @@ When eval-engine moves `xtdb.clj` → `evaluation/db/xtdb.clj`, update:
 - **Fixture suite runner**: `clojure -M -e "(require '[resolver-sim.sim.fixtures :as f])(f/run-suite :suites/all-invariants)"`
 - **gRPC server**: `nohup clojure -M:run -- -S --port 7070 > grpc-server.log 2>&1 &`
 - **Monte Carlo phases** (O–AI): `scripts/monte-carlo/test-all.sh`
-- **Single phase**: `clojure -M:run -- -p params/<phase>.edn <flags>`
+- **Single phase**: `clojure -M:run -- -p data/params/<phase>.edn <flags>`
 - **Unit tests**: `clojure -M:test -e "(require '...)(clojure.test/run-tests '...)"`
 - Integration tests (`db/telemetry_integration_test.clj`) require XTDB on localhost:5432
 - Pass threshold for most hypotheses: **≥80% across all scenarios in a sweep**

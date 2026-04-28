@@ -8,10 +8,10 @@
    
    Tests whether system remains robust when adversary is sophisticated
    AND environment is complex (correlated resolvers, evidence attacks)."
-  (:require [resolver-sim.model.bribery-markets :as bribery]
-            [resolver-sim.model.evidence-spoofing :as evidence]
-            [resolver-sim.model.correlated-failures :as corr]
-            [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.bribery-markets :as bribery]
+            [resolver-sim.stochastic.evidence-spoofing :as evidence]
+            [resolver-sim.stochastic.correlated-failures :as corr]
+            [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine      :as engine]))
 
 ;; ============ Bribery Feasibility Test ============

@@ -49,32 +49,32 @@ RUN_PHASE="${1:-all}"
 
 # Baseline (single simulation, baseline params)
 if [[ "$RUN_PHASE" == "all" ]] || [[ "$RUN_PHASE" == "baseline" ]]; then
-    run_simulation "01-baseline" "params/baseline.edn" ""
+    run_simulation "01-baseline" "data/params/baseline.edn" ""
 fi
 
 # Phase I (1D strategy sweep with all detection mechanisms)
 if [[ "$RUN_PHASE" == "all" ]] || [[ "$RUN_PHASE" == "phase-i" ]]; then
-    run_simulation "02-phase-i-1d" "params/phase-i-all-mechanisms.edn" "-s"
-    run_simulation "02-phase-i-2d" "params/phase-i-2d-all-mechanisms.edn" "-s"
+    run_simulation "02-phase-i-1d" "data/params/phase-i-all-mechanisms.edn" "-s"
+    run_simulation "02-phase-i-2d" "data/params/phase-i-2d-all-mechanisms.edn" "-s"
 fi
 
 # Phase H (realistic bond mechanics)
 if [[ "$RUN_PHASE" == "all" ]] || [[ "$RUN_PHASE" == "phase-h" ]]; then
-    run_simulation "03-phase-h-baseline" "params/phase-h-realistic-mechanics.edn" ""
-    run_simulation "03-phase-h-2d" "params/phase-h-2d-realistic.edn" "-s"
+    run_simulation "03-phase-h-baseline" "data/params/phase-h-realistic-mechanics.edn" ""
+    run_simulation "03-phase-h-2d" "data/params/phase-h-2d-realistic.edn" "-s"
 fi
 
 # Phase G (2D parameter sweep)
 if [[ "$RUN_PHASE" == "all" ]] || [[ "$RUN_PHASE" == "phase-g" ]]; then
-    run_simulation "04-phase-g-2d" "params/phase-g-sensitivity-2d.edn" "-s"
+    run_simulation "04-phase-g-2d" "data/params/phase-g-sensitivity-2d.edn" "-s"
 fi
 
 # Phase J (multi-epoch reputation)
 if [[ "$RUN_PHASE" == "all" ]] || [[ "$RUN_PHASE" == "phase-j" ]]; then
-    run_simulation "05-phase-j-baseline" "params/phase-j-baseline-stable.edn" "-m"
-    run_simulation "05-phase-j-governance-decay" "params/phase-j-governance-decay.edn" "-m"
-    run_simulation "05-phase-j-governance-failure" "params/phase-j-governance-failure.edn" "-m"
-    run_simulation "05-phase-j-sybil-re-entry" "params/phase-j-sybil-re-entry.edn" "-m"
+    run_simulation "05-phase-j-baseline" "data/params/phase-j-baseline-stable.edn" "-m"
+    run_simulation "05-phase-j-governance-decay" "data/params/phase-j-governance-decay.edn" "-m"
+    run_simulation "05-phase-j-governance-failure" "data/params/phase-j-governance-failure.edn" "-m"
+    run_simulation "05-phase-j-sybil-re-entry" "data/params/phase-j-sybil-re-entry.edn" "-m"
 fi
 
 # Generate report

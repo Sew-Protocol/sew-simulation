@@ -9,7 +9,7 @@
   What if attacker bunches 20+ disputes in one block, before governance
   can respond?"
   (:require [clojure.math :as math]
-            [resolver-sim.model.rng :as rng]
+            [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine      :as engine]))
 
 (defn simulate-burst-attack

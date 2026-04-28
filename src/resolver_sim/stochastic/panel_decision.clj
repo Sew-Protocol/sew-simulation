@@ -1,4 +1,4 @@
-(ns resolver-sim.model.panel-decision
+(ns resolver-sim.stochastic.panel-decision
   "Panel voting, correlation, and herding dynamics.
    
    Phase P Lite: Replaces single resolver with n-person panel.
@@ -8,8 +8,8 @@
    2. Herding: If slashing penalizes deviance, truth-tellers converge on wrong answer
    
    Together, these can invert the dominance ratio even if individual accuracy is fine."
-  (:require [resolver-sim.model.rng :as rng]
-            [resolver-sim.model.difficulty :as diff]))
+  (:require [resolver-sim.stochastic.rng :as rng]
+            [resolver-sim.stochastic.difficulty :as diff]))
 
 ;; === Panel Basics ===
 

@@ -13,7 +13,7 @@
       governance capacity is limited and biased toward high-value disputes.'
 
    Also covers the governance capture gap (rule drift) not tested in Phases M/J."
-  (:require [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine :as engine]))
 
 ;; ============ Governance Models (Pure) ============

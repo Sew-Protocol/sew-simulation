@@ -13,16 +13,16 @@
 results/
 *.csv
 *.edn
-!params/*.edn
-!params/**/*.edn
+!data/params/*.edn
+!data/params/**/*.edn
 # Fixture definitions are source-controlled; only generated golden reports are excluded
-!fixtures/protocol/*.edn
-!fixtures/states/*.edn
-!fixtures/actors/*.edn
-!fixtures/authority/*.edn
-!fixtures/tokens/*.edn
-!fixtures/thresholds/*.edn
-!fixtures/suites/*.edn
+!data/fixtures/protocol/*.edn
+!data/fixtures/states/*.edn
+!data/fixtures/actors/*.edn
+!data/fixtures/authority/*.edn
+!data/fixtures/tokens/*.edn
+!data/fixtures/thresholds/*.edn
+!data/fixtures/suites/*.edn
 
 # Python/notebook artifacts
 __pycache__/

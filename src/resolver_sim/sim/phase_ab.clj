@@ -20,7 +20,7 @@
      With reward-multiplier ≥ tier-complexity-multiplier, defection rate < 20%
      across all tiers.  Without the multiplier (reward = 1×), high-complexity
      tiers breach the 20% threshold."
-  (:require [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine      :as engine]))
 
 ;; ---------------------------------------------------------------------------

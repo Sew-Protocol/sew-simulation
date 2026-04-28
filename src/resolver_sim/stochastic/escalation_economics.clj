@@ -1,4 +1,4 @@
-(ns resolver-sim.model.escalation-economics
+(ns resolver-sim.stochastic.escalation-economics
   "Economics of sequential appeal escalation.
    
    Models:
@@ -9,7 +9,7 @@
    
    Key insight: Sequential system makes attacker pay per level,
    not as one-shot like panel voting."
-  (:require [resolver-sim.model.rng :as rng]))
+  (:require [resolver-sim.stochastic.rng :as rng]))
 
 ;; ============ Bond and Stake Configuration ============
 

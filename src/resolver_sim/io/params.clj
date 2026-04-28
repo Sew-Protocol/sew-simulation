@@ -1,6 +1,6 @@
 (ns resolver-sim.io.params
   "Load and validate parameter files (EDN format)."
-  (:require [resolver-sim.model.types :as types]
+  (:require [resolver-sim.stochastic.types :as types]
             [clojure.edn :as edn]
             [clojure.java.io :as io]))
 

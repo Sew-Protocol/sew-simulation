@@ -1,7 +1,7 @@
-(ns resolver-sim.model.dispute
+(ns resolver-sim.stochastic.dispute
   "Dispute lifecycle and resolution mechanics."
-  (:require [resolver-sim.model.rng :as rng]
-            [resolver-sim.model.economics :as econ]))
+  (:require [resolver-sim.stochastic.rng :as rng]
+            [resolver-sim.stochastic.economics :as econ]))
 
 ;; Dispute resolution for a single trial
 ;; Phase D: Track slashing reasons (timeout/reversal/fraud) without RNG changes

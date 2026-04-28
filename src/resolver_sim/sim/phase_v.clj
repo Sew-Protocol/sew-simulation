@@ -1,7 +1,7 @@
 (ns resolver-sim.sim.phase-v
   "Phase V: Correlated Belief Cascades
    Tests: Can early bias create permanent drift through rational herding?"
-  (:require [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine      :as engine]))
 
 (defn resolver-decides

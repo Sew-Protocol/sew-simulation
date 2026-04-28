@@ -87,33 +87,33 @@ Each phase type has specific success patterns:
 
 ## Parameter Files
 
-All test parameters are located in `params/`:
+All test parameters are located in `data/params/`:
 
 ```
-params/phase-g-slashing-delays.edn          Phase G baseline
-params/phase-g-sensitivity-2d.edn           Phase G 2D sweep
-params/phase-h-realistic-mechanics.edn      Phase H baseline
-params/phase-h-2d-realistic.edn             Phase H 2D sweep
-params/phase-h-collusion-symmetry.edn       Phase H collusion
-params/phase-i-all-mechanisms.edn           Phase I baseline
-params/phase-i-2d-all-mechanisms.edn        Phase I 2D sweep
-params/phase-j-baseline-stable.edn          Phase J baseline
-params/phase-j-governance-decay.edn         Phase J governance decay
-params/phase-j-governance-failure.edn       Phase J no governance
-params/phase-j-sybil-re-entry.edn          Phase J sybil resistance
-params/phase-l-baseline.edn                 Phase L baseline
-params/phase-l-high-fraud.edn               Phase L stress
-params/phase-l-escalation-cascade.edn       Phase L escalation
-params/phase-l-simultaneous-slashes.edn     Phase L simultaneous
-params/phase-l-senior-degraded.edn          Phase L degraded pool
-params/phase-m-instant.edn                  Phase M (0 day delay)
-params/phase-m-3day.edn                     Phase M (3 day delay)
-params/phase-m-7day.edn                     Phase M (7 day delay)
-params/phase-m-14day.edn                    Phase M (14 day delay)
-params/phase-n-baseline.edn                 Phase N baseline
-params/phase-n-high-fraud.edn               Phase N stress
-params/phase-o-baseline.edn                 Phase O baseline
-params/phase-o-high-fraud.edn               Phase O stress
+data/params/phase-g-slashing-delays.edn          Phase G baseline
+data/params/phase-g-sensitivity-2d.edn           Phase G 2D sweep
+data/params/phase-h-realistic-mechanics.edn      Phase H baseline
+data/params/phase-h-2d-realistic.edn             Phase H 2D sweep
+data/params/phase-h-collusion-symmetry.edn       Phase H collusion
+data/params/phase-i-all-mechanisms.edn           Phase I baseline
+data/params/phase-i-2d-all-mechanisms.edn        Phase I 2D sweep
+data/params/phase-j-baseline-stable.edn          Phase J baseline
+data/params/phase-j-governance-decay.edn         Phase J governance decay
+data/params/phase-j-governance-failure.edn       Phase J no governance
+data/params/phase-j-sybil-re-entry.edn          Phase J sybil resistance
+data/params/phase-l-baseline.edn                 Phase L baseline
+data/params/phase-l-high-fraud.edn               Phase L stress
+data/params/phase-l-escalation-cascade.edn       Phase L escalation
+data/params/phase-l-simultaneous-slashes.edn     Phase L simultaneous
+data/params/phase-l-senior-degraded.edn          Phase L degraded pool
+data/params/phase-m-instant.edn                  Phase M (0 day delay)
+data/params/phase-m-3day.edn                     Phase M (3 day delay)
+data/params/phase-m-7day.edn                     Phase M (7 day delay)
+data/params/phase-m-14day.edn                    Phase M (14 day delay)
+data/params/phase-n-baseline.edn                 Phase N baseline
+data/params/phase-n-high-fraud.edn               Phase N stress
+data/params/phase-o-baseline.edn                 Phase O baseline
+data/params/phase-o-high-fraud.edn               Phase O stress
 ```
 
 ## Individual Test Execution
@@ -122,22 +122,22 @@ To run a single phase:
 
 ```bash
 # Phase G baseline
-clojure -M:run -- -p params/phase-g-slashing-delays.edn
+clojure -M:run -- -p data/params/phase-g-slashing-delays.edn
 
 # Phase H with 2D sweep
-clojure -M:run -- -p params/phase-h-2d-realistic.edn -s
+clojure -M:run -- -p data/params/phase-h-2d-realistic.edn -s
 
 # Phase J multi-epoch
-clojure -M:run -- -p params/phase-j-baseline-stable.edn -m
+clojure -M:run -- -p data/params/phase-j-baseline-stable.edn -m
 
 # Phase L waterfall
-clojure -M:run -- -p params/phase-l-baseline.edn -l
+clojure -M:run -- -p data/params/phase-l-baseline.edn -l
 
 # Phase M governance impact
-clojure -M:run -- -p params/phase-m-instant.edn -g
+clojure -M:run -- -p data/params/phase-m-instant.edn -g
 
 # Phase O market exit
-clojure -M:run -- -p params/phase-o-baseline.edn -O
+clojure -M:run -- -p data/params/phase-o-baseline.edn -O
 ```
 
 ## Performance Expectations
@@ -177,7 +177,7 @@ If a test fails:
 
 3. **Verify parameter file is valid**:
    ```bash
-   clojure -M:run -- -p params/phase-<name>.edn
+   clojure -M:run -- -p data/params/phase-<name>.edn
    ```
 
 4. **Check if a specific phase is broken** by running the phase directly.

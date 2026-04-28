@@ -37,7 +37,7 @@
        attacker-stake > (1 - attacker-stake) × (1 - abstention)
      Abstention is drawn per epoch with ±5% noise around the base rate.
      Timing-attack epochs (every 5th) apply an additional +20pp spike."
-  (:require [resolver-sim.model.rng :as rng]
+  (:require [resolver-sim.stochastic.rng :as rng]
             [resolver-sim.sim.engine      :as engine]))
 
 ;; ── Constants ─────────────────────────────────────────────────────────────────
