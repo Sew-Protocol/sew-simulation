@@ -48,7 +48,7 @@
             [resolver-sim.contract-model.authority     :as auth]
             [resolver-sim.contract-model.trace-metadata :as meta]
             [resolver-sim.contract-model.invariants    :as inv]
-            [resolver-sim.engine.protocol              :as engine]))
+            [resolver-sim.protocols.protocol            :as engine]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants

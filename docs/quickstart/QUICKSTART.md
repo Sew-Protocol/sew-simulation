@@ -85,9 +85,9 @@ For each strategy:
 
 ## Testing
 
-All tests pass:
+All tests pass using the utility script:
 ```bash
-clojure -M:test -e "(do (require '[clojure.test :as t]) (require '[resolver-sim.core-tests]) (t/run-tests 'resolver-sim.core-tests))"
+./scripts/test.sh
 ```
 
 Tests cover:

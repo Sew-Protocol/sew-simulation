@@ -1,16 +1,17 @@
-(ns resolver-sim.engine.protocol-adapter-test
+(ns resolver-sim.protocols.protocol-adapter-test
   "Verifies the DisputeProtocol adapter layer.
 
    Tests:
    1. SEWProtocol via replay-with-protocol produces identical outcomes to
-      direct replay-scenario across a sample of invariant scenarios.
+      direct replay-scenario across all invariant scenarios.
    2. DummyProtocol runs through scenarios and produces :pass outcomes
       (no invariant violations since the Dummy checks nothing)."
   (:require [clojure.test :refer [deftest is testing]]
-            [resolver-sim.contract-model.replay            :as replay]
+            [resolver-sim.contract-model.replay              :as replay]
             [resolver-sim.contract-model.invariant-scenarios :as sc]
-            [resolver-sim.protocols.sew   :as sew]
-            [resolver-sim.protocols.dummy :as dummy]))
+            [resolver-sim.protocols.protocol                 :as proto]
+            [resolver-sim.protocols.sew                      :as sew]
+            [resolver-sim.protocols.dummy                    :as dummy]))
 
 (defn- single-scenario [entry]
   (if (map? entry) entry (first entry)))
@@ -42,5 +43,5 @@
 
 (deftest protocol-interface-is-satisfied
   "Both SEWProtocol and DummyProtocol must fully satisfy DisputeProtocol."
-  (is (satisfies? resolver-sim.engine.protocol/DisputeProtocol sew/protocol))
-  (is (satisfies? resolver-sim.engine.protocol/DisputeProtocol dummy/protocol)))
+  (is (satisfies? proto/DisputeProtocol sew/protocol))
+  (is (satisfies? proto/DisputeProtocol dummy/protocol)))

@@ -8,9 +8,9 @@
    Usage:
      (replay/replay-with-protocol sew/protocol <scenario>)
 
-   Layering: may import contract_model/* and engine/*.
+   Layering: may import contract_model/* and protocols/protocol.
    Must NOT import sim/*, db/*, io/*."
-  (:require [resolver-sim.engine.protocol         :as engine]
+  (:require [resolver-sim.protocols.protocol      :as proto]
             [resolver-sim.contract-model.replay   :as replay]))
 
 ;; ---------------------------------------------------------------------------
@@ -18,7 +18,7 @@
 ;; ---------------------------------------------------------------------------
 
 (deftype SEWProtocol []
-  engine/DisputeProtocol
+  proto/DisputeProtocol
 
   (build-execution-context [_ agents protocol-params]
     ;; Delegates to the existing build-context function in replay.clj,

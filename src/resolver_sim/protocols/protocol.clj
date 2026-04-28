@@ -1,4 +1,4 @@
-(ns resolver-sim.engine.protocol
+(ns resolver-sim.protocols.protocol
   "DisputeProtocol — the interface that protocol plugins must implement.
 
    The generic replay engine calls these methods during scenario execution.

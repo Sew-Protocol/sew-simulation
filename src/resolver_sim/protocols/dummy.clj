@@ -14,16 +14,16 @@
    replay-with-protocol's generic machinery (alias resolution, metrics, trace
    shape) works independently of SEW semantics.
 
-   Layering: may import engine/* only.
+   Layering: may import protocols/protocol only.
    Must NOT import contract_model/*, model/*, db/*, io/*."
-  (:require [resolver-sim.engine.protocol :as engine]))
+  (:require [resolver-sim.protocols.protocol :as proto]))
 
 ;; ---------------------------------------------------------------------------
 ;; DummyProtocol implementation
 ;; ---------------------------------------------------------------------------
 
 (deftype DummyProtocol []
-  engine/DisputeProtocol
+  proto/DisputeProtocol
 
   (build-execution-context [_ agents _protocol-params]
     {:agent-index (into {} (map (juxt :id identity) agents))})
