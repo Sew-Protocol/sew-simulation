@@ -15,6 +15,14 @@ results/
 *.edn
 !params/*.edn
 !params/**/*.edn
+# Fixture definitions are source-controlled; only generated golden reports are excluded
+!fixtures/protocol/*.edn
+!fixtures/states/*.edn
+!fixtures/actors/*.edn
+!fixtures/authority/*.edn
+!fixtures/tokens/*.edn
+!fixtures/thresholds/*.edn
+!fixtures/suites/*.edn
 
 # Python/notebook artifacts
 __pycache__/

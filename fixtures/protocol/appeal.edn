@@ -1,0 +1,4 @@
+{:protocol/id :protocol/appeal
+ :resolver-fee-bps 150
+ :appeal-window-duration 120
+ :max-dispute-duration 600}

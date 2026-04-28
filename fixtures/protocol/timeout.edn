@@ -1,0 +1,4 @@
+{:protocol/id :protocol/timeout
+ :resolver-fee-bps 150
+ :appeal-window-duration 0
+ :max-dispute-duration 300}

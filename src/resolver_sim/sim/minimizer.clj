@@ -29,27 +29,43 @@
             true)))))
 
 (defn- try-remove
-  "Attempt to remove event at index i and check if it still fails."
+  "Attempt to remove event at index i and check if it still fails.
+   Events with :minimize/pin true are never removed."
   [scenario i target-invariant]
   (let [events (:events scenario)
-        new-events (vec (concat (subvec events 0 i) (subvec events (inc i))))
-        new-scenario (assoc scenario :events (re-index-events new-events))]
-    (if (fails? new-scenario target-invariant)
-      new-scenario
-      scenario)))
+        event  (nth events i)]
+    (if (:minimize/pin event)
+      scenario
+      (let [new-events   (vec (concat (subvec events 0 i) (subvec events (inc i))))
+            new-scenario (assoc scenario :events (re-index-events new-events))]
+        (if (fails? new-scenario target-invariant)
+          new-scenario
+          scenario)))))
+
+(defn- prune-unreferenced-agents
+  "Remove agents from :agents that are not referenced by any event in the
+   minimized sequence.  Keeps the trace self-consistent after event removal."
+  [scenario]
+  (let [referenced (into #{} (keep :agent (:events scenario)))]
+    (update scenario :agents (fn [agents]
+                                (filterv #(contains? referenced (:id %)) agents)))))
 
 (defn minimize
-  "Greedily minimize the scenario trace."
+  "Greedily minimize the scenario trace, then prune unreferenced agents.
+
+   Events annotated with :minimize/pin true are never removed, preserving
+   causal pairs (e.g. same-block resolution + escalation) that are required
+   to trigger a specific invariant violation."
   [scenario target-invariant]
   (println "Starting minimization of" (count (:events scenario)) "events...")
-  (loop [current scenario
-         i (dec (count (:events scenario)))]
-    (if (neg? i)
-      (do
-        (println "Minimization complete:" (count (:events current)) "events remain.")
-        current)
-      (let [reduced (try-remove current i target-invariant)]
-        (recur reduced (dec i))))))
+  (let [minimized
+        (loop [current scenario
+               i       (dec (count (:events scenario)))]
+          (if (neg? i)
+            current
+            (recur (try-remove current i target-invariant) (dec i))))]
+    (println "Minimization complete:" (count (:events minimized)) "events remain.")
+    (prune-unreferenced-agents minimized)))
 
 ;; ---------------------------------------------------------------------------
 ;; CLI Entry Point

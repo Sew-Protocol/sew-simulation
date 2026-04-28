@@ -6,6 +6,7 @@
    trace minimisation integration."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.walk :as walk]
             [clojure.data.json :as json]
             [resolver-sim.contract-model.replay :as replay]
@@ -214,3 +215,25 @@
      :target-invariant target-invariant
      :minimized-count  (count @results)
      :results          @results}))
+
+;; ---------------------------------------------------------------------------
+;; Suite Discovery
+;; ---------------------------------------------------------------------------
+
+(defn list-suites
+  "Scan fixtures/suites/ and return a map of suite-key → top-level metadata.
+   Does not recursively compose fixtures; returns only the declared suite keys
+   (:suite/id :suite/title :suite/purpose :suite/class :suite/criticality
+   :suite/prevents) without loading traces or thresholds."
+  []
+  (let [suites-dir (io/file "fixtures/suites")]
+    (->> (.listFiles suites-dir)
+         (filter #(str/ends-with? (.getName %) ".edn"))
+         (map (fn [f]
+                (with-open [r (io/reader f)]
+                  (let [suite (edn/read (java.io.PushbackReader. r))]
+                    [(:suite/id suite)
+                     (select-keys suite [:suite/id :suite/title :suite/purpose
+                                         :suite/class :suite/criticality
+                                         :suite/prevents])]))))
+         (into {}))))
