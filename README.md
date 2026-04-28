@@ -64,14 +64,23 @@ This was reproduced and fixed using deterministic traces:
 
 ## Quick Start
 
-### Run validation suite
+### Run invariant validation suite (fast, in-process)
 ```bash
-# Start simulation engine
-clojure -M:run -- -S --port 7070 &
+clojure -M:run -- --invariants
+```
 
-# Run fixture suites
-cd python
-python invariant_suite.py
+### Run fixture suites (deterministic scenarios)
+```bash
+clojure -M -e "(require '[resolver-sim.sim.fixtures :as f])(f/run-suite :suites/all-invariants)"
+```
+
+### Run Python adversarial failure-mode suite
+```bash
+# Start gRPC simulation server
+nohup clojure -M:run -- -S --port 7070 > grpc-server.log 2>&1 &
+
+# Run suite
+python3 python/invariant_suite.py
 ```
 
 ### Verify Solidity equivalence
