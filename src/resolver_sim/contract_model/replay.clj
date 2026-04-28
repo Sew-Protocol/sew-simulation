@@ -913,7 +913,7 @@
    metrics, trace output shape) is shared with replay-scenario.  Only action
    dispatch and invariant checks are delegated to the protocol.
 
-   protocol — an implementation of resolver-sim.engine.protocol/DisputeProtocol
+   protocol — an implementation of resolver-sim.protocols.protocol/DisputeProtocol
    scenario — a parsed scenario map (v1 schema)
 
    Returns the same result shape as replay-scenario."
