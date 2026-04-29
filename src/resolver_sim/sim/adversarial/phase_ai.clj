@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-ai
+(ns resolver-sim.sim.adversarial.phase-ai
   "Phase AI: Escalation Trap — sybil ring forces honest resolver displacement.
 
    Models the interaction between whale-delegated capital and forced L2 escalation.

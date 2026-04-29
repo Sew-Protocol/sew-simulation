@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-ad
+(ns resolver-sim.sim.governance.phase-ad
   "Phase AD: Governance Bandwidth Floor.
 
    Safeguard for the Phase AA vulnerability: governance gaming is profitable

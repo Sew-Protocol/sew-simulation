@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-ae
+(ns resolver-sim.sim.adversarial.phase-ae
   "Phase AE: Fair Slashing Hypothesis Sweep.
 
    Tests whether the DR3 fair-slashing corrections (PENDING fraud window,

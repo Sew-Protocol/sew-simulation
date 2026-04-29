@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-x
+(ns resolver-sim.sim.economic.phase-x
   "Phase X: Burst Concurrency Exploit - Overwhelming Sequential Appeals
   
   Tests whether attacker can circumvent sequential defense by triggering

@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-u
+(ns resolver-sim.sim.economic.phase-u
   "Phase U: Adaptive Attacker Learning
    
    Tests whether attackers can optimize strategies across epochs.

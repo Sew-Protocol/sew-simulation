@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-o
+(ns resolver-sim.sim.economic.phase-o
   "Phase O: Market Exit Cascade Modeling
   
   Tests system resilience when honest resolvers exit due to low profitability.

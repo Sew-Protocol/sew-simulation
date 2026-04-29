@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-ah
+(ns resolver-sim.sim.adversarial.phase-ah
   "Phase AH: Honest vs. Strategic Equity Divergence Sweep.
 
    Tests whether strategic-type resolvers (malicious, lazy, collusive) can achieve

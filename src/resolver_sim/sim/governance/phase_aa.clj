@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-aa
+(ns resolver-sim.sim.governance.phase-aa
   "Phase AA: Governance as Adversary — Selective Enforcement Gaming.
 
    Tests whether attackers can achieve >20% win rate by gaming governance

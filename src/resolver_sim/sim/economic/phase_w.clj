@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-w
+(ns resolver-sim.sim.economic.phase-w
   "Phase W: Dispute Type Clustering - Adversarial Category Targeting
   
   Tests whether attackers can discover weak dispute categories and

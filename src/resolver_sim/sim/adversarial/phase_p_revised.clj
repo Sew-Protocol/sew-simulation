@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-p-revised
+(ns resolver-sim.sim.adversarial.phase-p-revised
   "Phase P Revised: Falsification test for sequential appeal system.
    
    Tests the CORRECT model:

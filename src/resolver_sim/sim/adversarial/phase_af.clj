@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-af
+(ns resolver-sim.sim.adversarial.phase-af
   "Phase AF: Slashing Epoch Solvency (BM-04).
 
    Tests whether the insurance pool remains solvent across all realistic

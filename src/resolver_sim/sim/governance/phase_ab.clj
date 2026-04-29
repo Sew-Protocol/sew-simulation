@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-ab
+(ns resolver-sim.sim.governance.phase-ab
   "Phase AB: Per-Dispute Effort Rewards.
 
    Safeguard for the Phase Y vulnerability: evidence fog causes resolvers to

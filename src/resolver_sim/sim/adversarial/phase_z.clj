@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-z
+(ns resolver-sim.sim.adversarial.phase-z
   "Phase Z: Legitimacy and Reflexive Participation Loop.
 
    Tests whether the system sustains stable participation over 100+ epochs when:

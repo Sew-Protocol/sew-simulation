@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-r
+(ns resolver-sim.sim.adversarial.phase-r
   "Phase R: Liveness & Participation Failure Testing.
    
    Tests whether system can fail not through attacks or mechanism flaws,

@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-y
+(ns resolver-sim.sim.adversarial.phase-y
   "Phase Y: Evidence Fog and Attention Budget Constraint.
 
    Tests whether system correctness holds when:

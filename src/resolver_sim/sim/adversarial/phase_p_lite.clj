@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-p-lite
+(ns resolver-sim.sim.adversarial.phase-p-lite
   "Phase P Lite: Full 3D falsification test
    
    Sweeps parameters:

@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-t
+(ns resolver-sim.sim.governance.phase-t
   "Phase T: Governance Capture via Rule Drift.
 
    Tests whether an attacker with partial governance control can drive

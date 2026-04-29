@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-q
+(ns resolver-sim.sim.adversarial.phase-q
   "Phase Q: Advanced vulnerability testing.
    
    Extends Phase P (information cascades) to include:

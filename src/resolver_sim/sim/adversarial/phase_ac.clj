@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-ac
+(ns resolver-sim.sim.adversarial.phase-ac
   "Phase AC: Trust Floor & Emergency Onboarding.
 
    Safeguard for the Phase Z vulnerability: legitimacy collapse caused by the

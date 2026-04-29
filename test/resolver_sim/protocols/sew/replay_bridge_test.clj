@@ -1,4 +1,4 @@
-(ns resolver-sim.contract-model.replay-bridge-test
+(ns resolver-sim.protocols.sew.replay-bridge-test
   "Smoke tests for the legacy SEW bridge functions in contract-model.replay.
 
    These functions (build-context, sew-dispatch-action,

@@ -1,4 +1,4 @@
-(ns resolver-sim.sim.phase-ag
+(ns resolver-sim.sim.adversarial.phase-ag
   "Phase AG: EMA Quality Signal Convergence (BM-05).
 
    Tests whether the exponential moving average (EMA) quality score used
