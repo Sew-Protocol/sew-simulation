@@ -9,9 +9,15 @@
 
    The :equity-trajectories key in the return value is a map
    {resolver-id → [profit@epoch1 profit@epoch2 ...]} built by
-   resolver-sim.sim.trajectory/build-equity-trajectories."
+   resolver-sim.sim.trajectory/build-equity-trajectories.
+
+   Attribution model: each epoch, batch trials are routed to individual resolvers
+   via a TrialRouter (default: :uniform-random). Conservation invariants are
+   checked inside run-single-epoch — any routing bug that changes the economics
+   throws before it can corrupt trajectory data."
   (:require [resolver-sim.sim.batch :as batch]
             [resolver-sim.sim.reputation :as rep]
+            [resolver-sim.sim.trial-router :as router]
             [resolver-sim.sim.trajectory :as trajectory]
             [resolver-sim.stochastic.rng :as rng]
             [clojure.set]))
@@ -45,77 +51,79 @@
     decayed-params))
 
 (defn run-single-epoch
-  "Run one epoch (N trials) and return both batch stats and per-resolver breakdown.
-   
+  "Run one epoch (N trials) and return batch stats + per-resolver histories.
+
+   Uses run-batch-with-attribution to get per-trial results, then routes them
+   to individual resolvers via the trial router. Conservation invariants are
+   checked inside route-epoch — any attribution bug throws immediately.
+
    Args:
-     rng: RNG state
-     epoch: Epoch number (1-based)
-     resolver-histories: Map of resolver-id -> resolver-state
-     n-trials: Trials to run this epoch
-     params: Simulation parameters
-   
-   Returns: {:epoch-summary {...}, :updated-histories {...}}"
-  [rng epoch resolver-histories n-trials params]
-  (let [; Apply decay for this epoch
-        decayed-params (apply-detection-decay params epoch)
-        
-        ; Run batch simulation for this epoch
-        batch-result (batch/run-batch rng n-trials decayed-params)
-        
-        ; For now, aggregate results across resolvers
-        ; TODO: Extend batch.clj to return per-resolver breakdown
-        ; For MVP, we'll infer resolver performance from strategy results
-        
-        epoch-summary
-        {:epoch epoch
-         :n-trials n-trials
-         :honest-mean-profit (:honest-mean batch-result)
-         :malice-mean-profit (:malice-mean batch-result)
-         :dominance-ratio (:dominance-ratio batch-result)
-         :appeal-rate (:appeal-rate batch-result)
-         :slash-rate (:slash-rate batch-result)
-         :fraud-slashed-count (:fraud-slashed-count batch-result 0)
-         :reversal-slashed-count (:reversal-slashed-count batch-result 0)
-         :timeout-slashed-count (:timeout-slashed-count batch-result 0)
-         :detection-rate (:slashing-detection-probability decayed-params)}
-        
-        ; Update resolver histories based on batch results
-        ; Strategy: Distribute batch profit proportionally to resolvers
-        ; NOTE: This is simplified attribution. Ideal would require per-resolver tracking from batch.clj
-        updated-histories
-        (let [honest-mean (:honest-mean batch-result)
-              malice-mean (:malice-mean batch-result)
-              honest-count (count (filter #(= :honest (:strategy (val %))) resolver-histories))
-              malice-count (count (filter #(#{:malicious :lazy :collusive} (:strategy (val %))) resolver-histories))]
-          
-          (reduce-kv (fn [acc id resolver]
-                       (let [strategy (:strategy resolver)
-                             is-honest? (= strategy :honest)
-                             ; Distribute batch profit evenly across resolvers of same strategy
-                             ; Each resolver gets a fair share of the epoch's profit
-                             resolver-profit (if is-honest?
-                                             (if (> honest-count 0) (/ honest-mean honest-count) 0)
-                                             (if (> malice-count 0) (/ malice-mean malice-count) 0))
-                             ; Simple slashing: if resolver is malicious and batch has slashed, mark as slashed
-                             was-slashed? (and (not is-honest?)
-                                              (> (:slash-rate batch-result 0) 0)
-                                              (< (rand) (:slash-rate batch-result 0.1)))
-                             
-                             updated (rep/update-resolver-history
-                                     resolver
-                                     resolver-profit
-                                     1  ; 1 verdict per epoch (simplified attribution)
-                                     (if is-honest? 1 0)
-                                     was-slashed?
-                                     epoch)]
-                         
-                         (assoc acc id updated)))
-                     {} resolver-histories))]
-    
-    ; Apply population decay (exits/new entries)
-    (let [decayed-histories (rep/apply-epoch-decay updated-histories epoch params)]
-      {:epoch-summary epoch-summary
-       :updated-histories decayed-histories})))
+     rng               — seeded SplittableRandom (mutated in place)
+     epoch             — epoch number (1-based)
+     resolver-histories — {resolver-id → resolver-state}
+     n-trials          — trials to run this epoch
+     params            — simulation parameters
+     trial-router      — TrialRouter implementation (default: uniform-random)
+
+   Returns: {:epoch-summary {...} :updated-histories {...}}"
+  ([rng epoch resolver-histories n-trials params]
+   (run-single-epoch rng epoch resolver-histories n-trials params router/uniform-random))
+  ([rng epoch resolver-histories n-trials params trial-router]
+   (let [decayed-params (apply-detection-decay params epoch)
+
+         ;; Run batch — get both aggregate stats and per-trial results
+         {:keys [aggregate trials]} (batch/run-batch-with-attribution rng n-trials decayed-params)
+
+         epoch-summary
+         {:epoch                  epoch
+          :n-trials               n-trials
+          :honest-mean-profit     (:honest-mean aggregate)
+          :malice-mean-profit     (:malice-mean aggregate)
+          :dominance-ratio        (:dominance-ratio aggregate)
+          :appeal-rate            (:appeal-rate aggregate)
+          :slash-rate             (:slash-rate aggregate)
+          :fraud-slashed-count    (:fraud-slashed-count aggregate 0)
+          :reversal-slashed-count (:reversal-slashed-count aggregate 0)
+          :timeout-slashed-count  (:timeout-slashed-count aggregate 0)
+          :detection-rate         (:slashing-detection-probability decayed-params)
+          :routing-mode           (router/routing-mode trial-router)}
+
+         ;; Partition resolvers by pool
+         honest-ids     (vec (keep (fn [[id r]] (when (= :honest (:strategy r)) id))
+                                   resolver-histories))
+         strategic-ids  (vec (keep (fn [[id r]] (when (not= :honest (:strategy r)) id))
+                                   resolver-histories))
+
+         ;; Route trials to resolvers — conservation checked inside route-epoch
+         [route-rng decay-rng] (rng/split-rng rng)
+         {:keys [honest-attribution strategic-attribution]}
+         (router/route-epoch honest-ids strategic-ids trials trial-router route-rng)
+
+         ;; Merge both attribution maps and update histories
+         all-attribution (merge honest-attribution strategic-attribution)
+
+         updated-histories
+         (reduce-kv
+          (fn [acc id resolver]
+            (let [attr      (get all-attribution id
+                                 {:trials 0 :profit 0.0 :slashed 0
+                                  :verdicts 0 :correct 0 :appealed 0 :escalated 0})
+                  is-honest? (= :honest (:strategy resolver))]
+              (assoc acc id
+                     (rep/update-resolver-history
+                      resolver
+                      (:profit attr 0.0)
+                      (:verdicts attr 0)
+                      (if is-honest? (:verdicts attr 0) 0)
+                      (pos? (:slashed attr 0))
+                      epoch))))
+          {}
+          resolver-histories)]
+
+     ;; Apply population decay with seeded RNG
+     (let [decayed-histories (rep/apply-epoch-decay updated-histories epoch params decay-rng)]
+       {:epoch-summary     epoch-summary
+        :updated-histories decayed-histories}))))
 
 (defn run-multi-epoch
   "Run N epochs with reputation tracking.

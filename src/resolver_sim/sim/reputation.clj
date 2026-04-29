@@ -1,6 +1,7 @@
 (ns resolver-sim.sim.reputation
   "Per-resolver reputation tracking for multi-epoch simulations."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [resolver-sim.stochastic.rng :as rng]))
 
 (defn initialize-resolvers
   "Create initial cohort of resolvers from strategy mix.
@@ -84,15 +85,17 @@
 
 (defn apply-epoch-decay
   "After each epoch, remove exited resolvers, add new ones to maintain population.
+
+   decay-rng — seeded RNG for deterministic exit decisions.
    Returns: Updated resolver-histories map"
-  [resolver-histories epoch-num params]
+  [resolver-histories epoch-num params decay-rng]
   (let [n-total (count resolver-histories)
-        
-        ; Calculate exits
+
+        ; Calculate exits using the seeded RNG — NOT bare rand
         active-resolvers
         (reduce-kv (fn [acc id resolver]
                      (let [exit-prob (calculate-exit-probability resolver epoch-num params)]
-                       (if (<= (rand) exit-prob)
+                       (if (<= (rng/next-double decay-rng) exit-prob)
                          acc  ; Remove this resolver
                          (assoc acc id (assoc resolver :status :active)))))
                    {} resolver-histories)
