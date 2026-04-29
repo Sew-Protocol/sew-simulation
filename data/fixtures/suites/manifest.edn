@@ -7,3 +7,4 @@
   :suites/timelock-regression {:file "timelock-regression.edn" :title "Timelock regression scenarios" :class :safety :criticality :high}
   :suites/token-pathologies {:file "token-pathologies.edn" :title "Token-based pathologies (FoT/Rebasing)" :class :adversarial :criticality :high}
 }
+:suites/withdrawal-adversarial {:file "withdrawal-adversarial.edn" :title "Adversarial withdrawal and settlement suite" :class :adversarial :criticality :critical}

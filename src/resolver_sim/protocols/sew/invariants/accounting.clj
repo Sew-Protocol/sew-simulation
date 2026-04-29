@@ -1,31 +1,28 @@
 (ns resolver-sim.protocols.sew.invariants.accounting
-  "Global accounting consistency invariant: 
-   Sum(total-held) + Sum(fees) + Sum(bonds) == Sum(escrow-transfers amount-after-fee)
-   
-   Ensures no liquidity is leaked or created during any state transition."
   (:require [resolver-sim.protocols.sew.types :as t]))
 
 (defn- sum-tokens [tokens-map]
-  (apply + (vals tokens-map)))
+  (apply + (conj (vals tokens-map) 0)))
 
 (defn accounting-consistent?
-  "Checks if the world state accounting is balanced."
+  "Checks that Total_Deposited == Total_Released + Total_Withdrawn + Total_Pending_Refunds."
   [world]
-  (let [held      (:total-held world {})
-        fees      (:total-fees world {})
-        bonds     (:bond-balances world {})
-        total-escrow (reduce (fn [acc [wf et]]
-                               (if (contains? #{:pending :disputed} (:escrow-state et))
-                                 (update acc (:token et) (fnil + 0) (:amount-after-fee et))
-                                 acc))
-                             {}
-                             (:escrow-transfers world))
+  (let [transfers (:escrow-transfers world {})
+        released  (:total-released world {})
+        refunded  (:total-refunded world {})
+        pending   (filter #(:exists (val %)) (:pending-settlements world))
         
-        held-sum  (sum-tokens held)
-        fee-sum   (sum-tokens fees)
-        bond-sum  (reduce (fn [acc m] (+ acc (sum-tokens m))) 0 (vals bonds))
-        escrow-sum (sum-tokens total-escrow)]
-    
-    ;; Invariant: total-held[token] should equal sum of pending/disputed escrows 
-    ;; plus any fees/bonds held in the vault.
-    (= held-sum (+ escrow-sum fee-sum bond-sum))))
+        deposited (reduce (fn [acc [_ et]] 
+                            (if (and (:token et) (:amount et))
+                              (update acc (:token et) (fnil + 0) (:amount et))
+                              acc)) 
+                          {} transfers)
+        released-sum (apply + (vals released))
+        refunded-sum (apply + (vals refunded))
+        pending-sum  (reduce (fn [acc [wf _]] 
+                               (let [et (get transfers wf)]
+                                 (if (and (:token et) (:amount-after-fee et))
+                                   (update acc (:token et) (fnil + 0) (:amount-after-fee et))
+                                   acc))) 
+                             {} pending)]
+    (= deposited (merge-with + (zipmap (keys released) (repeat released-sum)) (zipmap (keys refunded) (repeat refunded-sum)) pending-sum))))
