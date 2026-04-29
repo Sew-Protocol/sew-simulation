@@ -70,34 +70,58 @@
    (run-single-epoch rng epoch resolver-histories n-trials params router/uniform-random))
   ([rng epoch resolver-histories n-trials params trial-router]
    (let [decayed-params (apply-detection-decay params epoch)
+         ;; Split RNG into four independent streams
+         [[rng-h rng-m] [rng-route rng-decay]]
+         (let [[a b] (rng/split-rng rng)
+               [c d] (rng/split-rng a)
+               [e f] (rng/split-rng b)]
+           [[c d] [e f]])
 
-         ;; Run batch — get both aggregate stats and per-trial results
-         {:keys [aggregate trials]} (batch/run-batch-with-attribution rng n-trials decayed-params)
+         ;; Run two batches: honest strategy and malicious strategy.
+         ;; This is required so that malice profit reflects actual detection/slashing
+         ;; penalties rather than the honest resolver's counterfactual.
+         {:keys [aggregate trials-honest]}
+         (let [r (batch/run-batch-with-attribution
+                  rng-h n-trials (assoc decayed-params :strategy :honest))]
+           {:aggregate    (:aggregate r)
+            :trials-honest (:trials r)})
+
+         {:keys [aggregate-malice trials-malicious]}
+         (let [r (batch/run-batch-with-attribution
+                  rng-m n-trials (assoc decayed-params :strategy :malicious))]
+           {:aggregate-malice  (:aggregate r)
+            :trials-malicious  (:trials r)})
+
+         honest-mean (:honest-mean aggregate)
+         malice-mean (:malice-mean aggregate-malice)
+         dom-ratio   (cond
+                       (and malice-mean (pos? malice-mean)) (double (/ honest-mean malice-mean))
+                       (pos? honest-mean)                   Double/POSITIVE_INFINITY
+                       :else                                1.0)
 
          epoch-summary
          {:epoch                  epoch
           :n-trials               n-trials
-          :honest-mean-profit     (:honest-mean aggregate)
-          :malice-mean-profit     (:malice-mean aggregate)
-          :dominance-ratio        (:dominance-ratio aggregate)
+          :honest-mean-profit     honest-mean
+          :malice-mean-profit     malice-mean
+          :dominance-ratio        dom-ratio
           :appeal-rate            (:appeal-rate aggregate)
-          :slash-rate             (:slash-rate aggregate)
-          :fraud-slashed-count    (:fraud-slashed-count aggregate 0)
-          :reversal-slashed-count (:reversal-slashed-count aggregate 0)
-          :timeout-slashed-count  (:timeout-slashed-count aggregate 0)
+          :slash-rate             (:slash-rate aggregate-malice)
+          :fraud-slashed-count    (:fraud-slashed-count aggregate-malice 0)
+          :reversal-slashed-count (:reversal-slashed-count aggregate-malice 0)
+          :timeout-slashed-count  (:timeout-slashed-count aggregate-malice 0)
           :detection-rate         (:slashing-detection-probability decayed-params)
           :routing-mode           (router/routing-mode trial-router)}
 
-         ;; Partition resolvers by pool
-         honest-ids     (vec (keep (fn [[id r]] (when (= :honest (:strategy r)) id))
-                                   resolver-histories))
-         strategic-ids  (vec (keep (fn [[id r]] (when (not= :honest (:strategy r)) id))
-                                   resolver-histories))
+         honest-ids    (vec (keep (fn [[id r]] (when (= :honest (:strategy r)) id))
+                                  resolver-histories))
+         strategic-ids (vec (keep (fn [[id r]] (when (not= :honest (:strategy r)) id))
+                                  resolver-histories))
 
-         ;; Route trials to resolvers — conservation checked inside route-epoch
-         [route-rng decay-rng] (rng/split-rng rng)
          {:keys [honest-attribution strategic-attribution]}
-         (router/route-epoch honest-ids strategic-ids trials trial-router route-rng)
+         (router/route-epoch honest-ids strategic-ids
+                             trials-honest trials-malicious
+                             trial-router rng-route)
 
          ;; Merge both attribution maps and update histories
          all-attribution (merge honest-attribution strategic-attribution)
@@ -123,10 +147,13 @@
           {}
           resolver-histories)]
 
-     ;; Apply population decay with seeded RNG
-     (let [decayed-histories (rep/apply-epoch-decay updated-histories epoch params decay-rng)]
+     ;; Apply population decay with seeded RNG; thread next-id to avoid ID collisions
+     (let [{:keys [histories next-id]}
+           (rep/apply-epoch-decay updated-histories epoch params rng-decay
+                                  (:_next-resolver-id params 10000))]
        {:epoch-summary     epoch-summary
-        :updated-histories decayed-histories}))))
+        :updated-histories histories
+        :next-resolver-id  next-id}))))
 
 (defn run-multi-epoch
   "Run N epochs with reputation tracking.
@@ -164,8 +191,9 @@
            (fn [acc epoch-num]
              (let [[rng-1 rng-2]  (rng/split-rng (:rng acc))
                    prev-histories (:histories acc initial-histories)
-                   {:keys [epoch-summary updated-histories]}
-                   (run-single-epoch rng-1 epoch-num prev-histories n-trials-per-epoch params)
+                   {:keys [epoch-summary updated-histories next-resolver-id]}
+                   (run-single-epoch rng-1 epoch-num prev-histories n-trials-per-epoch
+                                     (assoc params :_next-resolver-id (:next-id acc n-resolvers)))
 
                    ;; Rich per-resolver snapshot: everything needed for full trajectories.
                    ;; :profit is the cumulative total so equity trajectories are monotone.
@@ -194,8 +222,10 @@
                       :rng             rng-2
                       :epochs          (cons epoch-summary (:epochs acc []))
                       :histories       updated-histories
-                      :epoch-snapshots (conj (:epoch-snapshots acc []) epoch-snapshot))))
-           {:rng rng :epochs [] :histories initial-histories :epoch-snapshots []}
+                      :epoch-snapshots (conj (:epoch-snapshots acc []) epoch-snapshot)
+                      :next-id         (or next-resolver-id (:next-id acc n-resolvers)))))
+           {:rng rng :epochs [] :histories initial-histories :epoch-snapshots []
+            :next-id n-resolvers}
            (range 1 (inc n-epochs)))
 
           epoch-results   (reverse (:epochs result-accumulator []))

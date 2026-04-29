@@ -189,53 +189,46 @@
 (defn route-epoch
   "Route one epoch's trial results to honest and strategic resolver pools.
 
-   honest-ids     — seq of resolver IDs with :honest strategy
-   strategic-ids  — seq of resolver IDs with non-honest strategies
-   trial-results  — vector of per-trial result maps from run-batch-with-attribution
-   router         — TrialRouter implementation
-   rng            — seeded RNG (will be split into two independent streams)
-
-   Each trial result must contain at minimum:
-     :profit-honest  numeric  (honest resolver perspective)
-     :profit-malice  numeric  (strategic resolver perspective)
-     :slashed?       bool     (strategic resolver was slashed)
-     :appeal-triggered? bool
-     :escalated?     bool
+   honest-ids        — seq of resolver IDs with :honest strategy
+   strategic-ids     — seq of resolver IDs with non-honest strategies
+   honest-trials     — vector of per-trial results run with strategy=:honest
+   strategic-trials  — vector of per-trial results run with strategy=:malicious
+                       (may equal honest-trials if only one batch is run)
+   router            — TrialRouter implementation
+   rng               — seeded RNG (will be split into two independent streams)
 
    Returns {:honest-attribution    {id → resolver-epoch-result}
             :strategic-attribution {id → resolver-epoch-result}}
 
    Conservation guarantee (checked internally via assert-conservation!):
-     sum(honest profits)   == sum(:profit-honest trial-results)
-     sum(strategic profits) == sum(:profit-malice trial-results)"
-  [honest-ids strategic-ids trial-results router rng]
+     sum(honest profits)    == sum(:profit-honest honest-trials)
+     sum(strategic profits) == sum(:profit-malice strategic-trials)"
+  [honest-ids strategic-ids honest-trials strategic-trials router rng]
   (let [[rng-h rng-s] (rng/split-rng rng)
 
-        ;; Project each trial into the honest-pool perspective
         honest-pool
-        (mapv (fn [t] {:profit          (:profit-honest t 0.0)
-                       :slashed?        false  ; honest resolvers are never slashed
-                       :verdicts        1
-                       :correct         (if (:dispute-correct? t false) 1 0)
+        (mapv (fn [t] {:profit            (:profit-honest t 0.0)
+                       :slashed?          false
+                       :verdicts          1
+                       :correct           (if (:dispute-correct? t false) 1 0)
                        :appeal-triggered? (:appeal-triggered? t false)
-                       :escalated?      (:escalated? t false)})
-              trial-results)
+                       :escalated?        (:escalated? t false)})
+              honest-trials)
 
-        ;; Project each trial into the strategic-pool perspective
         strategic-pool
-        (mapv (fn [t] {:profit          (:profit-malice t 0.0)
-                       :slashed?        (:slashed? t false)
-                       :verdicts        1
-                       :correct         0  ; strategic resolvers don't get "correct" credit
+        (mapv (fn [t] {:profit            (:profit-malice t 0.0)
+                       :slashed?          (:slashed? t false)
+                       :verdicts          1
+                       :correct           0
                        :appeal-triggered? (:appeal-triggered? t false)
-                       :escalated?      (:escalated? t false)})
-              trial-results)
+                       :escalated?        (:escalated? t false)})
+              strategic-trials)
 
-        honest-attr     (route router honest-ids     honest-pool     rng-h)
-        strategic-attr  (route router strategic-ids  strategic-pool  rng-s)]
+        honest-attr    (route router honest-ids    honest-pool    rng-h)
+        strategic-attr (route router strategic-ids strategic-pool rng-s)]
 
-    (assert-conservation! honest-attr     honest-pool     "honest pool")
-    (assert-conservation! strategic-attr  strategic-pool  "strategic pool")
+    (assert-conservation! honest-attr    honest-pool    "honest pool")
+    (assert-conservation! strategic-attr strategic-pool "strategic pool")
 
     {:honest-attribution    honest-attr
      :strategic-attribution strategic-attr}))

@@ -1,5 +1,5 @@
 (ns resolver-sim.sim.audit
-  "Multi-epoch stability audit: falsifiable hypothesis checks.
+  "Multi-epoch stability audit: falsifiable hypothesis checks and canonical output.
 
    The core question is not 'does honest beat malicious on average?' —
    the epoch-level batch results already show that. The question is:
@@ -9,8 +9,19 @@
    analyze-multi-epoch answers this with a composite of absolute, distributional,
    and trajectory-slope checks.
 
-   Layering: sim/* only. No db/*, io/* imports."
-  (:require [resolver-sim.sim.trajectory :as trajectory]))
+   Step 6a — calibration: run known-pass and known-fail fixtures to prove the
+   audit detects both outcomes before running the canonical baseline.
+
+   Step 6b — canonical run: run-phase-j-audit executes the full 1000-epoch
+   baseline and writes all output files.
+
+   Layering: sim/* + io/* only. No db/* imports."
+  (:require [resolver-sim.sim.trajectory :as trajectory]
+            [resolver-sim.io.results      :as results]
+            [clojure.java.io              :as io]
+            [clojure.string               :as str])
+  (:import [java.security MessageDigest]
+           [java.math BigInteger]))
 
 ;; ---------------------------------------------------------------------------
 ;; Utility
@@ -158,6 +169,8 @@
             :epoch (inc e)
             :value (:dominance-ratio r)})
 
+         survival-threshold (get opts :malice-survival-threshold 0.5)
+
          checks
          {:honest-mean-positive?           (pos? (:honest-cumulative-profit aggregated-stats 0.0))
           :malice-mean-nonpositive?         (<= (:malice-cumulative-profit aggregated-stats 0.0) 0.0)
@@ -165,7 +178,7 @@
           :honest-p10-above-malice-p90?     (> honest-p10 malice-p90)
           :malice-equity-share-below-limit? (< equity-share max-equity-share)
           :malice-slope-not-improving?      (not (malice-slope-improving? epoch-results tail-fraction))
-          :malice-survival-rate-low?        (< survival-rate 0.5)}
+          :malice-survival-rate-low?        (< survival-rate survival-threshold)}
 
          all-violations
          (concat dominance-violations
@@ -192,22 +205,211 @@
 ;; Reproducibility manifest
 ;; ---------------------------------------------------------------------------
 
+(defn- git-head-sha
+  "Return current git HEAD SHA, or \"unknown\" if git is unavailable."
+  []
+  (try
+    (let [pb  (ProcessBuilder. ["git" "rev-parse" "HEAD"])
+          p   (.start pb)
+          out (slurp (.getInputStream p))]
+      (str/trim out))
+    (catch Exception _ "unknown")))
+
+(defn- sha256-hex
+  "Return SHA-256 hex digest of string s."
+  [s]
+  (let [md  (MessageDigest/getInstance "SHA-256")
+        raw (.digest md (.getBytes s "UTF-8"))]
+    (format "%064x" (BigInteger. 1 raw))))
+
+(defn params-hash
+  "Return a SHA-256 hex digest of the EDN representation of params.
+   Stable across runs with the same params map, regardless of key insertion order,
+   because pr-str produces deterministic output for sorted/record maps."
+  [params]
+  (sha256-hex (pr-str (into (sorted-map) params))))
+
 (defn make-manifest
   "Build a reproducibility manifest for a completed multi-epoch run.
 
-   result      — return value of run-multi-epoch
-   params-file — path to the params EDN file used
-   seed        — the RNG seed used
-   git-commit  — current git HEAD SHA (optional)
+   Required fields (every canonical run must include all of them):
+     result      — return value of run-multi-epoch
+     params      — the params map used (NOT the file path — the actual map)
+     params-file — path to the params EDN file used
+     seed        — the RNG seed used
+
+   Optional overrides:
+     :git-commit   — override auto-detected git SHA
+     :sim-version  — simulator version string (default '0.1.0')
 
    Returns a map suitable for writing to EDN alongside results."
-  [result params-file seed & {:keys [git-commit sim-version]}]
-  {:params-file    params-file
-   :seed           seed
-   :epochs         (:n-epochs result)
-   :trials-per-epoch (:n-trials-per-epoch result)
+  [result params params-file seed & {:keys [git-commit sim-version]}]
+  {:params-file       params-file
+   :params-hash       (params-hash params)
+   :seed              seed
+   :epochs            (:n-epochs result)
+   :trials-per-epoch  (:n-trials-per-epoch result)
    :initial-resolvers (:initial-resolver-count result)
-   :routing-mode   (-> result :epoch-results first :routing-mode)
-   :git-commit     (or git-commit "unknown")
-   :sim-version    (or sim-version "0.1.0")
-   :completed-at   (str (java.time.Instant/now))})
+   :routing-mode      (-> result :epoch-results first :routing-mode)
+   :git-commit        (or git-commit (git-head-sha))
+   :sim-version       (or sim-version "0.1.0")
+   :completed-at      (str (java.time.Instant/now))})
+
+;; ---------------------------------------------------------------------------
+;; Canonical output writing
+;; ---------------------------------------------------------------------------
+
+(defn- trajectory-csv-rows
+  "Build seq of per-resolver-per-epoch rows for the trajectory CSV.
+   Each row: resolver-id, strategy, epoch (1-based), equity, reputation,
+              trial-count, verdict-count, slash-count"
+  [full-trajectories resolver-histories n-epochs]
+  (for [[id traj] full-trajectories
+        epoch-idx (range n-epochs)]
+    (let [strategy (get-in resolver-histories [id :strategy] :unknown)]
+      {:resolver_id  id
+       :strategy     (name strategy)
+       :epoch        (inc epoch-idx)
+       :equity       (get-in traj [:equity epoch-idx] 0.0)
+       :reputation   (get-in traj [:reputation epoch-idx] 0.0)
+       :trial_count  (long (get-in traj [:trial-count epoch-idx] 0))
+       :verdict_count (long (get-in traj [:verdict-count epoch-idx] 0))
+       :slash_count  (long (get-in traj [:slash-count epoch-idx] 0))})))
+
+(defn- audit-markdown
+  "Generate a human-readable PHASE_J_STABILITY_AUDIT.md from the audit result and manifest."
+  [audit-result manifest]
+  (let [{:keys [result epochs-checked checks summary violations]} audit-result
+        pass? (= :pass result)]
+    (str/join "\n"
+              ["# Phase J Multi-Epoch Stability Audit"
+               ""
+               (str "**Result: " (if pass? "✅ PASS" "❌ FAIL") "**")
+               ""
+               "## Run metadata"
+               ""
+               (format "| Field | Value |")
+               (format "|---|---|")
+               (format "| Params file | `%s` |" (:params-file manifest))
+               (format "| Params hash | `%s` |" (subs (:params-hash manifest) 0 16))
+               (format "| Seed | %d |" (:seed manifest))
+               (format "| Epochs | %d |" (:epochs manifest))
+               (format "| Trials/epoch | %d |" (:trials-per-epoch manifest))
+               (format "| Routing | %s |" (name (or (:routing-mode manifest) :unknown)))
+               (format "| Git commit | `%s` |" (subs (or (:git-commit manifest) "unknown") 0 (min 8 (count (str (:git-commit manifest))))))
+               (format "| Completed | %s |" (:completed-at manifest))
+               ""
+               "## Hypothesis"
+               ""
+               "> A malicious resolver cannot survive, compound, or become dominant over time."
+               ""
+               (format "Epochs checked: **%d**" epochs-checked)
+               ""
+               "## Checks"
+               ""
+               "| Check | Result |"
+               "|---|---|"
+               (format "| honest-mean-positive? | %s |" (if (:honest-mean-positive? checks) "✅" "❌"))
+               (format "| malice-mean-nonpositive? | %s |" (if (:malice-mean-nonpositive? checks) "✅" "❌"))
+               (format "| dominance-above-threshold? | %s |" (if (:dominance-above-threshold? checks) "✅" "❌"))
+               (format "| honest-p10-above-malice-p90? | %s |" (if (:honest-p10-above-malice-p90? checks) "✅" "❌"))
+               (format "| malice-equity-share-below-limit? | %s |" (if (:malice-equity-share-below-limit? checks) "✅" "❌"))
+               (format "| malice-slope-not-improving? | %s |" (if (:malice-slope-not-improving? checks) "✅" "❌"))
+               (format "| malice-survival-rate-low? | %s |" (if (:malice-survival-rate-low? checks) "✅" "❌"))
+               ""
+               "## Summary metrics"
+               ""
+               "| Metric | Value |"
+               "|---|---|"
+               (format "| Min dominance ratio | %.3f |" (double (:min-dominance-ratio summary 0.0)))
+               (format "| Dominance slope | %.6f |" (double (:dominance-slope summary 0.0)))
+               (format "| Honest p10 equity | %.1f |" (double (:final-honest-p10 summary 0.0)))
+               (format "| Malice p90 equity | %.1f |" (double (:final-malice-p90 summary 0.0)))
+               (format "| Malice equity share | %.1f%% |" (* 100 (double (:malice-equity-share summary 0.0))))
+               (format "| Malice survival rate | %.1f%% |" (* 100 (double (:malice-survival-rate summary 0.0))))
+               ""
+               (if (empty? violations)
+                 "## No violations — all checks passed."
+                 (str/join "\n"
+                           (concat
+                            ["## Violations"
+                             ""
+                             "| Check | Epoch | Value |"
+                             "|---|---|---|"]
+                            (map (fn [v]
+                                   (format "| %s | %s | %s |"
+                                           (name (:check v))
+                                           (or (:epoch v) "-")
+                                           (or (:value v) "-")))
+                                 violations))))
+               ""])))
+
+(defn write-audit-outputs
+  "Write all canonical audit output files to output-dir.
+
+   Writes:
+     epoch-results.edn
+     trajectory.csv
+     audit-result.edn
+     manifest.edn
+     PHASE_J_STABILITY_AUDIT.md
+
+   Returns output-dir."
+  [output-dir result audit-result manifest]
+  (.mkdirs (io/file output-dir))
+  (results/write-edn   (str output-dir "/epoch-results.edn")  (:epoch-results result))
+  (results/write-edn   (str output-dir "/audit-result.edn")   audit-result)
+  (results/write-edn   (str output-dir "/manifest.edn")       manifest)
+  (results/write-csv   (str output-dir "/trajectory.csv")
+                       (trajectory-csv-rows
+                        (:full-trajectories result)
+                        (:resolver-histories result)
+                        (:n-epochs result)))
+  (spit (str output-dir "/PHASE_J_STABILITY_AUDIT.md")
+        (audit-markdown audit-result manifest))
+  output-dir)
+
+;; ---------------------------------------------------------------------------
+;; Step 6b — canonical run
+;; ---------------------------------------------------------------------------
+
+(defn run-phase-j-audit
+  "Run the canonical multi-epoch stability audit and write all output files.
+
+   params      — simulation parameters map (load from EDN with io/params)
+   params-file — path to the params file (for manifest)
+   output-dir  — directory to write results (created if absent)
+
+   Optional keyword args:
+     :seed             — RNG seed (default: :rng-seed in params, or 42)
+     :n-epochs         — epoch count override (default: :n-epochs in params)
+     :n-trials         — trials/epoch override (default: :n-trials-per-epoch in params)
+     :audit-opts       — map of options for analyze-multi-epoch
+
+   Returns {:result run-result :audit audit-result :manifest manifest :output-dir output-dir}."
+  [params params-file output-dir & {:keys [seed n-epochs n-trials audit-opts]}]
+  (let [seed'     (or seed (:rng-seed params 42))
+        n-epochs' (or n-epochs (:n-epochs params 10))
+        n-trials' (or n-trials (:n-trials-per-epoch params 500))
+
+        ;; Incremental flush: write each epoch summary as it completes
+        epoch-dir (str output-dir "/epochs")
+        _         (.mkdirs (io/file epoch-dir))
+        callback  (fn [n summary]
+                    (results/write-edn
+                     (str epoch-dir "/epoch-" (format "%04d" n) ".edn")
+                     summary))
+
+        rng-inst  (@(requiring-resolve 'resolver-sim.stochastic.rng/make-rng) seed')
+        run-fn    @(requiring-resolve 'resolver-sim.sim.multi-epoch/run-multi-epoch)
+        result    (run-fn rng-inst n-epochs' n-trials' params callback)
+        audit-res (analyze-multi-epoch result (or audit-opts {}))
+        mfst      (make-manifest result params params-file seed')]
+
+    (write-audit-outputs output-dir result audit-res mfst)
+    (println (format "\nAudit result: %s" (name (:result audit-res))))
+    (println (format "Output written to: %s" output-dir))
+    {:result     result
+     :audit      audit-res
+     :manifest   mfst
+     :output-dir output-dir}))

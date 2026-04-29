@@ -5,36 +5,47 @@
 
 (defn initialize-resolvers
   "Create initial cohort of resolvers from strategy mix.
-   Returns map: {resolver-id -> resolver-state}"
-  [n-resolvers strategy-mix]
-  (let [honest-count    (int (* n-resolvers (:honest strategy-mix 0)))
-        lazy-count      (int (* n-resolvers (:lazy strategy-mix 0)))
-        malicious-count (int (* n-resolvers (:malicious strategy-mix 0)))
-        collusive-count (- n-resolvers honest-count lazy-count malicious-count)]
-    (reduce (fn [acc [strategy cnt]]
-              (reduce (fn [m _]
-                        (let [id (str (gensym (name strategy)))]
-                          (assoc m id
-                                 {:resolver-id          id
-                                  :strategy             strategy
-                                  :status               :active
-                                  :total-profit         0.0
-                                  :total-fees-earned    0.0
-                                  :total-slashing-loss  0.0
-                                  :total-trials         0
-                                  :total-verdicts       0
-                                  :total-correct        0
-                                  :total-slashed        0
-                                  :total-appealed       0
-                                  :total-escalated      0
-                                  :exit-probability     0.0
-                                  :epoch-history        {}})))
-                      acc (range cnt)))
-            {}
-            [[:honest    honest-count]
-             [:lazy      lazy-count]
-             [:malicious malicious-count]
-             [:collusive collusive-count]])))
+
+   start-id — first numeric suffix for resolver IDs (default 0).
+              Pass a non-zero value when adding new entrants to avoid
+              ID collisions with existing resolvers.
+
+   IDs are deterministic: \"<strategy>-<N>\" where N is sequential from start-id.
+   No gensym — same arguments always produce the same ID set."
+  ([n-resolvers strategy-mix] (initialize-resolvers n-resolvers strategy-mix 0))
+  ([n-resolvers strategy-mix start-id]
+   (let [honest-count    (int (* n-resolvers (:honest strategy-mix 0)))
+         lazy-count      (int (* n-resolvers (:lazy strategy-mix 0)))
+         malicious-count (int (* n-resolvers (:malicious strategy-mix 0)))
+         collusive-count (- n-resolvers honest-count lazy-count malicious-count)
+         groups          [[:honest    honest-count]
+                          [:lazy      lazy-count]
+                          [:malicious malicious-count]
+                          [:collusive collusive-count]]]
+     (first
+      (reduce
+       (fn [[m next-id] [strategy cnt]]
+         [(reduce (fn [acc i]
+                    (let [id (str (name strategy) "-" (+ next-id i))]
+                      (assoc acc id
+                             {:resolver-id         id
+                              :strategy            strategy
+                              :status              :active
+                              :total-profit        0.0
+                              :total-fees-earned   0.0
+                              :total-slashing-loss 0.0
+                              :total-trials        0
+                              :total-verdicts      0
+                              :total-correct       0
+                              :total-slashed       0
+                              :total-appealed      0
+                              :total-escalated     0
+                              :exit-probability    0.0
+                              :epoch-history       {}})))
+                  m (range cnt))
+          (+ next-id cnt)])
+       [{} start-id]
+       groups)))))
 
 (defn update-resolver-history
   "Update resolver state after one epoch's attributed trials.
@@ -101,37 +112,30 @@
 (defn apply-epoch-decay
   "After each epoch, remove exited resolvers, add new ones to maintain population.
 
-   decay-rng — seeded RNG for deterministic exit decisions.
-   Returns: Updated resolver-histories map"
-  [resolver-histories epoch-num params decay-rng]
+   decay-rng  — seeded RNG for deterministic exit decisions.
+   next-id    — starting numeric suffix for new entrant IDs (avoids ID collisions).
+   Returns: {:histories updated-map :next-id N}"
+  [resolver-histories epoch-num params decay-rng next-id]
   (let [n-total (count resolver-histories)
-
-        ; Calculate exits using the seeded RNG — NOT bare rand
         active-resolvers
         (reduce-kv (fn [acc id resolver]
                      (let [exit-prob (calculate-exit-probability resolver epoch-num params)]
                        (if (<= (rng/next-double decay-rng) exit-prob)
-                         acc  ; Remove this resolver
+                         acc
                          (assoc acc id (assoc resolver :status :active)))))
                    {} resolver-histories)
-        
-        n-remaining (count active-resolvers)
-        n-new (- n-total n-remaining)  ; How many to add back
-        
-        ; Determine strategy mix for new entrants (assume honest is attractive)
-        new-strategy-mix
-        (if (> n-new 0)
-          {:honest (/ n-new 2)
-           :lazy (/ n-new 4)
-           :malicious (/ n-new 8)
-           :collusive (/ n-new 8)}
-          {})]
-    
-    ; Add new resolvers to replace exited ones
-    (if (> n-new 0)
-      (let [new-resolvers (initialize-resolvers n-new new-strategy-mix)]
-        (merge active-resolvers new-resolvers))
-      active-resolvers)))
+        n-new (- n-total (count active-resolvers))
+        new-strategy-mix (when (pos? n-new)
+                           {:honest    (/ n-new 2)
+                            :lazy      (/ n-new 4)
+                            :malicious (/ n-new 8)
+                            :collusive (/ n-new 8)})]
+    (if (pos? n-new)
+      (let [new-resolvers (initialize-resolvers n-new new-strategy-mix next-id)]
+        {:histories (merge active-resolvers new-resolvers)
+         :next-id   (+ next-id n-new)})
+      {:histories active-resolvers
+       :next-id   next-id})))
 
 (defn win-rate
   "Calculate per-resolver win rate.
