@@ -1,14 +1,15 @@
 (ns resolver-sim.protocols.sew
   "SEWProtocol — implementation of DisputeProtocol for the SEW state machine."
-  (:require [resolver-sim.protocols.protocol            :as proto]
-            [resolver-sim.protocols.sew.types      :as t]
-            [resolver-sim.protocols.sew.state-machine :as sm]
-            [resolver-sim.protocols.sew.lifecycle     :as lc]
-            [resolver-sim.protocols.sew.resolution    :as res]
-            [resolver-sim.protocols.sew.registry      :as reg]
-            [resolver-sim.protocols.sew.authority     :as auth]
+  (:require [resolver-sim.protocols.protocol             :as proto]
+            [resolver-sim.protocols.sew.types       :as t]
+            [resolver-sim.protocols.sew.diff        :as diff]
+            [resolver-sim.protocols.sew.state-machine  :as sm]
+            [resolver-sim.protocols.sew.lifecycle      :as lc]
+            [resolver-sim.protocols.sew.resolution     :as res]
+            [resolver-sim.protocols.sew.registry       :as reg]
+            [resolver-sim.protocols.sew.authority      :as auth]
             [resolver-sim.protocols.sew.trace-metadata :as meta]
-            [resolver-sim.protocols.sew.invariants    :as inv]))
+            [resolver-sim.protocols.sew.invariants     :as inv]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -350,6 +351,24 @@
     (check-invariants-transition world-before world-after))
 
   (world-snapshot [_ world]
-    (world-snapshot world)))
+    (world-snapshot world))
+
+  (init-world [_ scenario]
+    (let [init-time    (get scenario :initial-block-time 1000)
+          tp           (:token-params scenario)
+          fot-bps      (when tp (get tp :fee-on-transfer 0))
+          s-tokens     (into #{} (keep #(get-in % [:params :token]) (:events scenario)))
+          base         (t/empty-world init-time)]
+      (if (and fot-bps (pos? fot-bps) (seq s-tokens))
+        (reduce (fn [w tok] (assoc-in w [:token-fot-bps tok] fot-bps)) base s-tokens)
+        base)))
+
+  (compute-projection [_ world]
+    [(diff/projection world) (diff/projection-hash world)])
+
+  (classify-transition [_ action result-kw]
+    {:transition/type (meta/transition-type action)
+     :effect/type     (meta/effect-type result-kw)
+     :resolution/path (meta/resolution-path action)}))
 
 (def protocol (SEWProtocol.))

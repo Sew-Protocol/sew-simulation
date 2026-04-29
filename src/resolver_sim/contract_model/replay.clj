@@ -9,13 +9,9 @@
    After every successful transition:
      1. protocol/check-invariants-single
      2. protocol/check-invariants-transition"
-  (:require [clojure.data.json                      :as json]
-            [clojure.string                         :as str]
-            [resolver-sim.protocols.sew.diff       :as diff]
-            [resolver-sim.protocols.sew.types      :as t]
-            [resolver-sim.protocols.sew.trace-metadata :as meta]
-            [resolver-sim.protocols.protocol            :as engine]
-            [resolver-sim.protocols.sew                 :as sew]))
+  (:require [clojure.data.json              :as json]
+            [clojure.string                :as str]
+            [resolver-sim.protocols.protocol :as engine]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -175,21 +171,22 @@
   (let [event-time (:time event)
         now        (:block-time world)]
     (if (< event-time now)
-      {:ok?    true
-       :world  world
-       :trace-entry {:seq            (:seq event)
-                     :time           event-time
-                     :agent          (:agent event)
-                     :action         (:action event)
-                     :result         :rejected
-                     :error          :time-regression
-                     :extra          nil
-                     :invariants-ok? true
-                     :violations     nil
-                     :world          (engine/world-snapshot protocol world)
-                     :projection     (diff/projection world)
-                     :projection-hash (diff/projection-hash world)}
-       :halted? false}
+      (let [[proj proj-hash] (engine/compute-projection protocol world)]
+        {:ok?    true
+         :world  world
+         :trace-entry {:seq             (:seq event)
+                       :time            event-time
+                       :agent           (:agent event)
+                       :action          (:action event)
+                       :result          :rejected
+                       :error           :time-regression
+                       :extra           nil
+                       :invariants-ok?  true
+                       :violations      nil
+                       :world           (engine/world-snapshot protocol world)
+                       :projection      proj
+                       :projection-hash proj-hash}
+         :halted? false})
 
       (let [world-t    (if (> event-time now) (assoc world :block-time event-time) world)
             result     (try
@@ -207,25 +204,26 @@
                              (merge (when-not (:ok? inv-single) (:violations inv-single))
                                     (when-not (:ok? inv-trans)  (:violations inv-trans))))]
 
-        {:ok?    (and ok? (not violated?))
-         :world  (if violated? world-t world-next)
-         :trace-entry
-         {:seq            (:seq event)
-          :time           event-time
-          :agent          (:agent event)
-          :action         (:action event)
-          :result         (cond violated? :invariant-violated ok? :ok :else :rejected)
-          :error          (when-not ok? (:error result))
-          :extra          (:extra result)
-          :invariants-ok? (if ok? (and (:ok? inv-single) (:ok? inv-trans)) true)
-          :violations     all-violations
-          :trace-metadata {:transition/type (meta/transition-type (:action event))
-                           :effect/type     (meta/effect-type (cond violated? :invariant-violated ok? :ok :else :rejected))
-                           :resolution/path (meta/resolution-path (:action event))}
-          :world          (engine/world-snapshot protocol (if violated? world-t world-next))
-          :projection     (diff/projection (if violated? world-t world-next))
-          :projection-hash (diff/projection-hash (if violated? world-t world-next))}
-         :halted? violated?}))))
+        (let [result-kw    (cond violated? :invariant-violated ok? :ok :else :rejected)
+              final-world  (if violated? world-t world-next)
+              [proj ph]    (engine/compute-projection protocol final-world)]
+          {:ok?    (and ok? (not violated?))
+           :world  final-world
+           :trace-entry
+           {:seq             (:seq event)
+            :time            event-time
+            :agent           (:agent event)
+            :action          (:action event)
+            :result          result-kw
+            :error           (when-not ok? (:error result))
+            :extra           (:extra result)
+            :invariants-ok?  (if ok? (and (:ok? inv-single) (:ok? inv-trans)) true)
+            :violations      all-violations
+            :trace-metadata  (engine/classify-transition protocol (:action event) result-kw)
+            :world           (engine/world-snapshot protocol final-world)
+            :projection      proj
+            :projection-hash ph}
+           :halted? violated?})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public API (Generic)
@@ -241,15 +239,8 @@
             p-params (get-in scenario [:metadata :protocol_params] (get scenario :protocol-params {}))
             context  (engine/build-execution-context protocol agents p-params)
             agent-index (:agent-index context)
-            init-time (get scenario :initial-block-time 1000)
-            token-params (:token-params scenario)
-            fot-bps (when token-params (get token-params :fee-on-transfer 0))
-            scenario-tokens (into #{} (keep #(get-in % [:params :token]) (:events scenario)))
-            world-base (t/empty-world init-time)
-            world0 (if (and fot-bps (pos? fot-bps) (seq scenario-tokens))
-                     (reduce (fn [w tok] (assoc-in w [:token-fot-bps tok] fot-bps)) world-base scenario-tokens)
-                     world-base)
-            events (sort-by :seq (:events scenario))]
+            world0  (engine/init-world protocol scenario)
+            events  (sort-by :seq (:events scenario))]
         (loop [world world0 events events trace [] metrics (zero-metrics) wf-alias-map {}]
           (if (empty? events)
             (let [open-disputes (when-not (:allow-open-disputes? scenario)
@@ -274,25 +265,29 @@
                     (recur (:world step) (rest events) new-trace new-metrics new-alias-map)))))))))))
 
 (defn replay-scenario
-  "Legacy/Standard entry point: Replays using the SEWProtocol."
+  "Standard SEW entry point: replays using SEWProtocol.
+   Callers that need a different protocol should use replay-with-protocol directly."
   [scenario]
-  (replay-with-protocol sew/protocol scenario))
+  (replay-with-protocol @(requiring-resolve 'resolver-sim.protocols.sew/protocol) scenario))
 
 ;; ---------------------------------------------------------------------------
 ;; Legacy/Compatibility helpers (Bridge to SEW implementation)
 ;; ---------------------------------------------------------------------------
 
+(defn- sew-protocol []
+  @(requiring-resolve 'resolver-sim.protocols.sew/protocol))
+
 (defn build-context [agents protocol-params]
-  (engine/build-execution-context sew/protocol agents protocol-params))
+  (engine/build-execution-context (sew-protocol) agents protocol-params))
 
 (defn sew-dispatch-action [context world event]
-  (engine/dispatch-action sew/protocol context world event))
+  (engine/dispatch-action (sew-protocol) context world event))
 
 (defn sew-check-invariants-single [world]
-  (engine/check-invariants-single sew/protocol world))
+  (engine/check-invariants-single (sew-protocol) world))
 
 (defn sew-check-invariants-transition [world-before world-after]
-  (engine/check-invariants-transition sew/protocol world-before world-after))
+  (engine/check-invariants-transition (sew-protocol) world-before world-after))
 
 (defn result->json-str
   "Serialize a replay result to a JSON string."

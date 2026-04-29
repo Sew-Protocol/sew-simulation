@@ -51,7 +51,17 @@
     {:ok? true :violations nil})
 
   (world-snapshot [_ world]
-    {:block-time (:block-time world)}))
+    {:block-time (:block-time world)})
+
+  (init-world [_ scenario]
+    {:escrow-transfers {}
+     :block-time (get scenario :initial-block-time 1000)})
+
+  (compute-projection [_ _world]
+    [nil nil])
+
+  (classify-transition [_ _action _result-kw]
+    nil))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared singleton
