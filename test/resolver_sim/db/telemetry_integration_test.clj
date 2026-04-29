@@ -10,7 +10,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [evaluation.store     :as store]
             [resolver-sim.db.store :as ss]
-            [resolver-sim.contract-model.runner    :as runner]
+            [resolver-sim.protocols.sew.runner    :as runner]
             [resolver-sim.db.telemetry :as tel])
   (:import [java.util Date UUID]))
 

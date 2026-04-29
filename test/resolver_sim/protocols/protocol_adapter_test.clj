@@ -8,7 +8,7 @@
       (no invariant violations since the Dummy checks nothing)."
   (:require [clojure.test :refer [deftest is testing]]
             [resolver-sim.contract-model.replay              :as replay]
-            [resolver-sim.contract-model.invariant-scenarios :as sc]
+            [resolver-sim.protocols.sew.invariant-scenarios :as sc]
             [resolver-sim.protocols.protocol                 :as proto]
             [resolver-sim.protocols.sew                      :as sew]
             [resolver-sim.protocols.dummy                    :as dummy]))

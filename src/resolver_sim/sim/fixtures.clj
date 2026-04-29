@@ -10,9 +10,9 @@
             [clojure.walk :as walk]
             [clojure.data.json :as json]
             [resolver-sim.contract-model.replay :as replay]
-            [resolver-sim.contract-model.types :as t]
-            [resolver-sim.contract-model.invariants :as inv]
-            [resolver-sim.contract-model.diff :as diff]
+            [resolver-sim.protocols.sew.types :as t]
+            [resolver-sim.protocols.sew.invariants :as inv]
+            [resolver-sim.protocols.sew.diff :as diff]
             [resolver-sim.canonical.actions :as canon]
             [resolver-sim.sim.minimizer :as minimizer]
             [clojure.pprint :as pp]))

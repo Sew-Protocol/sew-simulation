@@ -2,7 +2,7 @@
   "CLI entry point."
   (:require [resolver-sim.io.params :as params]
             [resolver-sim.io.results :as results]
-            [resolver-sim.contract-model.invariant-runner :as invariant]
+            [resolver-sim.protocols.sew.invariant-runner :as invariant]
             [resolver-sim.sim.batch :as batch]
             [resolver-sim.sim.sweep :as sweep]
             [resolver-sim.sim.multi-epoch :as multi-epoch]
@@ -427,7 +427,7 @@
 
           (try
             (println "Loading params from:" (:params options))
-            (let [params    (data/params/validate-and-merge (:params options))
+            (let [params    (params/validate-and-merge (:params options))
                   output    (:output options)
                   phase-key (some #(when (get options %) %) (keys phase-runners))
                   [label run-fn] (get phase-runners phase-key)]

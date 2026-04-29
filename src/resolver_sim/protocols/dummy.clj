@@ -48,7 +48,10 @@
     {:ok? true :violations nil})
 
   (check-invariants-transition [_ _world-before _world-after]
-    {:ok? true :violations nil}))
+    {:ok? true :violations nil})
+
+  (world-snapshot [_ world]
+    {:block-time (:block-time world)}))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared singleton

@@ -44,4 +44,8 @@
   (check-invariants-transition [protocol world-before world-after]
     "Cross-world invariant checks (e.g. terminal-state irreversibility).
      Called after every successful transition with both worlds.
-     Returns {:ok? bool :violations map-or-nil}."))
+     Returns {:ok? bool :violations map-or-nil}.")
+
+  (world-snapshot [protocol world]
+    "Create a lean, serializable map of the world state for trace output.
+     Should exclude large internal state and keep only relevant metrics."))

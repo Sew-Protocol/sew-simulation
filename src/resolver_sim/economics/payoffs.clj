@@ -2,7 +2,7 @@
   "Canonical economic logic for the SEW protocol.
    Centralizes payoff, fee, and bounty calculations to ensure consistency
    across the simulation and contract model."
-  (:require [resolver-sim.contract-model.types :as t]))
+  (:require [resolver-sim.protocols.sew.types :as t]))
 
 ;; ---------------------------------------------------------------------------
 ;; Escrow Fees
