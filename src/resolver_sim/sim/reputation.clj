@@ -7,56 +7,71 @@
   "Create initial cohort of resolvers from strategy mix.
    Returns map: {resolver-id -> resolver-state}"
   [n-resolvers strategy-mix]
-  (let [honest-count (int (* n-resolvers (:honest strategy-mix 0)))
-        lazy-count (int (* n-resolvers (:lazy strategy-mix 0)))
+  (let [honest-count    (int (* n-resolvers (:honest strategy-mix 0)))
+        lazy-count      (int (* n-resolvers (:lazy strategy-mix 0)))
         malicious-count (int (* n-resolvers (:malicious strategy-mix 0)))
         collusive-count (- n-resolvers honest-count lazy-count malicious-count)]
-    
-    (reduce (fn [acc [strategy count]]
-              (reduce (fn [map _]
+    (reduce (fn [acc [strategy cnt]]
+              (reduce (fn [m _]
                         (let [id (str (gensym (name strategy)))]
-                          (assoc map id
-                            {:resolver-id id
-                             :strategy strategy
-                             :status :active
-                             :total-profit 0.0
-                             :total-fees-earned 0.0
-                             :total-slashing-loss 0.0
-                             :total-verdicts 0
-                             :total-correct 0
-                             :total-slashed 0
-                             :exit-probability 0.0
-                             :epoch-history {}})))
-                        acc (range count)))
+                          (assoc m id
+                                 {:resolver-id          id
+                                  :strategy             strategy
+                                  :status               :active
+                                  :total-profit         0.0
+                                  :total-fees-earned    0.0
+                                  :total-slashing-loss  0.0
+                                  :total-trials         0
+                                  :total-verdicts       0
+                                  :total-correct        0
+                                  :total-slashed        0
+                                  :total-appealed       0
+                                  :total-escalated      0
+                                  :exit-probability     0.0
+                                  :epoch-history        {}})))
+                      acc (range cnt)))
             {}
-            [[:honest honest-count]
-             [:lazy lazy-count]
+            [[:honest    honest-count]
+             [:lazy      lazy-count]
              [:malicious malicious-count]
              [:collusive collusive-count]])))
 
 (defn update-resolver-history
-  "Update resolver state after a single dispute outcome.
-   Returns: Updated resolver record"
-  [resolver profit verdicts-this-trial correct-this-trial slashed? epoch]
+  "Update resolver state after one epoch's attributed trials.
+
+   profit             — net profit this epoch (sum of attributed trial profits)
+   verdicts           — verdicts rendered this epoch
+   correct            — correct verdicts this epoch (0 for strategic resolvers)
+   slashed?           — true if at least one slash event occurred this epoch
+   epoch              — epoch number (1-based)
+   trials             — number of trials attributed to this resolver (may be 0)
+   appealed           — number of appeal events
+   escalated          — number of escalation events
+
+   Returns: Updated resolver record."
+  [resolver profit verdicts correct slashed? epoch
+   & {:keys [trials appealed escalated] :or {trials 0 appealed 0 escalated 0}}]
   (let [old-history (:epoch-history resolver {})
-        epoch-key (keyword (str "epoch-" epoch))
-        epoch-data (get old-history epoch-key {:profit 0.0 :verdicts 0 :slashed? false})
-        
-        new-epoch-data
-        {:profit (+ (:profit epoch-data 0.0) profit)
-         :verdicts (+ (:verdicts epoch-data 0) verdicts-this-trial)
-         :correct (+ (:correct epoch-data 0) correct-this-trial)
-         :slashed? (or (:slashed? epoch-data false) slashed?)
-         :epoch epoch}]
-    
+        epoch-key   (keyword (str "epoch-" epoch))
+        new-epoch   {:profit    profit
+                     :trials    trials
+                     :verdicts  verdicts
+                     :correct   correct
+                     :slashed?  slashed?
+                     :appealed  appealed
+                     :escalated escalated
+                     :epoch     epoch}]
     (assoc resolver
-      :total-profit (+ (:total-profit resolver) profit)
-      :total-fees-earned (+ (:total-fees-earned resolver) (max 0.0 profit))
-      :total-slashing-loss (+ (:total-slashing-loss resolver) (if slashed? (abs profit) 0.0))
-      :total-verdicts (+ (:total-verdicts resolver) verdicts-this-trial)
-      :total-correct (+ (:total-correct resolver) correct-this-trial)
-      :total-slashed (+ (:total-slashed resolver) (if slashed? 1 0))
-      :epoch-history (assoc old-history epoch-key new-epoch-data))))
+           :total-profit        (+ (:total-profit resolver 0.0) profit)
+           :total-fees-earned   (+ (:total-fees-earned resolver 0.0) (max 0.0 profit))
+           :total-slashing-loss (+ (:total-slashing-loss resolver 0.0) (if slashed? (- (min 0.0 profit)) 0.0))
+           :total-trials        (+ (:total-trials resolver 0) trials)
+           :total-verdicts      (+ (:total-verdicts resolver 0) verdicts)
+           :total-correct       (+ (:total-correct resolver 0) correct)
+           :total-slashed       (+ (:total-slashed resolver 0) (if slashed? 1 0))
+           :total-appealed      (+ (:total-appealed resolver 0) appealed)
+           :total-escalated     (+ (:total-escalated resolver 0) escalated)
+           :epoch-history       (assoc old-history epoch-key new-epoch))))
 
 (defn calculate-exit-probability
   "Based on cumulative losses and slashing, probability resolver exits.
