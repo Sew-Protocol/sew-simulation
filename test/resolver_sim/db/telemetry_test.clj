@@ -6,7 +6,7 @@
    trial->event-records) and confirm that all write calls are no-ops
    on a nil datasource."
   (:require [clojure.test :refer [deftest testing is are]]
-            [resolver-sim.contract-model.runner    :as runner]
+            [resolver-sim.protocols.sew.runner    :as runner]
             [resolver-sim.db.telemetry :as tel]
             [resolver-sim.db.store     :as ss]))
 

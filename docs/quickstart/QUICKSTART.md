@@ -72,15 +72,16 @@ Tests cover:
 
 ```
 src/resolver_sim/
-  contract_model/   - State machine, invariants, and replay engine
+  contract_model/   - Protocol-agnostic replay kernel (replay.clj)
+  protocols/        - DisputeProtocol interface + SEW and Dummy implementations
+    sew/            - SEW state machine, lifecycle, invariants, accounting
   stochastic/       - Statistical models (rng, difficulty, decision quality)
   sim/              - Monte Carlo simulation phases and harness
-  protocols/        - DisputeProtocol interface and implementations (SEW)
   io/               - Parameter loading and result serialisation
   core.clj          - CLI entry point
 ```
 
-**Key principle**: All logic in `contract_model` and `stochastic` is pure (no side effects). RNG is explicitly passed as a parameter.
+**Key principle**: All logic in `protocols/`, `contract_model/`, and `stochastic/` is pure (no side effects). RNG is explicitly passed as a parameter.
 
 ## Reproducibility Guarantees
 

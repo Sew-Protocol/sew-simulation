@@ -8,7 +8,7 @@
       (no invariant violations since the Dummy checks nothing)."
   (:require [clojure.test :refer [deftest is testing]]
             [resolver-sim.contract-model.replay              :as replay]
-            [resolver-sim.contract-model.invariant-scenarios :as sc]
+            [resolver-sim.protocols.sew.invariant-scenarios :as sc]
             [resolver-sim.protocols.protocol                 :as proto]
             [resolver-sim.protocols.sew                      :as sew]
             [resolver-sim.protocols.dummy                    :as dummy]))
@@ -17,8 +17,9 @@
   (if (map? entry) entry (first entry)))
 
 (deftest sew-protocol-matches-direct-replay
-  "replay-with-protocol using SEWProtocol must produce the same :outcome as
-   direct replay-scenario for every invariant scenario."
+  "replay-with-protocol using SEWProtocol must produce identical results to
+   direct replay-scenario for every invariant scenario — same outcome,
+   same event count, same metrics."
   (testing "all scenarios"
     (doseq [[name entry] sc/all-scenarios]
       (let [scenario (single-scenario entry)
@@ -26,14 +27,20 @@
             via-prot (replay/replay-with-protocol sew/protocol scenario)]
         (is (= (:outcome direct) (:outcome via-prot))
             (str name ": outcome mismatch — direct=" (:outcome direct)
-                 " via-protocol=" (:outcome via-prot)))))))
+                 " via-protocol=" (:outcome via-prot)))
+        (is (= (:events-processed direct) (:events-processed via-prot))
+            (str name ": events-processed mismatch — direct=" (:events-processed direct)
+                 " via-protocol=" (:events-processed via-prot)))
+        (is (= (:metrics direct) (:metrics via-prot))
+            (str name ": metrics mismatch"))))))
 
 (deftest dummy-protocol-passes-scenarios
   "DummyProtocol (no invariant enforcement) must complete without crash for
-   any scenario.  Outcome is :pass because the Dummy enforces no invariants
-   and treats all actions as successful no-ops (except create_escrow)."
-  (testing "first three scenarios complete without exception"
-    (doseq [[name entry] (take 3 sc/all-scenarios)]
+   every invariant scenario.  Outcome is never :invalid — the generic kernel
+   machinery (alias resolution, metrics, trace shape) must work independently
+   of SEW semantics."
+  (testing "all scenarios complete without structural failure"
+    (doseq [[name entry] sc/all-scenarios]
       (let [scenario (single-scenario entry)
             result   (replay/replay-with-protocol dummy/protocol scenario)]
         (is (#{:pass :fail} (:outcome result))

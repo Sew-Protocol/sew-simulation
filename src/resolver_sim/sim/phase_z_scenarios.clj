@@ -1,7 +1,7 @@
-(ns resolver-sim.sim.phase-z-scenarios
+(ns resolver-sim.sim.adversarial.phase-z-scenarios
   "Phase Z adversarial scenarios mapped to the contract-model replay format.
 
-   Phase Z (resolver-sim.sim.phase-z) tests legitimacy and reflexive
+   Phase Z (resolver-sim.sim.adversarial.phase-z) tests legitimacy and reflexive
    participation collapse.  Its five tests identify system-level risks:
 
      TEST 1 Baseline           → resolver always present           → no liveness risk

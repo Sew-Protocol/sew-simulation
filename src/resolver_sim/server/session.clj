@@ -15,7 +15,7 @@
      - Clojure is the sole authority: no state lives outside this store.
 
    Layering: server/* may import contract_model/*.  Must NOT import db/* or io/*."
-  (:require [resolver-sim.contract-model.types  :as t]
+  (:require [resolver-sim.protocols.sew.types  :as t]
             [resolver-sim.contract-model.replay :as replay])
   (:import [java.util.concurrent.locks ReentrantLock]))
 
