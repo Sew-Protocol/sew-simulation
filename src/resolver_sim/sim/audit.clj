@@ -88,12 +88,16 @@
    in the final tail-fraction of epochs. A positive slope on dominance means
    honest is pulling ahead; negative means malice is closing the gap.
 
+   Infinite dominance ratios (malice profit <= 0) are capped at 1000.0 before
+   regression to prevent NaN from ∞ - ∞ arithmetic.
+
    tail-fraction — fraction of epochs to use for the regression (default 0.2)."
   [epoch-results tail-fraction]
-  (let [ratios (dominance-ratio-trajectory epoch-results)
+  (let [cap    1000.0
+        ratios (mapv #(min cap (double %)) (dominance-ratio-trajectory epoch-results))
         n      (count ratios)
         tail-n (max 2 (int (* tail-fraction n)))
-        tail   (subvec (vec ratios) (- n tail-n))]
+        tail   (subvec ratios (- n tail-n))]
     (< (linear-slope tail) 0.0)))
 
 ;; ---------------------------------------------------------------------------
@@ -322,7 +326,8 @@
                "| Metric | Value |"
                "|---|---|"
                (format "| Min dominance ratio | %.3f |" (double (:min-dominance-ratio summary 0.0)))
-               (format "| Dominance slope | %.6f |" (double (:dominance-slope summary 0.0)))
+               (let [ds (double (:dominance-slope summary 0.0))]
+                 (format "| Dominance slope | %s |" (if (Double/isNaN ds) "n/a" (format "%.6f" ds))))
                (format "| Honest p10 equity | %.1f |" (double (:final-honest-p10 summary 0.0)))
                (format "| Malice p90 equity | %.1f |" (double (:final-malice-p90 summary 0.0)))
                (format "| Malice equity share | %.1f%% |" (* 100 (double (:malice-equity-share summary 0.0))))

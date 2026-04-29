@@ -126,10 +126,10 @@
                    {} resolver-histories)
         n-new (- n-total (count active-resolvers))
         new-strategy-mix (when (pos? n-new)
-                           {:honest    (/ n-new 2)
-                            :lazy      (/ n-new 4)
-                            :malicious (/ n-new 8)
-                            :collusive (/ n-new 8)})]
+                           {:honest    0.50
+                            :lazy      0.25
+                            :malicious 0.125
+                            :collusive 0.125})]
     (if (pos? n-new)
       (let [new-resolvers (initialize-resolvers n-new new-strategy-mix next-id)]
         {:histories (merge active-resolvers new-resolvers)

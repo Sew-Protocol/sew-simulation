@@ -177,7 +177,7 @@
 (deftest manifest-contains-required-fields
   (testing "make-manifest produces a map with all required fields"
     (let [result   (run :epochs 4 :trials 40)
-          manifest (audit/make-manifest result "data/params/test.edn" 42
+          manifest (audit/make-manifest result base-params "data/params/test.edn" 42
                                         :git-commit "abc123"
                                         :sim-version "0.1.0")]
       (is (= "data/params/test.edn" (:params-file manifest)))
