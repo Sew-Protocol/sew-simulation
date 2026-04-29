@@ -2,14 +2,15 @@
 
 ## What this system is
 
-A Monte Carlo + contract-model simulation engine validating that honest dispute
-resolution incentives dominate malicious strategies in the SEW protocol. It
-operates at two levels:
+A Monte Carlo + protocol simulation engine validating that honest dispute
+resolution incentives dominate malicious strategies in the SEW protocol.
+It operates at two levels:
 
-1. **Statistical simulation** (`sim/`, `model/`) — probabilistic phases that
-   test incentive properties across parameter spaces.
-2. **Live contract simulation** (`contract_model/`) — a deterministic model of
-   the actual SEW smart contract, run trial-by-trial and recorded to XTDB.
+1. **Statistical simulation** (`sim/`, `stochastic/`) — probabilistic phases
+   that test incentive properties across parameter spaces.
+2. **Live protocol simulation** (`contract_model/`, `protocols/`) — deterministic
+   execution of the SEW dispute protocol against adversarial strategies,
+   recorded to XTDB.
 
 Results feed an engineering brief (`docs/results/`) that drives protocol
 implementation and remediation.
@@ -18,10 +19,13 @@ implementation and remediation.
 
 ## Design principles
 
-- **Functional core, imperative shell**: all model and simulation logic is pure
-  (no I/O, no DB). Only `io/` (file I/O) and `db/` (XTDB) are effectful.
+- **Functional core, imperative shell**: all protocol and simulation logic is
+  pure (no I/O, no DB). Only `io/` (file I/O) and `db/` (XTDB) are effectful.
 - **Pure functions, explicit RNG**: randomness is an explicit parameter — same
   seed + params → identical output, byte-for-byte.
+- **Pluggable protocol layer**: the replay kernel (`contract_model/replay.clj`)
+  is protocol-agnostic. SEW is one implementation of `DisputeProtocol`; other
+  protocols can be plugged in without touching the kernel.
 - **Reproducibility**: every run is auditable via params EDN + git commit.
 - **Transparent economics**: fee, bond, slashing calculations are explicit and
   independently verifiable.
@@ -33,29 +37,36 @@ implementation and remediation.
 ```
 src/resolver_sim/
 
-  contract_model/       ← deterministic SEW contract model (pure)
-    accounting.clj        fee/bond/slashing arithmetic
-    authority.clj         resolver authority checks
-    invariants.clj        CM invariant assertions
-    lifecycle.clj         escrow lifecycle transitions
-    resolution.clj        dispute resolution logic
-    runner.clj            single trial entry point → result map
-    state_machine.clj     escrow FSM
-    types.clj             domain types and param schema
+  contract_model/       ← Protocol-agnostic kernel (pure)
+    replay.clj            open-world scenario replay engine; delegates all
+                          protocol logic to a DisputeProtocol implementation
 
-  db/                   ← imperative shell: XTDB persistence
-    store.clj             sew_trial_outcomes + sew_escrow_events tables,
-                          queries, summarise-batch (pure aggregate helper)
-    telemetry.clj         adapter: runner output → db writes
+  protocols/            ← DisputeProtocol interface + implementations (pure)
+    protocol.clj          DefProtocol: the 8-method plugin interface
+                            build-execution-context, dispatch-action,
+                            check-invariants-single, check-invariants-transition,
+                            world-snapshot, init-world,
+                            compute-projection, classify-transition
+    dummy.clj             DummyProtocol — always-pass proof-of-concept
+    sew.clj               SEWProtocol adapter — wires sew/* into the interface
+    sew/                  SEW Protocol implementation (pure)
+      state_machine.clj     escrow FSM transitions
+      lifecycle.clj         contract lifecycle (create → dispute → resolve)
+      accounting.clj        fee/bond/slashing arithmetic
+      resolution.clj        DR1/DR2/DR3 resolution logic
+      authority.clj         resolver authority checks
+      invariants.clj        28+ post-condition checks
+      invariants/
+        accounting.clj      accounting sub-invariants (FoT, projection hash)
+      types.clj             SEW world-state shape, constructors, accessors
+      runner.clj            top-level trial runner (live sim)
+      invariant_runner.clj  in-process S01–S41 runner
+      invariant_scenarios.clj S01–S41 deterministic scenarios
+      diff.clj              world-state hashing + EVM diff helpers
+      trace_metadata.clj    transition/effect/resolution type vocabulary
+      registry.clj          resolver stake/bond registry
 
-  sim/                  ← statistical simulation phases (pure)
-    phase_o.clj … phase_aa.clj   individual hypothesis phases
-    batch.clj, sweep.clj          batch runners
-    adversarial.clj, waterfall.clj, multi_epoch.clj, reputation.clj
-    governance_delay.clj, governance_impact.clj
-    appeal_outcomes.clj, batch_integration.clj
-
-  model/                ← statistical / economic models (pure)
+  stochastic/           ← statistical/economic models (pure)
     types.clj, rng.clj, economics.clj, dispute.clj
     bribery_markets.clj, contingent_bribery.clj
     correlated_failures.clj, decision_quality.clj
@@ -64,19 +75,36 @@ src/resolver_sim/
     information_cascade.clj, liveness_failures.clj
     panel_decision.clj, resolver_ring.clj
 
-  governance/           ← governance rule models (pure)
-    rules.clj
+  sim/                  ← simulation phases (pure sweeps)
+    phase_o.clj … phase_ai.clj   individual hypothesis phases
+    engine.clj                   phase harness (make-result, run-parameter-sweep)
+    batch.clj, sweep.clj         batch runners
+    fixtures.clj                 deterministic suite runner
+    minimizer.clj                trace minimisation
+    adversarial.clj, waterfall.clj, multi_epoch.clj
+    governance_impact.clj, trajectory.clj
 
+  governance/           ← governance rule models (pure)
   adversaries/          ← adversary strategy models (pure)
     strategy.clj
-
+    ring_attacker.clj
   oracle/               ← detection models (pure)
-    detection.clj
+
+  economics/            ← canonical payoff calculations (pure)
+  canonical/            ← canonical action vocabulary (pure)
+
+  db/                   ← imperative shell: XTDB persistence
+    store.clj             sew_trial_outcomes + sew_escrow_events tables;
+                          summarise-batch (pure aggregate helper)
+    telemetry.clj         adapter: protocols/sew/runner output → db writes
 
   io/                   ← imperative shell: file I/O
     params.clj            load + validate EDN params
     results.clj           write CSV / EDN / metadata
+    trace_store.clj       trace persistence
+    trace_export.clj      trace export helpers
 
+  server/               ← gRPC server + session management
   core.clj              ← CLI entry point (imperative shell)
 ```
 
@@ -86,16 +114,39 @@ src/resolver_sim/
 
 ```
 FUNCTIONAL CORE (no I/O, easily testable)
-  contract_model/*, model/*, sim/*, governance/*, adversaries/*, oracle/*
+  contract_model/*, protocols/*, stochastic/*, sim/*,
+  governance/*, adversaries/*, oracle/*, economics/*, canonical/*
 
 IMPERATIVE SHELL (effectful)
-  db/*      — XTDB reads/writes via evaluation.xtdb (from eval-engine dep)
+  db/*      — XTDB reads/writes
   io/*      — file reads/writes
+  server/*  — gRPC session state
   core.clj  — CLI, wires shell to core
 ```
 
-**Rule**: namespaces in the functional core must never import `evaluation.xtdb`
-or any `db/*` namespace. Shell code flows inward; core code never reaches out.
+**Rule**: namespaces in the functional core must never import `db/*` or `io/*`.
+Shell code flows inward; core code never reaches out.
+
+---
+
+## Layering rules
+
+| Namespace | May import | Must NOT import |
+|---|---|---|
+| `protocols/protocol.clj` | nothing | everything else |
+| `contract_model/*` | `protocols/protocol` | anything else |
+| `protocols/sew/*` | `protocols/protocol`, `contract_model/*` | `sim/*`, `db/*`, `io/*` |
+| `protocols/dummy` | `protocols/protocol` | everything else |
+| `stochastic/*` | nothing outside `stochastic/` | everything else |
+| `sim/*` | `contract_model/*`, `protocols/*`, `stochastic/*`, `governance/*`, `adversaries/*`, `oracle/*` | `db/*`, `io/*` |
+| `governance/*`, `adversaries/*`, `oracle/*` | `stochastic/*` only | `db/*`, `io/*` |
+| `db/*` | `contract_model/*`, `protocols/sew/*`, `evaluation.xtdb` | `sim/*` |
+| `io/*` | `stochastic/*`, `sim/*` | `db/*` |
+| `core.clj` | everything | — |
+
+**Key invariant**: the functional core is testable without a running XTDB
+instance or filesystem. `db/` and `io/` are the only namespaces with
+side effects.
 
 ---
 
@@ -108,9 +159,6 @@ og/eval-engine {:local/root "../og/eval-engine"}
 
 Only `resolver-sim.db.*` may import `evaluation.xtdb` (eval-engine's shared
 XTDB infrastructure). The rest of the codebase is decoupled from eval-engine.
-
-When `evaluation.xtdb` moves to `evaluation.db.xtdb` (planned eval-engine
-restructure), update `db/store.clj` require accordingly.
 
 ---
 
@@ -127,94 +175,84 @@ Valid-time semantics: `_valid_from` = simulated block timestamp. Queries with
 `FOR VALID_TIME AS OF` reproduce the escrow state at any point in the simulated
 chain timeline.
 
-SQL literals (not JDBC `?` params) are used for INSERTs because XTDB 2.x
-pgwire rejects double-parenthesised VALUES from `preferQueryMode=simple` param
-substitution. See `evaluation.xtdb/sql-str` etc.
-
 Pass `nil` as datasource to skip all writes — enables offline simulation runs
 and unit tests without a live XTDB instance.
 
 ---
 
-## Evaluation pipeline (statistical simulation)
+## Evaluation pipeline (live simulation)
 
 ```
-data/params/*.edn
-  ↓  io/params.clj  (load + validate + merge defaults)
-Validated params map
-  ↓  core.clj  (CLI dispatch)
-  ├── sim/phase_*.clj  (statistical phase runner)
-  │     ↓  model/*.clj  (pure economic/adversarial models)
-  │   Phase summary printed + saved to results/
+data/fixtures/*.edn / *.json
+  ↓  sim/fixtures.clj  (load + compose scenario)
+Scenario map
+  ↓  contract_model/replay.clj  (replay-with-protocol / replay-scenario)
+  │     ↓  protocols/sew.clj   (SEWProtocol.dispatch-action)
+  │           ↓  protocols/sew/*.clj  (state machine, lifecycle, resolution)
+  │     ↓  protocols/sew.clj   (SEWProtocol.check-invariants-*)
+  │           ↓  protocols/sew/invariants.clj  (28+ invariant checks)
+  │   Trace map (per-step outcomes) returned to caller
   │
-  └── contract_model/runner.clj  (live contract trial)
-        ↓  db/telemetry.clj  (write to XTDB if ds provided)
-      Trial result map → XTDB
+  └── db/telemetry.clj  (write to XTDB if ds provided)
 ```
 
 ---
 
 ## Namespace growth guidance
 
-### `sim/` — currently ~15 files
-Stays manageable to ~25 before navigation suffers. When it tips, group by
-what is being tested rather than chronologically:
-
+### `sim/` — currently ~38 files
+When it reaches ~50, group by test domain:
 ```
 sim/
-  statistical/    ← early model-validation phases (A–N)
-  live/           ← contract-model phases (O–AA) + future
-  adversarial.clj, batch.clj, sweep.clj, waterfall.clj
+  economic/     phases testing fee/profit/incentive hypotheses
+  governance/   phases testing governance capture, rule drift
+  adversarial/  phases testing attack strategies
+  engine.clj, batch.clj, sweep.clj, waterfall.clj  (shared infrastructure)
 ```
 
-Do not split prematurely — wait until a flat listing is confusing to navigate.
+### `stochastic/` — currently ~17 files
+Split into sub-domains only when two distinct areas emerge (e.g.
+`stochastic/economic/` vs `stochastic/adversarial/`). Flat is correct for ≤20 files.
 
-### `model/` — currently ~10 files
-Split only when two distinct sub-domains emerge (e.g. `model/economic/` vs
-`model/adversarial/`). `bribery_markets.clj` and `contingent_bribery.clj` are
-natural neighbours; keep them together.
+### `protocols/sew/` — currently ~13 files
+If the SEW kernel expands significantly, consider splitting by concern:
+```
+protocols/sew/
+  core/         state_machine, lifecycle, resolution, authority
+  accounting/   accounting, invariants/accounting
+  dr3/          registry, runner (DR3-specific logic)
+```
 
 ### `db/` — currently 2 files
-New tables get new files here (e.g. `db/governance.clj` for governance event
-tables). Do not grow `store.clj` indefinitely — one file per table group.
-
-### `contract_model/` — currently 8 files
-If the live contract simulation expands significantly (e.g. multi-escrow
-workflows, oracle integration), sub-group into `contract_model/state/` and
-`contract_model/oracle/`. Not needed yet.
+New tables get new files here (e.g. `db/governance.clj`). Do not grow
+`store.clj` indefinitely — one file per table group.
 
 ---
 
 ## Validation phases
 
-27 phases implemented (G through AA). Results in `docs/results/`.
+Phases O through AI implemented (~30 phases). Results in `docs/results/`.
 
 | Range | Focus |
 |---|---|
-| G–N | Statistical model baseline and edge cases |
-| O–X | Contract model: lifecycle, adversarial, divergence |
+| O–X | Protocol lifecycle, adversarial strategies, divergence detection |
 | Y | Evidence fog and attention budget exhaustion |
 | Z | Legitimacy and reflexive participation loop |
 | AA | Governance as adversary (capacity attack + rule drift) |
+| AB–AI | Effort rewards, threshold sensitivity, trajectory analysis |
 
 Key findings documented in `docs/results/PHASE_YZA_FINDINGS.md`.
-Remediation status tracked in `docs/results/COMPLETE_VALIDATION_SUMMARY.md`.
 
 ---
 
 ## Testing
 
-- **Unit tests**: `test/resolver_sim/contract_model/*_test.clj` — pure functions,
-  no XTDB required (ds=nil)
-- **Integration tests**: `test/resolver_sim/db/telemetry_integration_test.clj` —
-  requires live XTDB on localhost:5432
-- **Simulation smoke tests**: `test-all.sh` — runs all 27 phases, checks for
-  expected completion output (27/27 passing)
-
-Run unit tests:
-```bash
-clojure -M:test -e "
-  (require 'clojure.test)
-  (require 'resolver-sim.db.telemetry-test)
-  (clojure.test/run-tests 'resolver-sim.db.telemetry-test)"
-```
+- **Deterministic invariant suite** (S01–S41): `clojure -M:run -- --invariants`
+  (in-process, no gRPC; ~1 s)
+- **Fixture suite runner**: `clojure -M -e "(require '[resolver-sim.sim.fixtures :as f])(f/run-suite :suites/all-invariants)"`
+- **Unit tests**: `./scripts/test.sh`
+  - `test/resolver_sim/protocols/sew/*_test.clj` — SEW state machine, invariants, lifecycle
+  - `test/resolver_sim/contract_model/replay_bridge_test.clj` — kernel bridge functions
+  - `test/resolver_sim/protocols/protocol_adapter_test.clj` — SEWProtocol + DummyProtocol parity
+  - `test/resolver_sim/db/` — XTDB persistence (requires live XTDB on localhost:5432)
+- **Protocol adapter tests**: `clojure -M:test -e "(require '[resolver-sim.protocols.protocol-adapter-test :as t]) (clojure.test/run-tests 'resolver-sim.protocols.protocol-adapter-test)"`

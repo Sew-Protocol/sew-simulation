@@ -94,7 +94,7 @@ This simulator does **not** test:
 | **Escalation** | Escalation level bounded; pending settlement cleared on escalation |
 | **Concurrency** | agree_to_cancel not set on disputed escrow |
 
-The invariants are implemented in `src/resolver_sim/contract_model/invariants.clj`.
+The invariants are implemented in `src/resolver_sim/protocols/sew/invariants.clj`.
 
 ---
 

@@ -1,6 +1,5 @@
   1. High-Priority Infrastructure & Documentation
-   * Finalise README.md & data/fixtures/README.md: These are now structurally complete, but the content in docs/ and the repo-level documentation should reflect the new
-     abstraction layer (DisputeProtocol kernel vs. SEW plugin).
+   * ✅ Architecture docs updated: docs/ now reflects DisputeProtocol kernel vs. SEW plugin split.
    * Suite Manifest: Create the data/fixtures/suites/manifest.edn as a single registry file, making it easy for users to list and discover all available suites.
    * Determinism Proof: Execute the "Double Run" check (run-suite twice, byte-compare golden/ reports) and document the result as a guarantee.
 
@@ -9,15 +8,15 @@
      "happy path" trace).
    * Greedy Multi-Step Pruning: Ensure the minimize function correctly prunes agent actors that are no longer referenced in the minimized event sequence.
 
-  3. Abstraction (The "Protocol Kernel" Layer)
-   * Extract DisputeProtocol Interface: Refactor src/resolver_sim/contract_model/ to isolate protocol-agnostic primitives (actions, resolution states) from SEW-specific
-     logic.
-   * Module Migration: Move all SEW-specific implementation (transitions, economics, invariants) to src/protocols/sew/.
-   * Cross-Protocol Example: Implement a minimal UMA-style or Dummy protocol within the framework to prove that the kernel successfully abstracts away the implementation
-     details.
+  3. ✅ Abstraction (The "Protocol Kernel" Layer) — COMPLETE
+   * ✅ DisputeProtocol interface extracted to protocols/protocol.clj (8 methods).
+   * ✅ SEW implementation migrated from contract_model/ to protocols/sew/*.
+   * ✅ DummyProtocol proof-of-concept implemented and tested against all 41 scenarios.
+   * ✅ replay.clj is now genuinely protocol-agnostic (no protocols/sew/* imports).
 
   4. Canonical Vocabulary Expansion
-   * Event Typing: Implement the :transition/type and :effect/type classifications we discussed to enable structured trace filtering (e.g., "Show all :economic effects").
+   * ✅ Event Typing: :transition/type and :effect/type classifications implemented in
+     protocols/sew/trace_metadata.clj and exposed via DisputeProtocol.classify-transition.
    * Outcome & Integrity Mapping: Fully integrate the Resolution Trace Metadata (:outcome, :integrity, :failure) into the run-suite reporter.
 
   5. Roadmap Coverage & Testing

@@ -40,7 +40,7 @@ clojure -M:fmt
 
 ## Project Structure
 
-- **src/resolver_sim/model/** — Pure functions for dispute mechanics (economics, slashing, appeals)
+- **src/resolver_sim/stochastic/** — Pure functions for dispute mechanics (economics, slashing, appeals)
 - **src/resolver_sim/sim/** — Trial + batch + sweep orchestration
 - **src/resolver_sim/io/** — Parameter loading, result serialization (EDN/CSV)
 - **test/** — Unit tests + property-based invariants
@@ -52,7 +52,7 @@ clojure -M:fmt
 
 ### Pure Model Layer
 
-All dispute mechanics in `src/resolver_sim/model/` are **deterministic functions** given:
+All dispute mechanics in `src/resolver_sim/stochastic/` are **deterministic functions** given:
 
 - Parameters (escrow size, fees, bonds, slashing)
 - RNG seed
@@ -86,12 +86,12 @@ Tests validate invariants:
 
 ### Model Layer
 
-- `src/resolver_sim/model/types.clj` — Parameter schemas
-- `src/resolver_sim/model/economics.clj` — Payoff functions
-- `src/resolver_sim/model/dispute.clj` — Dispute lifecycle
-- `src/resolver_sim/model/appeal.clj` — Appeal dynamics
-- `src/resolver_sim/model/slashing.clj` — Slashing rules
-- `src/resolver_sim/model/agents.clj` — Resolver strategies
+- `src/resolver_sim/stochastic/types.clj` — Parameter schemas
+- `src/resolver_sim/stochastic/economics.clj` — Payoff functions
+- `src/resolver_sim/stochastic/dispute.clj` — Dispute lifecycle
+- `src/resolver_sim/stochastic/decision_quality.clj` — Decision quality model
+- `src/resolver_sim/stochastic/difficulty.clj` — Difficulty distribution
+- `src/resolver_sim/stochastic/rng.clj` — Deterministic RNG
 
 ### Simulation Layer
 
@@ -223,10 +223,10 @@ Then in nREPL:
 
 ### Adding a New Model Component
 
-1. Add `.clj` file to `src/resolver_sim/model/`
+1. Add `.clj` file to `src/resolver_sim/stochastic/`
 2. Implement pure functions (no I/O, no randomness except via RNG arg)
 3. Add tests to `test/resolver_sim/` with property-based tests
-4. Export from `model/types.clj` if part of public interface
+4. Export from `stochastic/types.clj` if part of public interface
 
 ## References
 
