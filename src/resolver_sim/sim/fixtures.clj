@@ -221,19 +221,15 @@
 ;; ---------------------------------------------------------------------------
 
 (defn list-suites
-  "Scan data/fixtures/suites/ and return a map of suite-key → top-level metadata.
-   Does not recursively compose fixtures; returns only the declared suite keys
-   (:suite/id :suite/title :suite/purpose :suite/class :suite/criticality
-   :suite/prevents) without loading traces or thresholds."
+  "Read the suite registry from data/fixtures/suites/manifest.edn and return a map of suite-key → metadata."
   []
-  (let [suites-dir (io/file "data/fixtures/suites")]
-    (->> (.listFiles suites-dir)
-         (filter #(str/ends-with? (.getName %) ".edn"))
-         (map (fn [f]
-                (with-open [r (io/reader f)]
-                  (let [suite (edn/read (java.io.PushbackReader. r))]
-                    [(:suite/id suite)
-                     (select-keys suite [:suite/id :suite/title :suite/purpose
-                                         :suite/class :suite/criticality
-                                         :suite/prevents])]))))
-         (into {}))))
+  (let [manifest-path "data/fixtures/suites/manifest.edn"
+        manifest (edn/read-string (slurp manifest-path))]
+    (reduce-kv (fn [m k v]
+                 (let [suite-path (str "data/fixtures/suites/" (:file v))
+                       suite (edn/read-string (slurp suite-path))]
+                   (assoc m k (select-keys suite [:suite/id :suite/title :suite/purpose
+                                                 :suite/class :suite/criticality
+                                                 :suite/prevents]))))
+               {}
+               manifest)))
