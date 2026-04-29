@@ -31,6 +31,13 @@
     {:ok true :address (:address agent)}
     {:ok false :error :unknown-agent :detail {:agent-id agent-id}}))
 
+;; Defaults below are the on-chain contract defaults from BaseEscrow/EscrowFactory.
+;; Non-zero on-chain defaults:
+;;   :resolver-fee-bps   50    → 0.5%  (ESCROW_FEE_DENOMINATOR = 10 000)
+;;   :max-dispute-duration 2592000 → 30 days in seconds
+;;   :resolver-bond-bps  1000  → 10%   (DR3 resolver bond requirement)
+;;   :fraud-slash-bps    5000  → 50%   (DR3 fraud penalty)
+;; Everything else defaults to 0 / nil — meaning "feature disabled at module level".
 (defn- build-snapshot [pp]
   (t/make-module-snapshot
    {:escrow-fee-bps               (get pp :resolver-fee-bps 50)
@@ -40,7 +47,7 @@
     :appeal-bond-protocol-fee-bps (get pp :appeal-bond-protocol-fee-bps 0)
     :dispute-resolver             (get pp :dispute-resolver nil)
     :appeal-bond-bps              (get pp :appeal-bond-bps 0)
-    :resolver-bond-bps            (get pp :resolver-bond-bps 1000) ; 10%
+    :resolver-bond-bps            (get pp :resolver-bond-bps 1000)
     :appeal-bond-amount           (get pp :appeal-bond-amount 0)
     :reversal-slash-bps           (get pp :reversal-slash-bps 0)
     :fraud-slash-bps              (get pp :fraud-slash-bps 5000)
@@ -275,7 +282,7 @@
 ;; Invariant Checks
 ;; ---------------------------------------------------------------------------
 
-(defn- check-invariants-single
+(defn- run-single-invariants
   "Single-world invariants (solvency, fee non-negative).
    Returns {:ok? bool :violations map-or-nil}."
   [world]
@@ -283,7 +290,7 @@
     {:ok?        (:all-hold? r)
      :violations (when-not (:all-hold? r) (:results r))}))
 
-(defn- check-invariants-transition
+(defn- run-transition-invariants
   "Cross-world invariants (terminal state irreversibility).
    Returns {:ok? bool :violations map-or-nil}."
   [world-before world-after]
@@ -345,10 +352,10 @@
     (apply-action context world event))
 
   (check-invariants-single [_ world]
-    (check-invariants-single world))
+    (run-single-invariants world))
 
   (check-invariants-transition [_ world-before world-after]
-    (check-invariants-transition world-before world-after))
+    (run-transition-invariants world-before world-after))
 
   (world-snapshot [_ world]
     (world-snapshot world))

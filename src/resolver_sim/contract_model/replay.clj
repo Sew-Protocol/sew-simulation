@@ -63,23 +63,14 @@
         events      (sort-by :seq (:events scenario))
         known-ids   (set (map :id agents))
         init-time   (get scenario :initial-block-time 1000)
-        id-counts   (frequencies (map :id agents))
-        addr-counts (frequencies (map :address agents))
-        dup-ids     (keys (filter (fn [[_ n]] (> n 1)) id-counts))
-        dup-addrs   (keys (filter (fn [[_ n]] (> n 1)) addr-counts))]
+        agent-check (validate-agents agents)]
     (cond
       (not= version supported-schema-version)
       {:ok false :error :unsupported-schema-version
        :detail {:expected supported-schema-version :got version}}
 
-      (empty? agents)
-      {:ok false :error :no-agents}
-
-      (seq dup-ids)
-      {:ok false :error :duplicate-agent-ids :detail {:duplicates (vec dup-ids)}}
-
-      (seq dup-addrs)
-      {:ok false :error :duplicate-agent-addresses :detail {:duplicates (vec dup-addrs)}}
+      (not (:ok agent-check))
+      agent-check
 
       (empty? events)
       {:ok false :error :no-events}
