@@ -9,10 +9,10 @@
   (:require [clojure.data.json                 :as json]
             [clojure.java.io                   :as io]
             [clojure.string                    :as str]
-            [resolver-sim.contract-model.diff  :as diff]
+            [resolver-sim.protocols.sew.diff  :as diff]
             [resolver-sim.contract-model.replay :as replay]
             [resolver-sim.io.scenarios          :as scenarios]
-            [resolver-sim.contract-model.trace-metadata     :as meta])
+            [resolver-sim.protocols.sew.trace-metadata     :as meta])
   (:gen-class))
 
 ;; ---------------------------------------------------------------------------

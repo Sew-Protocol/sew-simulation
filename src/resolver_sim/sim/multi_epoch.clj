@@ -9,9 +9,15 @@
 
    The :equity-trajectories key in the return value is a map
    {resolver-id → [profit@epoch1 profit@epoch2 ...]} built by
-   resolver-sim.sim.trajectory/build-equity-trajectories."
+   resolver-sim.sim.trajectory/build-equity-trajectories.
+
+   Attribution model: each epoch, batch trials are routed to individual resolvers
+   via a TrialRouter (default: :uniform-random). Conservation invariants are
+   checked inside run-single-epoch — any routing bug that changes the economics
+   throws before it can corrupt trajectory data."
   (:require [resolver-sim.sim.batch :as batch]
             [resolver-sim.sim.reputation :as rep]
+            [resolver-sim.sim.trial-router :as router]
             [resolver-sim.sim.trajectory :as trajectory]
             [resolver-sim.stochastic.rng :as rng]
             [clojure.set]))
@@ -45,89 +51,128 @@
     decayed-params))
 
 (defn run-single-epoch
-  "Run one epoch (N trials) and return both batch stats and per-resolver breakdown.
-   
+  "Run one epoch (N trials) and return batch stats + per-resolver histories.
+
+   Uses run-batch-with-attribution to get per-trial results, then routes them
+   to individual resolvers via the trial router. Conservation invariants are
+   checked inside route-epoch — any attribution bug throws immediately.
+
    Args:
-     rng: RNG state
-     epoch: Epoch number (1-based)
-     resolver-histories: Map of resolver-id -> resolver-state
-     n-trials: Trials to run this epoch
-     params: Simulation parameters
-   
-   Returns: {:epoch-summary {...}, :updated-histories {...}}"
-  [rng epoch resolver-histories n-trials params]
-  (let [; Apply decay for this epoch
-        decayed-params (apply-detection-decay params epoch)
-        
-        ; Run batch simulation for this epoch
-        batch-result (batch/run-batch rng n-trials decayed-params)
-        
-        ; For now, aggregate results across resolvers
-        ; TODO: Extend batch.clj to return per-resolver breakdown
-        ; For MVP, we'll infer resolver performance from strategy results
-        
-        epoch-summary
-        {:epoch epoch
-         :n-trials n-trials
-         :honest-mean-profit (:honest-mean batch-result)
-         :malice-mean-profit (:malice-mean batch-result)
-         :dominance-ratio (:dominance-ratio batch-result)
-         :appeal-rate (:appeal-rate batch-result)
-         :slash-rate (:slash-rate batch-result)
-         :fraud-slashed-count (:fraud-slashed-count batch-result 0)
-         :reversal-slashed-count (:reversal-slashed-count batch-result 0)
-         :timeout-slashed-count (:timeout-slashed-count batch-result 0)
-         :detection-rate (:slashing-detection-probability decayed-params)}
-        
-        ; Update resolver histories based on batch results
-        ; Strategy: Distribute batch profit proportionally to resolvers
-        ; NOTE: This is simplified attribution. Ideal would require per-resolver tracking from batch.clj
-        updated-histories
-        (let [honest-mean (:honest-mean batch-result)
-              malice-mean (:malice-mean batch-result)
-              honest-count (count (filter #(= :honest (:strategy (val %))) resolver-histories))
-              malice-count (count (filter #(#{:malicious :lazy :collusive} (:strategy (val %))) resolver-histories))]
-          
-          (reduce-kv (fn [acc id resolver]
-                       (let [strategy (:strategy resolver)
-                             is-honest? (= strategy :honest)
-                             ; Distribute batch profit evenly across resolvers of same strategy
-                             ; Each resolver gets a fair share of the epoch's profit
-                             resolver-profit (if is-honest?
-                                             (if (> honest-count 0) (/ honest-mean honest-count) 0)
-                                             (if (> malice-count 0) (/ malice-mean malice-count) 0))
-                             ; Simple slashing: if resolver is malicious and batch has slashed, mark as slashed
-                             was-slashed? (and (not is-honest?)
-                                              (> (:slash-rate batch-result 0) 0)
-                                              (< (rand) (:slash-rate batch-result 0.1)))
-                             
-                             updated (rep/update-resolver-history
-                                     resolver
-                                     resolver-profit
-                                     1  ; 1 verdict per epoch (simplified attribution)
-                                     (if is-honest? 1 0)
-                                     was-slashed?
-                                     epoch)]
-                         
-                         (assoc acc id updated)))
-                     {} resolver-histories))]
-    
-    ; Apply population decay (exits/new entries)
-    (let [decayed-histories (rep/apply-epoch-decay updated-histories epoch params)]
-      {:epoch-summary epoch-summary
-       :updated-histories decayed-histories})))
+     rng               — seeded SplittableRandom (mutated in place)
+     epoch             — epoch number (1-based)
+     resolver-histories — {resolver-id → resolver-state}
+     n-trials          — trials to run this epoch
+     params            — simulation parameters
+     trial-router      — TrialRouter implementation (default: uniform-random)
+
+   Returns: {:epoch-summary {...} :updated-histories {...}}"
+  ([rng epoch resolver-histories n-trials params]
+   (run-single-epoch rng epoch resolver-histories n-trials params router/uniform-random))
+  ([rng epoch resolver-histories n-trials params trial-router]
+   (let [decayed-params (apply-detection-decay params epoch)
+         ;; Split RNG into four independent streams
+         [[rng-h rng-m] [rng-route rng-decay]]
+         (let [[a b] (rng/split-rng rng)
+               [c d] (rng/split-rng a)
+               [e f] (rng/split-rng b)]
+           [[c d] [e f]])
+
+         ;; Run two batches: honest strategy and malicious strategy.
+         ;; This is required so that malice profit reflects actual detection/slashing
+         ;; penalties rather than the honest resolver's counterfactual.
+         {:keys [aggregate trials-honest]}
+         (let [r (batch/run-batch-with-attribution
+                  rng-h n-trials (assoc decayed-params :strategy :honest))]
+           {:aggregate    (:aggregate r)
+            :trials-honest (:trials r)})
+
+         {:keys [aggregate-malice trials-malicious]}
+         (let [r (batch/run-batch-with-attribution
+                  rng-m n-trials (assoc decayed-params :strategy :malicious))]
+           {:aggregate-malice  (:aggregate r)
+            :trials-malicious  (:trials r)})
+
+         honest-mean (:honest-mean aggregate)
+         malice-mean (:malice-mean aggregate-malice)
+         dom-ratio   (cond
+                       (and malice-mean (pos? malice-mean)) (double (/ honest-mean malice-mean))
+                       (pos? honest-mean)                   Double/POSITIVE_INFINITY
+                       :else                                1.0)
+
+         epoch-summary
+         {:epoch                  epoch
+          :n-trials               n-trials
+          :honest-mean-profit     honest-mean
+          :malice-mean-profit     malice-mean
+          :dominance-ratio        dom-ratio
+          :appeal-rate            (:appeal-rate aggregate)
+          :slash-rate             (:slash-rate aggregate-malice)
+          :fraud-slashed-count    (:fraud-slashed-count aggregate-malice 0)
+          :reversal-slashed-count (:reversal-slashed-count aggregate-malice 0)
+          :timeout-slashed-count  (:timeout-slashed-count aggregate-malice 0)
+          :detection-rate         (:slashing-detection-probability decayed-params)
+          :routing-mode           (router/routing-mode trial-router)}
+
+         honest-ids    (vec (keep (fn [[id r]] (when (= :honest (:strategy r)) id))
+                                  resolver-histories))
+         strategic-ids (vec (keep (fn [[id r]] (when (not= :honest (:strategy r)) id))
+                                  resolver-histories))
+
+         {:keys [honest-attribution strategic-attribution]}
+         (router/route-epoch honest-ids strategic-ids
+                             trials-honest trials-malicious
+                             trial-router rng-route)
+
+         ;; Merge both attribution maps and update histories
+         all-attribution (merge honest-attribution strategic-attribution)
+
+         updated-histories
+         (reduce-kv
+          (fn [acc id resolver]
+            (let [attr       (get all-attribution id
+                                  {:trials 0 :profit 0.0 :slashed 0
+                                   :verdicts 0 :correct 0 :appealed 0 :escalated 0})
+                  is-honest? (= :honest (:strategy resolver))]
+              (assoc acc id
+                     (rep/update-resolver-history
+                      resolver
+                      (:profit attr 0.0)
+                      (:verdicts attr 0)
+                      (if is-honest? (:verdicts attr 0) 0)
+                      (pos? (:slashed attr 0))
+                      epoch
+                      :trials    (:trials attr 0)
+                      :appealed  (:appealed attr 0)
+                      :escalated (:escalated attr 0)))))
+          {}
+          resolver-histories)]
+
+     ;; Apply population decay with seeded RNG; thread next-id to avoid ID collisions
+     (let [{:keys [histories next-id]}
+           (rep/apply-epoch-decay updated-histories epoch params rng-decay
+                                  (:_next-resolver-id params 10000))]
+       {:epoch-summary     epoch-summary
+        :updated-histories histories
+        :next-resolver-id  next-id}))))
 
 (defn run-multi-epoch
   "Run N epochs with reputation tracking.
-   
+
    Args:
-     rng: RNG state
-     n-epochs: Number of epochs (default 10)
-     n-trials-per-epoch: Trials per epoch (default 500)
-     params: Simulation parameters
-   
-   Returns: {:epoch-results [...], :resolver-histories {...}, :aggregated-stats {...}}"
-  [rng n-epochs n-trials-per-epoch params]
+     rng               — seeded SplittableRandom
+     n-epochs          — number of epochs (default: :n-epochs in params, or 10)
+     n-trials-per-epoch — trials per epoch (default: :n-trials-per-epoch in params, or 500)
+     params            — simulation parameters
+     on-epoch-complete — optional 1-arity fn called with [epoch-n epoch-summary]
+                         after each epoch completes; used for incremental output.
+                         Default: no-op. Does not affect simulation state.
+
+   Returns: {:epoch-results [...] :resolver-histories {...}
+             :aggregated-stats {...} :equity-trajectories {...}
+             :full-trajectories {...} :strategy-spread-trajectories [...]}"
+  ([rng n-epochs n-trials-per-epoch params]
+   (run-multi-epoch rng n-epochs n-trials-per-epoch params (fn [_ _] nil)))
+  ([rng n-epochs n-trials-per-epoch params on-epoch-complete]
   (let [n-resolvers (get params :n-resolvers 100)
         strategy-mix (or (:strategy-mix params)
                         {:honest 0.50 :lazy 0.15 :malicious 0.25 :collusive 0.10})]
@@ -139,104 +184,108 @@
     (println (format "   Strategy mix: %s" strategy-mix))
     (println "")
     
-    ; Initialize resolver cohort
     (let [initial-histories (rep/initialize-resolvers n-resolvers strategy-mix)
-          
-          ; Run epoch loop — accumulate epoch summaries AND per-epoch profit snapshots.
-          ; A snapshot is {resolver-id → total-profit-at-end-of-epoch} and feeds
-          ; trajectory/build-equity-trajectories after the loop.
+
           result-accumulator
-          (reduce (fn [acc epoch-num]
-                    (let [[rng-1 rng-2] (rng/split-rng (:rng acc))
-                          prev-histories (:histories acc initial-histories)
-                          {:keys [epoch-summary updated-histories]}
-                          (run-single-epoch rng-1 epoch-num prev-histories n-trials-per-epoch params)
+          (reduce
+           (fn [acc epoch-num]
+             (let [[rng-1 rng-2]  (rng/split-rng (:rng acc))
+                   prev-histories (:histories acc initial-histories)
+                   {:keys [epoch-summary updated-histories next-resolver-id]}
+                   (run-single-epoch rng-1 epoch-num prev-histories n-trials-per-epoch
+                                     (assoc params :_next-resolver-id (:next-id acc n-resolvers)))
 
-                          ; Snapshot cumulative profit for every resolver at this epoch end.
-                          profit-snapshot
-                          (reduce-kv (fn [m id r] (assoc m id (rep/cumulative-profit r)))
-                                     {} updated-histories)
+                   ;; Rich per-resolver snapshot: everything needed for full trajectories.
+                   ;; :profit is the cumulative total so equity trajectories are monotone.
+                   epoch-snapshot
+                   (reduce-kv
+                    (fn [m id r]
+                      (let [eh (get (:epoch-history r) (keyword (str "epoch-" epoch-num)) {})]
+                        (assoc m id
+                               {:profit     (rep/cumulative-profit r)
+                                :reputation (rep/win-rate r)
+                                :trials     (:total-trials r 0)
+                                :verdicts   (:total-verdicts r 0)
+                                :slashed    (:total-slashed r 0)
+                                :appealed   (:total-appealed r 0)
+                                :escalated  (:total-escalated r 0)
+                                :strategy   (:strategy r)})))
+                    {} updated-histories)]
 
-                          _ (println (format "   Epoch %d: honest=%.0f, malice=%.0f, dominance=%.1f×"
-                                             epoch-num
-                                             (:honest-mean-profit epoch-summary)
-                                             (:malice-mean-profit epoch-summary)
-                                             (:dominance-ratio epoch-summary)))]
+               (on-epoch-complete epoch-num epoch-summary)
+               (println (format "   Epoch %d: honest=%.0f, malice=%.0f, dominance=%.1f×"
+                                epoch-num
+                                (:honest-mean-profit epoch-summary)
+                                (:malice-mean-profit epoch-summary)
+                                (:dominance-ratio epoch-summary)))
+               (assoc acc
+                      :rng             rng-2
+                      :epochs          (cons epoch-summary (:epochs acc []))
+                      :histories       updated-histories
+                      :epoch-snapshots (conj (:epoch-snapshots acc []) epoch-snapshot)
+                      :next-id         (or next-resolver-id (:next-id acc n-resolvers)))))
+           {:rng rng :epochs [] :histories initial-histories :epoch-snapshots []
+            :next-id n-resolvers}
+           (range 1 (inc n-epochs)))
 
-                      (assoc acc
-                             :rng             rng-2
-                             :epochs          (cons epoch-summary (:epochs acc []))
-                             :histories       updated-histories
-                             :epoch-snapshots (conj (:epoch-snapshots acc []) profit-snapshot))))
-                  {:rng rng :epochs [] :histories initial-histories :epoch-snapshots []}
-                  (range 1 (inc n-epochs)))
+          epoch-results   (reverse (:epochs result-accumulator []))
+          epoch-snapshots (:epoch-snapshots result-accumulator [])
+          final-histories (:histories result-accumulator initial-histories)
+          resolver-ids    (keys final-histories)
 
-          epoch-results    (reverse (:epochs result-accumulator []))
-          epoch-snapshots  (:epoch-snapshots result-accumulator [])
-          final-histories  (:histories result-accumulator initial-histories)
-          resolver-ids     (keys final-histories)
-
-          ; Aggregate final statistics
           final-stats
-          (let [histories        final-histories
-                honest-resolvers (filter #(= :honest (:strategy (val %))) histories)
-                malice-resolvers (filter #(#{:malicious :lazy :collusive} (:strategy (val %))) histories)
+          (let [honest-rs (filter #(= :honest     (:strategy (val %))) final-histories)
+                malice-rs (filter #(not= :honest  (:strategy (val %))) final-histories)
+                h-profits (map #(rep/cumulative-profit (val %)) honest-rs)
+                m-profits (map #(rep/cumulative-profit (val %)) malice-rs)
+                h-wr      (map #(rep/win-rate (val %)) honest-rs)
+                m-wr      (map #(rep/win-rate (val %)) malice-rs)
+                exits     (count (clojure.set/difference
+                                  (set (keys initial-histories))
+                                  (set (keys final-histories))))]
+            {:final-resolver-count     (count final-histories)
+             :total-resolver-exits     exits
+             :honest-final-count       (count honest-rs)
+             :malice-final-count       (count malice-rs)
+             :honest-cumulative-profit (if (seq h-profits) (double (apply + h-profits)) 0.0)
+             :malice-cumulative-profit (if (seq m-profits) (double (apply + m-profits)) 0.0)
+             :honest-avg-win-rate      (if (seq h-wr) (double (/ (apply + h-wr) (count h-wr))) 0.0)
+             :malice-avg-win-rate      (if (seq m-wr) (double (/ (apply + m-wr) (count m-wr))) 0.0)
+             :honest-exit-rate         (double (/ exits (max 1 n-resolvers)))
+             :malice-survival-rate     (double (/ (count malice-rs)
+                                                  (max 1 (count (filter #(not= :honest (:strategy (val %)))
+                                                                         initial-histories)))))})
 
-                honest-profits   (map #(rep/cumulative-profit (val %)) honest-resolvers)
-                malice-profits   (map #(rep/cumulative-profit (val %)) malice-resolvers)
+          ;; Legacy equity-only trajectories (backward compat)
+          profit-snapshots (mapv (fn [s] (reduce-kv (fn [m id v] (assoc m id (:profit v))) {} s))
+                                 epoch-snapshots)
+          equity-trajectories          (trajectory/build-equity-trajectories profit-snapshots resolver-ids)
+          strategy-spread-trajectories (trajectory/strategy-spread-trajectory final-histories profit-snapshots)
 
-                honest-win-rates (map #(rep/win-rate (val %)) honest-resolvers)
-                malice-win-rates (map #(rep/win-rate (val %)) malice-resolvers)
-
-                initial-ids      (set (keys initial-histories))
-                final-ids        (set (keys histories))
-                total-exits      (count (clojure.set/difference initial-ids final-ids))]
-
-            {:final-resolver-count       (count histories)
-             :total-resolver-exits       total-exits
-             :honest-final-count         (count honest-resolvers)
-             :malice-final-count         (count malice-resolvers)
-             :honest-cumulative-profit   (double (apply + (map #(rep/cumulative-profit (val %)) honest-resolvers)))
-             :malice-cumulative-profit   (double (apply + (map #(rep/cumulative-profit (val %)) malice-resolvers)))
-             :honest-avg-win-rate        (if (empty? honest-win-rates) 0.0
-                                           (double (/ (apply + honest-win-rates) (count honest-win-rates))))
-             :malice-avg-win-rate        (if (empty? malice-win-rates) 0.0
-                                           (double (/ (apply + malice-win-rates) (count malice-win-rates))))
-             :honest-exit-rate           (if (empty? honest-resolvers) 0.0
-                                           (double (/ total-exits n-resolvers)))
-             :malice-exit-rate           (if (empty? malice-resolvers) 0.0
-                                           (double (/ total-exits
-                                                      (+ (count malice-resolvers)
-                                                         (count (filter #(#{:malicious :lazy :collusive}
-                                                                           (:strategy (val %)))
-                                                                        initial-histories))))))})
-
-          ; Build trajectory data using the shared trajectory namespace.
-          equity-trajectories          (trajectory/build-equity-trajectories epoch-snapshots resolver-ids)
-          strategy-spread-trajectories (trajectory/strategy-spread-trajectory final-histories epoch-snapshots)
+          ;; Full multi-dimensional trajectories (Step 3)
+          full-trajectories (trajectory/build-full-trajectories epoch-snapshots resolver-ids final-histories)
 
           result
-          {:scenario-id        (:scenario-id params "phase-j-unnamed")
-           :n-epochs           n-epochs
-           :n-trials-per-epoch n-trials-per-epoch
+          {:scenario-id            (:scenario-id params "phase-j-unnamed")
+           :n-epochs               n-epochs
+           :n-trials-per-epoch     n-trials-per-epoch
            :initial-resolver-count n-resolvers
-           :epoch-results      (or epoch-results [])
-           :resolver-histories final-histories
-           :aggregated-stats   final-stats
-           ; --- trajectory output (T1b / T1c) ---
+           :epoch-results          (or epoch-results [])
+           :resolver-histories     final-histories
+           :aggregated-stats       final-stats
            :equity-trajectories          equity-trajectories
+           :full-trajectories            full-trajectories
            :strategy-spread-trajectories strategy-spread-trajectories
            :trajectory/meta              {:type        :trajectory/equity
                                           :epoch-count n-epochs
                                           :unit        :profit}}]
-      
-      (println "")
-      (println (format "✓ Phase J complete. Final state:"))
+
+      (println (format "\n✓ Phase J complete. Final state:"))
       (println (format "   Resolvers exited: %d" (:total-resolver-exits final-stats)))
       (println (format "   Honest cumulative: %.0f" (:honest-cumulative-profit final-stats)))
       (println (format "   Malice cumulative: %.0f" (:malice-cumulative-profit final-stats)))
       (println (format "   Win rate - honest: %.1f%%" (* 100 (:honest-avg-win-rate final-stats))))
       (println (format "   Win rate - malice: %.1f%%" (* 100 (:malice-avg-win-rate final-stats))))
       (println "")
-      
-      result)))
+
+      result))))

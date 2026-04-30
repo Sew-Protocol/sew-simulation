@@ -7,7 +7,7 @@
 │  Python adversarial layer                                    │
 │                                                              │
 │  invariant_suite.py          eth_failure_modes.py            │
-│  (33 scenarios, harness)     (F1–F10 attack agents)         │
+│  (scenarios, harness)        (attack agents)                 │
 │                │                                             │
 │                │  gRPC (port 7070)                           │
 └────────────────┼────────────────────────────────────────────┘
@@ -17,14 +17,16 @@
 │                                                              │
 │  Session API: open-session / process-step / close-session    │
 │                │                                             │
-│  contract_model/                                             │
-│    state_machine.clj   ← escrow state transitions            │
-│    lifecycle.clj       ← create → dispute → resolve          │
-│    invariants.clj      ← 13 post-condition checks            │
-│    resolution.clj      ← DR1/DR2/DR3 resolution logic        │
-│    authority.clj       ← resolver authorization              │
-│    accounting.clj      ← fee and profit calculations         │
-│    runner.clj          ← top-level trial runner              │
+│  contract_model/replay.clj  ← protocol-agnostic kernel       │
+│                │                                             │
+│  protocols/sew.clj          ← SEWProtocol adapter            │
+│    sew/state_machine.clj    ← escrow state transitions       │
+│    sew/lifecycle.clj        ← create → dispute → resolve     │
+│    sew/invariants.clj       ← 28+ post-condition checks      │
+│    sew/resolution.clj       ← DR1/DR2/DR3 resolution logic   │
+│    sew/authority.clj        ← resolver authorization         │
+│    sew/accounting.clj       ← fee and profit calculations    │
+│    sew/runner.clj           ← top-level trial runner         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -35,8 +37,9 @@ The system is strictly layered. The functional core has no I/O. Only `db/` and `
 ### Functional core (no I/O, no DB)
 
 ```
-contract_model/     deterministic contract execution
-model/              statistical/economic models (pure functions)
+contract_model/     protocol-agnostic replay kernel (replay.clj only)
+protocols/          DisputeProtocol interface + SEW and Dummy implementations
+stochastic/         statistical/economic models (pure functions)
 sim/                Monte Carlo simulation phases (pure sweeps)
 governance/         governance rule models (pure)
 adversaries/        adversary strategy models (pure)
@@ -59,11 +62,15 @@ server/             gRPC session server
 
 | Namespace | May import | Must NOT import |
 |-----------|-----------|----------------|
-| `contract_model/*` | other `contract_model/*` | `db/*`, `io/*` |
-| `model/*` | nothing outside `model/` | everything else |
-| `sim/*` | `contract_model/*`, `model/*`, `governance/*`, `adversaries/*`, `oracle/*` | `db/*`, `io/*` |
-| `governance/*`, `adversaries/*`, `oracle/*` | `model/*` only | `db/*`, `io/*` |
-| `db/*` | `contract_model/*`, `evaluation.xtdb` | `sim/*` |
+| `protocols/protocol.clj` | nothing | everything else |
+| `contract_model/*` | `protocols/protocol` | anything else |
+| `protocols/sew/*` | `protocols/protocol`, `contract_model/*` | `sim/*`, `db/*`, `io/*` |
+| `protocols/dummy` | `protocols/protocol` | everything else |
+| `stochastic/*` | nothing outside `stochastic/` | everything else |
+| `sim/*` | `contract_model/*`, `protocols/*`, `stochastic/*`, `governance/*`, `adversaries/*`, `oracle/*` | `db/*`, `io/*` |
+| `governance/*`, `adversaries/*`, `oracle/*` | `stochastic/*` only | `db/*`, `io/*` |
+| `db/*` | `contract_model/*`, `protocols/sew/*`, `evaluation.xtdb` | `sim/*` |
+| `io/*` | `stochastic/*`, `sim/*` | `db/*` |
 | `core.clj` | everything | — |
 
 **Key invariant:** The functional core is testable without a running XTDB instance or filesystem.
@@ -72,28 +79,23 @@ server/             gRPC session server
 
 1. Python opens a gRPC session with `open-session`
 2. Python sends a sequence of `process-step` calls, each encoding one actor action (e.g., `raise_dispute`, `resolve`, `escalate`)
-3. The Clojure server applies the action to the current escrow state, runs all 13 invariants, and returns a `trace_entry` with the new state, any invariant violations, and whether the step was accepted or rejected
+3. The Clojure server applies the action to the current escrow state, runs all 28+ invariants via the SEWProtocol adapter, and returns a `trace_entry` with the new state, any invariant violations, and whether the step was accepted or rejected
 4. Python agents inspect the response and choose their next action (adversarial agents use this to decide whether to escalate, attack, or retreat)
 5. Python asserts the scenario's specific success condition (e.g., "attack succeeded at least once" or "0 invariant violations")
 6. Session is closed
 
-## The 13 Protocol Invariants
+## The 28+ Protocol Invariants
 
-Checked after every state transition in `contract_model/invariants.clj`:
+Checked after every state transition via `SEWProtocol.check-invariants-single`
+and `check-invariants-transition` (implemented in `protocols/sew/invariants.clj`):
 
-1. **solvency-holds?** — contract balance ≥ sum of all escrow amounts
-2. **no-double-finalization?** — a finalized escrow cannot be finalized again
-3. **state-transition-valid?** — only valid transitions are accepted
-4. **resolver-authorized?** — only authorized resolvers can resolve
-5. **dispute-window-respected?** — resolution only within valid time window
-6. **fee-accounting-correct?** — fee deducted matches fee_bps × amount
-7. **refund-accounting-correct?** — refund amount matches escrow amount minus fee
-8. **escalation-level-bounded?** — escalation level never exceeds max_level
-9. **pending-settlement-cleared?** — pending settlement cleared on escalation
-10. **cancel-consent-required?** — cancel requires consent from both parties
-11. **agree-cancel-not-set-on-dispute?** — agree_to_cancel cannot be set on disputed escrow
-12. **authority-unchanged-after-resolution?** — resolver authority unchanged by resolution
-13. **balance-non-negative?** — no escrow balance ever goes negative
+| Category | Invariants |
+|----------|-----------|
+| **Accounting** | Solvency, fee non-negative, held non-negative, conservation of funds, finalization accounting, token-tax reconciliation, fees monotone |
+| **State machine** | Valid status combinations, pending settlement consistent, dispute timestamp consistent, dispute level bounded, terminal states unchanged, escalation level monotonic |
+| **Economic** | Slash status, appeal bond conserved, bond liquidity, bond slash bounded, fee cap, slash distribution, resolver bond mix (80/20), senior coverage, slash epoch cap |
+| **Safety** | No auto fraud execute, resolver not frozen on assign, reversal slash disabled, no withdrawal during dispute, time-lock integrity |
+| **Liveness** | No stale automatable escrows, dispute resolution path exists |
 
 ## gRPC Session Protocol
 
@@ -107,13 +109,13 @@ Each `ProcessStep` response includes a `trace_entry` with:
 - The action that was attempted
 - Whether it was accepted or rejected (with revert reason)
 - The full escrow state after the step
-- All 13 invariant results (`{holds?: bool, violations: [...]}` per invariant)
+- All invariant results (`{holds?: bool, violations: [...]}` per invariant)
 
 ## Monte Carlo Layer
 
-The Monte Carlo layer (`src/resolver_sim/sim/`) runs parameter sweeps independently of the adversarial layer. It does not use gRPC — it calls the contract model functions directly in-process.
+The Monte Carlo layer (`src/resolver_sim/sim/`) runs parameter sweeps independently of the adversarial layer. It does not use gRPC — it calls the protocol simulation functions directly in-process via `contract_model/replay.clj` and `protocols/sew/`.
 
-Each phase (`phase_g.clj` through `phase_ad.clj`) tests a falsifiable hypothesis against a threshold (typically ≥80% pass rate across all scenarios in the sweep).
+Each phase (`phase_o.clj` through `phase_ai.clj`) tests a falsifiable hypothesis against a threshold (typically ≥80% pass rate across all scenarios in the sweep).
 
 ## Foundry Differential Testing (In Progress)
 

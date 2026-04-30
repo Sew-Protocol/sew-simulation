@@ -1,5 +1,5 @@
 {:scenario-id "phase-j-baseline-stable"
- :description "Phase J: Baseline with stable detection (no decay). Tests if system remains stable over 10 epochs."
+ :description "Phase J: Canonical baseline — stable detection, no decay. 100-epoch stability audit (canonical Step 6b run)."
  :rng-seed 42
  
  :escrow-distribution
@@ -34,7 +34,7 @@
  :appeal-window-days 7
  
  ; Phase J: Multi-epoch configuration
- :n-epochs 10
+ :n-epochs 100
  :n-trials-per-epoch 500
  :n-resolvers 100
  :detection-decay-rate 0.0  ; No decay (stable control)

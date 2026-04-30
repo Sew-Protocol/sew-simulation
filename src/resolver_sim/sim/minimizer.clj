@@ -3,6 +3,7 @@
    Reduces a failing event sequence to its 1-minimal subset that still
    triggers a target invariant violation."
   (:require [resolver-sim.contract-model.replay :as replay]
+            [resolver-sim.protocols.sew :as sew]
             [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.tools.cli :refer [parse-opts]]))
@@ -18,14 +19,13 @@
   "True if the scenario fails with the target-invariant violation."
   ([scenario] (fails? scenario nil))
   ([scenario target-invariant]
-   (let [res (replay/replay-scenario scenario)
+   (let [res (replay/replay-with-protocol sew/protocol scenario)
          last-entry (last (:trace res))
          violations (get-in last-entry [:violations])]
-     (println "Replay outcome:" (:outcome res) "halt-reason:" (:halt-reason res) "violations:" (keys violations))
      (and (= :fail (:outcome res))
           (= :invariant-violation (:halt-reason res))
           (if target-invariant
-            (contains? violations target-invariant)
+            (contains? (set (keys violations)) target-invariant)
             true)))))
 
 (defn- try-remove
@@ -54,8 +54,7 @@
   "Greedily minimize the scenario trace, then prune unreferenced agents.
 
    Events annotated with :minimize/pin true are never removed, preserving
-   causal pairs (e.g. same-block resolution + escalation) that are required
-   to trigger a specific invariant violation."
+   causal pairs that are required to trigger a specific invariant violation."
   [scenario target-invariant]
   (println "Starting minimization of" (count (:events scenario)) "events...")
   (let [minimized

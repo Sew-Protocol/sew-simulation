@@ -144,6 +144,114 @@
                                      (> (:fraud-slash-bps params) 0)))
       :bribery-cost (when (:bribe-cost-ratio params)
                       (integration/calculate-bribery-cost params))}))
+
+(defn run-batch-with-attribution
+  "Run N trials and return both aggregate stats and per-trial results.
+
+   Returns {:aggregate <same map as run-batch>
+            :trials    [{per-trial result map} ...]}
+
+   The :trials vector has exactly n-trials entries. Each entry is the raw
+   map returned by dispute/resolve-dispute and contains at minimum:
+     :profit-honest     numeric
+     :profit-malice     numeric
+     :slashed?          bool
+     :slashing-reason   keyword or nil
+     :appeal-triggered? bool
+     :escalated?        bool
+     :dispute-correct?  bool
+
+   The trial router (sim.trial-router) uses :trials to attribute outcomes to
+   individual resolvers. Conservation invariants on :trials:
+     (sum :profit-honest) == (* n-trials (:honest-mean aggregate))   ± fp-epsilon
+     (sum :profit-malice) == (* n-trials (:malice-mean aggregate))   ± fp-epsilon
+     (count (filter :slashed? trials)) == (* n-trials (:slash-rate aggregate))  exactly"
+  [rng n-trials params]
+  (let [base-strategy (or (:force-strategy params) (:strategy params :honest))
+        strategy      (integration/adjust-strategy-for-bribery base-strategy params)
+        trials
+        (vec (repeatedly n-trials
+               #(dispute/resolve-dispute
+                  rng (:escrow-size params 10000)
+                  (:resolver-fee-bps params)
+                  (:appeal-bond-bps params)
+                  (:slash-multiplier params)
+                  strategy
+                  (:appeal-probability-if-correct params)
+                  (:appeal-probability-if-wrong params)
+                  (:slashing-detection-probability params)
+                  :l2-detection-prob (:l2-detection-prob params 0)
+                  :slashing-detection-delay-weeks (:slashing-detection-delay-weeks params 0)
+                  :allow-slashing? (:allow-slashing? params true)
+                  :resolver-bond-bps (:resolver-bond-bps params 0)
+                  :fraud-detection-probability (:fraud-detection-probability params 0.0)
+                  :fraud-slash-bps (:fraud-slash-bps params 0)
+                  :reversal-detection-probability (:reversal-detection-probability params 0.0)
+                  :reversal-slash-bps (:reversal-slash-bps params 0)
+                  :timeout-slash-bps (:timeout-slash-bps params 200)
+                  :unstaking-delay-days (:unstaking-delay-days params 14)
+                  :freeze-on-detection? (:freeze-on-detection? params true)
+                  :freeze-duration-days (:freeze-duration-days params 3)
+                  :appeal-window-days (:appeal-window-days params 7))))
+
+        profits-honest (map :profit-honest trials)
+        profits-malice (map :profit-malice trials)
+        mean-honest    (mean profits-honest)
+        mean-malice    (mean profits-malice)
+        sorted-honest  (sort profits-honest)
+        sorted-malice  (sort profits-malice)
+
+        total-slashed    (count (filter :slashed? trials))
+        timeout-slashed  (count (filter #(= (:slashing-reason %) :timeout)  trials))
+        reversal-slashed (count (filter #(= (:slashing-reason %) :reversal) trials))
+        fraud-slashed    (count (filter #(= (:slashing-reason %) :fraud)    trials))
+        appeal-count     (count (filter :appeal-triggered? trials))
+        escalation-count (count (filter :escalated? trials))
+        l2-detected-count (count (filter :l2-detected? trials))
+        frozen-count     (count (filter :frozen? trials))
+        escaped-count    (count (filter :escaped? trials))]
+
+    {:aggregate
+     {:n-trials n-trials
+      :strategy strategy
+      :honest-mean  (double mean-honest)
+      :honest-std   (double (std-dev profits-honest mean-honest))
+      :honest-min   (apply min profits-honest)
+      :honest-max   (apply max profits-honest)
+      :honest-p25   (quantile sorted-honest 0.25)
+      :honest-p50   (quantile sorted-honest 0.50)
+      :honest-p75   (quantile sorted-honest 0.75)
+      :malice-mean  (double mean-malice)
+      :malice-std   (double (std-dev profits-malice mean-malice))
+      :malice-min   (apply min profits-malice)
+      :malice-max   (apply max profits-malice)
+      :malice-p25   (quantile sorted-malice 0.25)
+      :malice-p50   (quantile sorted-malice 0.50)
+      :malice-p75   (quantile sorted-malice 0.75)
+      :honest-wins  (count (filter #(> % 0) (map - profits-honest profits-malice)))
+      :dominance-ratio (if (zero? mean-malice)
+                         Double/POSITIVE_INFINITY
+                         (double (/ mean-honest mean-malice)))
+      :appeal-rate      (double (/ appeal-count n-trials))
+      :escalation-rate  (double (/ escalation-count n-trials))
+      :l2-detection-rate (double (/ l2-detected-count n-trials))
+      :slash-rate       (double (/ total-slashed n-trials))
+      :timeout-slash-rate   (double (/ timeout-slashed n-trials))
+      :reversal-slash-rate  (double (/ reversal-slashed n-trials))
+      :fraud-slash-rate     (double (/ fraud-slashed n-trials))
+      :fraud-slashed-count  fraud-slashed
+      :reversal-slashed-count reversal-slashed
+      :timeout-slashed-count  timeout-slashed
+      :frozen-rate  (double (/ frozen-count n-trials))
+      :escaped-rate (double (/ escaped-count n-trials))
+      :adjusted-strategy strategy
+      :bribery-enabled (boolean (and (:bribe-cost-ratio params)
+                                     (:fraud-slash-bps params)
+                                     (> (:fraud-slash-bps params) 0)))
+      :bribery-cost (when (:bribe-cost-ratio params)
+                      (integration/calculate-bribery-cost params))}
+     :trials trials}))
+
 (defn run-ring-batch
   "Run N trials of a resolver ring simulation and return aggregated stats.
    

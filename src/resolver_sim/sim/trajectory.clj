@@ -125,6 +125,78 @@
         epoch-resolver-counts))
 
 ;; ---------------------------------------------------------------------------
+;; Full multi-dimensional trajectories (Step 3)
+;; ---------------------------------------------------------------------------
+
+(defn- extract-field
+  "Extract one numeric field from a rich epoch-snapshot for a single resolver.
+   Returns a vector of values, one per epoch (0.0 if resolver absent or field missing)."
+  [epoch-snapshots resolver-id field]
+  (mapv (fn [snap]
+          (double (get-in snap [resolver-id field] 0.0)))
+        epoch-snapshots))
+
+(defn- loss-events-from-history
+  "Extract slash loss events from a resolver's epoch-history.
+   Returns [{:epoch N :profit P :slashed? true}] for epochs with slash events."
+  [resolver-history]
+  (->> (for [[ek ed] (:epoch-history resolver-history)
+             :when (:slashed? ed false)]
+         {:epoch   (:epoch ed)
+          :profit  (:profit ed 0.0)
+          :slashed true})
+       (sort-by :epoch)
+       vec))
+
+(defn resolver-full-trajectory
+  "Build the full multi-dimensional trajectory for one resolver.
+
+   epoch-snapshots — rich [{resolver-id → {:profit :reputation :trials ...}} ...].
+   resolver-id     — resolver to extract.
+   resolver-history — the resolver's final state (for loss-events).
+
+   Returns:
+   {:equity          [cumulative-profit@e1 ...]
+    :reputation      [win-rate@e1 ...]
+    :trial-count     [trials-assigned@e1 ...]
+    :verdict-count   [verdicts@e1 ...]
+    :slash-count     [slashes@e1 ...]
+    :appeal-count    [appeals@e1 ...]
+    :escalated-count [escalations@e1 ...]
+    :loss-events     [{:epoch :profit :slashed true} ...]}"
+  [epoch-snapshots resolver-id resolver-history]
+  {:equity          (extract-field epoch-snapshots resolver-id :profit)
+   :reputation      (extract-field epoch-snapshots resolver-id :reputation)
+   :trial-count     (extract-field epoch-snapshots resolver-id :trials)
+   :verdict-count   (extract-field epoch-snapshots resolver-id :verdicts)
+   :slash-count     (extract-field epoch-snapshots resolver-id :slashed)
+   :appeal-count    (extract-field epoch-snapshots resolver-id :appealed)
+   :escalated-count (extract-field epoch-snapshots resolver-id :escalated)
+   :loss-events     (loss-events-from-history resolver-history)})
+
+(defn build-full-trajectories
+  "Build multi-dimensional per-resolver trajectories from rich epoch-snapshots.
+
+   epoch-snapshots — vector of {resolver-id → rich-snapshot-map}, one per epoch.
+   resolver-ids    — seq of resolver IDs to include.
+   resolver-histories — {resolver-id → resolver-state} for loss-event extraction.
+                        If nil, loss-events will be empty for all resolvers.
+
+   Returns {resolver-id → full-trajectory-map}.
+
+   The :equity field is identical to build-equity-trajectories output, so this
+   is a strict superset. Callers migrating from build-equity-trajectories can
+   pull (:equity (get full-trajectories id)) for backward compatibility."
+  ([epoch-snapshots resolver-ids]
+   (build-full-trajectories epoch-snapshots resolver-ids nil))
+  ([epoch-snapshots resolver-ids resolver-histories]
+   (reduce (fn [acc id]
+             (let [hist (when resolver-histories (get resolver-histories id {}))]
+               (assoc acc id (resolver-full-trajectory epoch-snapshots id hist))))
+           {}
+           resolver-ids)))
+
+;; ---------------------------------------------------------------------------
 ;; Statistical helpers
 ;; ---------------------------------------------------------------------------
 

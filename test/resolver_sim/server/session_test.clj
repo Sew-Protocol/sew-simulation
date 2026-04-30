@@ -7,7 +7,7 @@
    thread-safety contracts."
   (:require [clojure.test                    :refer [deftest is testing run-tests]]
             [resolver-sim.server.session     :as session]
-            [resolver-sim.contract-model.types :as t])
+            [resolver-sim.protocols.sew.types :as t])
   (:import [java.util.concurrent Executors CountDownLatch]))
 
 ;; ---------------------------------------------------------------------------

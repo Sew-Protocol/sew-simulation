@@ -44,4 +44,27 @@
   (check-invariants-transition [protocol world-before world-after]
     "Cross-world invariant checks (e.g. terminal-state irreversibility).
      Called after every successful transition with both worlds.
-     Returns {:ok? bool :violations map-or-nil}."))
+     Returns {:ok? bool :violations map-or-nil}.")
+
+  (world-snapshot [protocol world]
+    "Create a lean, serializable map of the world state for trace output.
+     Should exclude large internal state and keep only relevant metrics.")
+
+  (init-world [protocol scenario]
+    "Return an initial world-state map from the scenario.
+     scenario — the full scenario map; the protocol may read :initial-block-time,
+                :token-params, :events, and any other fields it needs.
+     Returns a world map ready to be passed to dispatch-action.")
+
+  (compute-projection [protocol world]
+    "Return [projection projection-hash] for trace output.
+     projection      — a lean map of fields comparable against EVM state, or nil.
+     projection-hash — SHA-256 of the projection, or nil.
+     Return [nil nil] for protocols that do not support differential testing.")
+
+  (classify-transition [protocol action result-kw]
+    "Return a :trace-metadata map for a completed transition, or nil.
+     action     — the action string that was dispatched
+     result-kw  — :ok, :rejected, or :invariant-violated
+     The map is stored verbatim as :trace-metadata in each trace entry.
+     Return nil for protocols that do not produce transition metadata."))

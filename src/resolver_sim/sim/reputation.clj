@@ -1,61 +1,88 @@
 (ns resolver-sim.sim.reputation
   "Per-resolver reputation tracking for multi-epoch simulations."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [resolver-sim.stochastic.rng :as rng]))
 
 (defn initialize-resolvers
   "Create initial cohort of resolvers from strategy mix.
-   Returns map: {resolver-id -> resolver-state}"
-  [n-resolvers strategy-mix]
-  (let [honest-count (int (* n-resolvers (:honest strategy-mix 0)))
-        lazy-count (int (* n-resolvers (:lazy strategy-mix 0)))
-        malicious-count (int (* n-resolvers (:malicious strategy-mix 0)))
-        collusive-count (- n-resolvers honest-count lazy-count malicious-count)]
-    
-    (reduce (fn [acc [strategy count]]
-              (reduce (fn [map _]
-                        (let [id (str (gensym (name strategy)))]
-                          (assoc map id
-                            {:resolver-id id
-                             :strategy strategy
-                             :status :active
-                             :total-profit 0.0
-                             :total-fees-earned 0.0
-                             :total-slashing-loss 0.0
-                             :total-verdicts 0
-                             :total-correct 0
-                             :total-slashed 0
-                             :exit-probability 0.0
-                             :epoch-history {}})))
-                        acc (range count)))
-            {}
-            [[:honest honest-count]
-             [:lazy lazy-count]
-             [:malicious malicious-count]
-             [:collusive collusive-count]])))
+
+   start-id — first numeric suffix for resolver IDs (default 0).
+              Pass a non-zero value when adding new entrants to avoid
+              ID collisions with existing resolvers.
+
+   IDs are deterministic: \"<strategy>-<N>\" where N is sequential from start-id.
+   No gensym — same arguments always produce the same ID set."
+  ([n-resolvers strategy-mix] (initialize-resolvers n-resolvers strategy-mix 0))
+  ([n-resolvers strategy-mix start-id]
+   (let [honest-count    (int (* n-resolvers (:honest strategy-mix 0)))
+         lazy-count      (int (* n-resolvers (:lazy strategy-mix 0)))
+         malicious-count (int (* n-resolvers (:malicious strategy-mix 0)))
+         collusive-count (- n-resolvers honest-count lazy-count malicious-count)
+         groups          [[:honest    honest-count]
+                          [:lazy      lazy-count]
+                          [:malicious malicious-count]
+                          [:collusive collusive-count]]]
+     (first
+      (reduce
+       (fn [[m next-id] [strategy cnt]]
+         [(reduce (fn [acc i]
+                    (let [id (str (name strategy) "-" (+ next-id i))]
+                      (assoc acc id
+                             {:resolver-id         id
+                              :strategy            strategy
+                              :status              :active
+                              :total-profit        0.0
+                              :total-fees-earned   0.0
+                              :total-slashing-loss 0.0
+                              :total-trials        0
+                              :total-verdicts      0
+                              :total-correct       0
+                              :total-slashed       0
+                              :total-appealed      0
+                              :total-escalated     0
+                              :exit-probability    0.0
+                              :epoch-history       {}})))
+                  m (range cnt))
+          (+ next-id cnt)])
+       [{} start-id]
+       groups)))))
 
 (defn update-resolver-history
-  "Update resolver state after a single dispute outcome.
-   Returns: Updated resolver record"
-  [resolver profit verdicts-this-trial correct-this-trial slashed? epoch]
+  "Update resolver state after one epoch's attributed trials.
+
+   profit             — net profit this epoch (sum of attributed trial profits)
+   verdicts           — verdicts rendered this epoch
+   correct            — correct verdicts this epoch (0 for strategic resolvers)
+   slashed?           — true if at least one slash event occurred this epoch
+   epoch              — epoch number (1-based)
+   trials             — number of trials attributed to this resolver (may be 0)
+   appealed           — number of appeal events
+   escalated          — number of escalation events
+
+   Returns: Updated resolver record."
+  [resolver profit verdicts correct slashed? epoch
+   & {:keys [trials appealed escalated] :or {trials 0 appealed 0 escalated 0}}]
   (let [old-history (:epoch-history resolver {})
-        epoch-key (keyword (str "epoch-" epoch))
-        epoch-data (get old-history epoch-key {:profit 0.0 :verdicts 0 :slashed? false})
-        
-        new-epoch-data
-        {:profit (+ (:profit epoch-data 0.0) profit)
-         :verdicts (+ (:verdicts epoch-data 0) verdicts-this-trial)
-         :correct (+ (:correct epoch-data 0) correct-this-trial)
-         :slashed? (or (:slashed? epoch-data false) slashed?)
-         :epoch epoch}]
-    
+        epoch-key   (keyword (str "epoch-" epoch))
+        new-epoch   {:profit    profit
+                     :trials    trials
+                     :verdicts  verdicts
+                     :correct   correct
+                     :slashed?  slashed?
+                     :appealed  appealed
+                     :escalated escalated
+                     :epoch     epoch}]
     (assoc resolver
-      :total-profit (+ (:total-profit resolver) profit)
-      :total-fees-earned (+ (:total-fees-earned resolver) (max 0.0 profit))
-      :total-slashing-loss (+ (:total-slashing-loss resolver) (if slashed? (abs profit) 0.0))
-      :total-verdicts (+ (:total-verdicts resolver) verdicts-this-trial)
-      :total-correct (+ (:total-correct resolver) correct-this-trial)
-      :total-slashed (+ (:total-slashed resolver) (if slashed? 1 0))
-      :epoch-history (assoc old-history epoch-key new-epoch-data))))
+           :total-profit        (+ (:total-profit resolver 0.0) profit)
+           :total-fees-earned   (+ (:total-fees-earned resolver 0.0) (max 0.0 profit))
+           :total-slashing-loss (+ (:total-slashing-loss resolver 0.0) (if slashed? (- (min 0.0 profit)) 0.0))
+           :total-trials        (+ (:total-trials resolver 0) trials)
+           :total-verdicts      (+ (:total-verdicts resolver 0) verdicts)
+           :total-correct       (+ (:total-correct resolver 0) correct)
+           :total-slashed       (+ (:total-slashed resolver 0) (if slashed? 1 0))
+           :total-appealed      (+ (:total-appealed resolver 0) appealed)
+           :total-escalated     (+ (:total-escalated resolver 0) escalated)
+           :epoch-history       (assoc old-history epoch-key new-epoch))))
 
 (defn calculate-exit-probability
   "Based on cumulative losses and slashing, probability resolver exits.
@@ -84,36 +111,31 @@
 
 (defn apply-epoch-decay
   "After each epoch, remove exited resolvers, add new ones to maintain population.
-   Returns: Updated resolver-histories map"
-  [resolver-histories epoch-num params]
+
+   decay-rng  — seeded RNG for deterministic exit decisions.
+   next-id    — starting numeric suffix for new entrant IDs (avoids ID collisions).
+   Returns: {:histories updated-map :next-id N}"
+  [resolver-histories epoch-num params decay-rng next-id]
   (let [n-total (count resolver-histories)
-        
-        ; Calculate exits
         active-resolvers
         (reduce-kv (fn [acc id resolver]
                      (let [exit-prob (calculate-exit-probability resolver epoch-num params)]
-                       (if (<= (rand) exit-prob)
-                         acc  ; Remove this resolver
+                       (if (<= (rng/next-double decay-rng) exit-prob)
+                         acc
                          (assoc acc id (assoc resolver :status :active)))))
                    {} resolver-histories)
-        
-        n-remaining (count active-resolvers)
-        n-new (- n-total n-remaining)  ; How many to add back
-        
-        ; Determine strategy mix for new entrants (assume honest is attractive)
-        new-strategy-mix
-        (if (> n-new 0)
-          {:honest (/ n-new 2)
-           :lazy (/ n-new 4)
-           :malicious (/ n-new 8)
-           :collusive (/ n-new 8)}
-          {})]
-    
-    ; Add new resolvers to replace exited ones
-    (if (> n-new 0)
-      (let [new-resolvers (initialize-resolvers n-new new-strategy-mix)]
-        (merge active-resolvers new-resolvers))
-      active-resolvers)))
+        n-new (- n-total (count active-resolvers))
+        new-strategy-mix (when (pos? n-new)
+                           {:honest    0.50
+                            :lazy      0.25
+                            :malicious 0.125
+                            :collusive 0.125})]
+    (if (pos? n-new)
+      (let [new-resolvers (initialize-resolvers n-new new-strategy-mix next-id)]
+        {:histories (merge active-resolvers new-resolvers)
+         :next-id   (+ next-id n-new)})
+      {:histories active-resolvers
+       :next-id   next-id})))
 
 (defn win-rate
   "Calculate per-resolver win rate.
