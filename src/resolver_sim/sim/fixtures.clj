@@ -15,6 +15,7 @@
             [resolver-sim.protocols.sew.diff :as diff]
             [resolver-sim.canonical.actions :as canon]
             [resolver-sim.sim.minimizer :as minimizer]
+            [resolver-sim.sim.theory :as theory]
             [clojure.pprint :as pp]))
 
 ;; ---------------------------------------------------------------------------
@@ -49,6 +50,59 @@
           (edn/read (java.io.PushbackReader. r))))
       (throw (ex-info "Fixture not found" {:key k :path path})))))
 
+;; ---------------------------------------------------------------------------
+;; JSON Normalization: Handle EDN/JSON type mismatches
+;; ---------------------------------------------------------------------------
+
+(defn- normalize-keyword-strings
+  "Convert string values starting with ':' to proper Clojure keywords.
+   This fixes keyword corruption from JSON deserialization."
+  [v]
+  (cond
+    (string? v)
+    (if (and (.startsWith v ":") (> (count v) 1))
+      (keyword (subs v 1))  ; Remove leading colon and convert to keyword
+      v)
+    (keyword? v) v
+    :else v))
+
+(defn- normalize-map-keys
+  "Recursively convert numeric string keys in maps to Integer keys."
+  [m]
+  (if (map? m)
+    (reduce-kv (fn [acc k v]
+                  (let [normalized-k (if (string? k)
+                                       (try (Integer/parseInt k)
+                                            (catch Exception _ k))
+                                       k)]
+                    (assoc acc normalized-k v)))
+               {} m)
+    m))
+
+(defn normalize-scenario
+  "Recursively normalize a loaded scenario to fix JSON deserialization issues:
+   1. Convert string keywords (e.g. ':released') to proper keywords
+   2. Convert numeric string keys to Integer keys in all maps"
+  [x]
+  (walk/postwalk
+    (fn [v]
+      (cond
+        ;; First handle maps - normalize keys
+        (map? v)
+        (let [key-normalized (normalize-map-keys v)]
+          ;; Then normalize all values in the map
+          (reduce-kv (fn [m k kv]
+                       (assoc m k (normalize-keyword-strings kv)))
+                     key-normalized key-normalized))
+        
+        ;; Then handle keyword string values
+        (string? v)
+        (normalize-keyword-strings v)
+        
+        ;; Everything else stays as-is
+        :else v))
+    x))
+
 (defn- fixture-ref? [x]
   (and (keyword? x) (namespace x)
        (contains? #{"protocol" "states" "actors" "authority" "tokens" "thresholds" "suites" "traces"} (namespace x))))
@@ -60,7 +114,12 @@
      (fixture-ref? x)
      (if (contains? seen x)
        (throw (ex-info "Circular fixture reference" {:key x :seen seen}))
-       (compose-suite (load-fixture x) (conj seen x)))
+       ;; Normalize JSON-loaded fixtures to fix type mismatches
+       (let [loaded (load-fixture x)
+             normalized (if (.endsWith (fixture-key->path x) ".json")
+                          (normalize-scenario loaded)
+                          loaded)]
+         (compose-suite normalized (conj seen x))))
 
      (map? x)
      (reduce-kv (fn [m k v]
@@ -158,17 +217,27 @@
                                                  token (assoc :token-params token))
                                res (replay/replay-scenario effective-trace)
                                report (generate-golden-report suite-key res)
-                               comparison (when (= mode :verify) (compare-golden-report suite-key {:trace-id (:scenario-id trace) :golden-report report}))]
+                               comparison (when (= mode :verify) (compare-golden-report suite-key {:trace-id (:scenario-id trace) :golden-report report}))
+                               
+                               ;; CDRS v1.1 Analysis
+                               expect-res (when (:expectations trace)
+                                            (theory/evaluate-expectations res (:expectations trace)))
+                               theory-res (when (:theory trace)
+                                            (theory/evaluate-theory res (:theory trace)))]
+                           
                            (when (= mode :save) (save-golden-report suite-key {:trace-id (:scenario-id trace) :golden-report report}))
                            {:trace-id (:scenario-id trace)
                             :outcome (:outcome res)
                             :metrics (:metrics res)
                             :threshold-validation (validate-thresholds res thresholds)
                             :golden-report report
-                            :golden-comparison comparison}))
+                            :golden-comparison comparison
+                            :expectations expect-res
+                            :theory theory-res}))
                        traces)
          all-ok? (every? (fn [r] (and (= :pass (:outcome r))
                                       (:ok? (:threshold-validation r))
+                                      (or (nil? (:expectations r)) (:ok? (:expectations r)))
                                       (if (= mode :verify) (:ok? (:golden-comparison r)) true)))
                          results)]
      {:suite-id suite-key

@@ -17,7 +17,7 @@
 ;; Constants
 ;; ---------------------------------------------------------------------------
 
-(def ^:private supported-schema-version "1.0")
+(def ^:private supported-versions #{"1.0" "1.1"})
 
 ;; ---------------------------------------------------------------------------
 ;; JSON serialisation helpers (Generic)
@@ -58,16 +58,22 @@
 (defn validate-scenario
   "Validate a scenario map for structural correctness before replay."
   [scenario]
-  (let [version     (:schema-version scenario)
+  (let [version     (str (:schema-version scenario))
         agents      (:agents scenario)
         events      (sort-by :seq (:events scenario))
         known-ids   (set (map :id agents))
         init-time   (get scenario :initial-block-time 1000)
         agent-check (validate-agents agents)]
     (cond
-      (not= version supported-schema-version)
+      (not (contains? supported-versions version))
       {:ok false :error :unsupported-schema-version
-       :detail {:expected supported-schema-version :got version}}
+       :detail {:expected supported-versions :got version}}
+
+      (and (= version "1.1") (not (:id scenario)))
+      {:ok false :error :missing-id :detail "v1.1 scenarios must have a unique :id"}
+
+      (and (= version "1.1") (not (:purpose scenario)))
+      {:ok false :error :missing-purpose :detail "v1.1 scenarios must declare a :purpose"}
 
       (not (:ok agent-check))
       agent-check
