@@ -14,10 +14,12 @@
   ],
   "theory": {
     "claim-id": "claims/atomic-lifecycle-consistency",
-    "claim": "The protocol maintains state consistency even when transitions happen in the same block.",
-    "assumptions": ["Transactions are processed in the order submitted"],
+    "claim": "Same-block lifecycle transitions cannot produce inconsistent state, double settlement, or fund loss.",
+    "assumptions": ["Transactions are processed in sequence order within the replay trace"],
     "falsifies-if": [
-      { "metric": "reverts", "op": ">", "value": 0 }
+      { "metric": "double-settlements", "op": ">", "value": 0 },
+      { "metric": "invalid-state-transitions", "op": ">", "value": 0 },
+      { "metric": "funds-lost", "op": ">", "value": 0 }
     ]
   },
   "expectations": {

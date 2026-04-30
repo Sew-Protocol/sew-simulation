@@ -1,4 +1,4 @@
-(ns resolver-sim.contract-model.replay-test
+(ns resolver-sim.protocols.sew.replay-test
   "Unit tests for the open-world scenario replay engine.
 
    Covers:
@@ -10,6 +10,7 @@
      - Escalation flows: full chain (0→1→2), mid-pending escalation, adversarial rejections"
   (:require [clojure.test :refer [deftest is testing]]
             [resolver-sim.contract-model.replay    :as replay]
+            [resolver-sim.protocols.sew            :as sew]
             [resolver-sim.protocols.sew.invariants :as inv]
             [resolver-sim.protocols.sew.types     :as t]
             [resolver-sim.protocols.sew.resolution :as res]))
@@ -130,7 +131,7 @@
         context {:agent-index {"alice" alice "resolver" resolver}
                  :snapshot    (t/make-module-snapshot {:escrow-fee-bps 50})}
         event   {:seq 0 :time 999 :agent "alice" :action "advance_time" :params {}}
-        result  (replay/process-step context world0 event)]
+        result  (replay/process-step sew/protocol context world0 event)]
     (testing "rejected, not halted"
       (is (= :rejected (get-in result [:trace-entry :result])))
       (is (false? (:halted? result))))
@@ -226,7 +227,7 @@
                  :snapshot    (t/make-module-snapshot {:escrow-fee-bps 50})}
         event   {:seq 0 :time 1000 :agent "nobody" :action "create_escrow"
                  :params {:token "0xUSDC" :to "0xBob" :amount 5000}}
-        result  (replay/process-step context world0 event)]
+        result  (replay/process-step sew/protocol context world0 event)]
     (is (= :rejected (get-in result [:trace-entry :result])))
     (is (false? (:halted? result)))
     (is (= :unknown-agent (:error (:trace-entry result))))))
@@ -436,14 +437,6 @@
   {:resolver-fee-bps 50 :appeal-window-duration 500
    :max-dispute-duration 2592000 :appeal-bond-protocol-fee-bps 0})
 
-(defn- esc-fn-cycling
-  "Escalation fn that cycles resolvers by level: 0→res-level-1, 1→res-level-2."
-  [_world _wf _caller level]
-  {:ok true :new-resolver (case level
-                            0 res-level-1
-                            1 res-level-2
-                            "0xKleros")})
-
 (defn- make-step-context
   "Build a context with appeal-params snapshot and the cycling escalation-fn."
   []
@@ -452,19 +445,20 @@
                 {:id "resolver0" :address res-level-0  :type "resolver"}
                 {:id "resolver1" :address res-level-1  :type "resolver"}
                 {:id "resolver2" :address res-level-2  :type "resolver"}]]
-    (replay/build-context agents appeal-params esc-fn-cycling)))
+    (replay/build-context agents
+                          (assoc appeal-params :escalation-resolvers {:1 res-level-1 :2 res-level-2}))))
 
 (defn- initial-disputed-world
   "Build a world with one :disputed escrow whose et.dispute-resolver = res-level-0.
    Uses process-step to drive create_escrow + raise_dispute so invariants hold."
   [context]
   (let [w0 (t/empty-world 1000)
-        s1 (replay/process-step context w0
+        s1 (replay/process-step sew/protocol context w0
                                 {:seq 0 :time 1000 :agent "alice" :action "create_escrow"
                                  :params {:token "0xUSDC" :to "0xBob" :amount 10000}})
         ;; Set Priority-3 resolver (no custom-resolver in create, so we patch directly)
         w1 (assoc-in (:world s1) [:escrow-transfers 0 :dispute-resolver] res-level-0)
-        s2 (replay/process-step context w1
+        s2 (replay/process-step sew/protocol context w1
                                 {:seq 1 :time 1000 :agent "alice" :action "raise_dispute"
                                  :params {:workflow-id 0}})]
     (:world s2)))
@@ -475,15 +469,15 @@
   (let [ctx  (make-step-context)
         w    (initial-disputed-world ctx)
         ;; Level 0: resolver0 submits verdict → deferred (appeal window = 500)
-        s1   (replay/process-step ctx w
+        s1   (replay/process-step sew/protocol ctx w
                                   {:seq 2 :time 1000 :agent "resolver0" :action "execute_resolution"
                                    :params {:workflow-id 0 :is-release true}})
         _    (testing "level-0 verdict deferred"
                (is (= :ok (get-in s1 [:trace-entry :result])))
                (is (:exists (t/get-pending (:world s1) 0))))
-        ;; Escalate 0→1
-        s2   (replay/process-step ctx (:world s1)
-                                  {:seq 3 :time 1000 :agent "alice" :action "escalate_dispute"
+        ;; Escalate 0→1 — each escalation must be in a distinct block
+        s2   (replay/process-step sew/protocol ctx (:world s1)
+                                  {:seq 3 :time 1001 :agent "alice" :action "escalate_dispute"
                                    :params {:workflow-id 0}})
         _    (testing "escalation 0→1"
                (is (= :ok (get-in s2 [:trace-entry :result])))
@@ -492,15 +486,15 @@
                (is (nil? (get-in (:world s2) [:pending-settlements 0]))
                    "pending cleared by escalation"))
         ;; Level 1: resolver1 submits verdict → still deferred (not yet final round)
-        s3   (replay/process-step ctx (:world s2)
-                                  {:seq 4 :time 1000 :agent "resolver1" :action "execute_resolution"
+        s3   (replay/process-step sew/protocol ctx (:world s2)
+                                  {:seq 4 :time 1001 :agent "resolver1" :action "execute_resolution"
                                    :params {:workflow-id 0 :is-release true}})
         _    (testing "level-1 verdict deferred"
                (is (= :ok (get-in s3 [:trace-entry :result])))
                (is (:exists (t/get-pending (:world s3) 0))))
-        ;; Escalate 1→2
-        s4   (replay/process-step ctx (:world s3)
-                                  {:seq 5 :time 1000 :agent "alice" :action "escalate_dispute"
+        ;; Escalate 1→2 — must be in a different block than escalation 0→1 (time-lock-integrity)
+        s4   (replay/process-step sew/protocol ctx (:world s3)
+                                  {:seq 5 :time 1002 :agent "alice" :action "escalate_dispute"
                                    :params {:workflow-id 0}})
         _    (testing "escalation 1→2"
                (is (= :ok (get-in s4 [:trace-entry :result])))
@@ -508,8 +502,8 @@
                (is (= res-level-2 (get-in (:world s4) [:escrow-transfers 0 :dispute-resolver])))
                (is (nil? (get-in (:world s4) [:pending-settlements 0]))))
         ;; Level 2 (final round): resolver2 submits verdict → IMMEDIATE (no pending)
-        s5   (replay/process-step ctx (:world s4)
-                                  {:seq 6 :time 1000 :agent "resolver2" :action "execute_resolution"
+        s5   (replay/process-step sew/protocol ctx (:world s4)
+                                  {:seq 6 :time 1002 :agent "resolver2" :action "execute_resolution"
                                    :params {:workflow-id 0 :is-release true}})]
     (testing "final-round verdict is immediate"
       (is (= :ok (get-in s5 [:trace-entry :result])))
@@ -530,25 +524,25 @@
   (let [ctx (make-step-context)
         w   (initial-disputed-world ctx)
         ;; Submit verdict at level 0 → deferred
-        s1  (replay/process-step ctx w
+        s1  (replay/process-step sew/protocol ctx w
                                  {:seq 2 :time 1000 :agent "resolver0" :action "execute_resolution"
                                   :params {:workflow-id 0 :is-release false}})
         _   (is (:exists (t/get-pending (:world s1) 0)) "pending exists before escalation")
         ;; Escalate 0→1 — clears pending
-        s2  (replay/process-step ctx (:world s1)
-                                 {:seq 3 :time 1000 :agent "alice" :action "escalate_dispute"
+        s2  (replay/process-step sew/protocol ctx (:world s1)
+                                 {:seq 3 :time 1001 :agent "alice" :action "escalate_dispute"
                                   :params {:workflow-id 0}})
         _   (testing "pending cleared"
               (is (= :ok (get-in s2 [:trace-entry :result])))
               (is (nil? (get-in (:world s2) [:pending-settlements 0]))))
         ;; Try to execute-pending-settlement after escalation → rejected
-        s3  (replay/process-step ctx (:world s2)
+        s3  (replay/process-step sew/protocol ctx (:world s2)
                                  {:seq 4 :time 1501 :agent "bob" :action "execute_pending_settlement"
                                   :params {:workflow-id 0}})
         _   (testing "stale execute-pending rejected"
               (is (= :rejected (get-in s3 [:trace-entry :result]))))
         ;; New resolver (level 1) successfully resolves
-        s4  (replay/process-step ctx (:world s3)
+        s4  (replay/process-step sew/protocol ctx (:world s3)
                                  {:seq 5 :time 1501 :agent "resolver1" :action "execute_resolution"
                                   :params {:workflow-id 0 :is-release false}})]
     (testing "level-1 resolver succeeds"
@@ -571,14 +565,15 @@
                       {:id "mallory"  :address "0xMallory"  :type "attacker"}
                       {:id "resolver0" :address res-level-0 :type "resolver"}
                       {:id "resolver1" :address res-level-1 :type "resolver"}]]
-          (replay/build-context agents appeal-params esc-fn-cycling))
+          (replay/build-context agents
+                                (assoc appeal-params :escalation-resolvers {:1 res-level-1})))
         w   (initial-disputed-world ctx-with-mallory)
         ;; Submit verdict → deferred
-        s1  (replay/process-step ctx-with-mallory w
+        s1  (replay/process-step sew/protocol ctx-with-mallory w
                                  {:seq 2 :time 1000 :agent "resolver0" :action "execute_resolution"
                                   :params {:workflow-id 0 :is-release true}})
         ;; Mallory (not a participant) tries to escalate
-        s2  (replay/process-step ctx-with-mallory (:world s1)
+        s2  (replay/process-step sew/protocol ctx-with-mallory (:world s1)
                                  {:seq 3 :time 1000 :agent "mallory" :action "escalate_dispute"
                                   :params {:workflow-id 0}})]
     (testing "non-participant escalation rejected"
@@ -594,33 +589,33 @@
   (let [ctx (make-step-context)
         w   (initial-disputed-world ctx)
         ;; Level 0: submit → deferred → escalate 0→1
-        s1  (replay/process-step ctx w
+        s1  (replay/process-step sew/protocol ctx w
                                  {:seq 2 :time 1000 :agent "resolver0" :action "execute_resolution"
                                   :params {:workflow-id 0 :is-release true}})
-        s2  (replay/process-step ctx (:world s1)
-                                 {:seq 3 :time 1000 :agent "alice" :action "escalate_dispute"
+        s2  (replay/process-step sew/protocol ctx (:world s1)
+                                 {:seq 3 :time 1001 :agent "alice" :action "escalate_dispute"
                                   :params {:workflow-id 0}})
         _   (is (= 1 (t/dispute-level (:world s2) 0)))
         ;; Level 1: submit → deferred → escalate 1→2
-        s3  (replay/process-step ctx (:world s2)
-                                 {:seq 4 :time 1000 :agent "resolver1" :action "execute_resolution"
+        s3  (replay/process-step sew/protocol ctx (:world s2)
+                                 {:seq 4 :time 1001 :agent "resolver1" :action "execute_resolution"
                                   :params {:workflow-id 0 :is-release true}})
-        s4  (replay/process-step ctx (:world s3)
-                                 {:seq 5 :time 1000 :agent "alice" :action "escalate_dispute"
+        s4  (replay/process-step sew/protocol ctx (:world s3)
+                                 {:seq 5 :time 1002 :agent "alice" :action "escalate_dispute"
                                   :params {:workflow-id 0}})
         _   (testing "second escalation ok"
               (is (= :ok (get-in s4 [:trace-entry :result])))
               (is (= 2 (t/dispute-level (:world s4) 0))))
         ;; Level 2 is final: execute-resolution is immediate (no pending created)
-        s5  (replay/process-step ctx (:world s4)
-                                 {:seq 6 :time 1000 :agent "resolver2" :action "execute_resolution"
+        s5  (replay/process-step sew/protocol ctx (:world s4)
+                                 {:seq 6 :time 1002 :agent "resolver2" :action "execute_resolution"
                                   :params {:workflow-id 0 :is-release true}})
         _   (testing "final-round verdict is immediate"
               (is (= :ok (get-in s5 [:trace-entry :result])))
               (is (= :released (t/escrow-state (:world s5) 0))))
         ;; After finalization, a third escalation is impossible (not :disputed)
-        s6  (replay/process-step ctx (:world s5)
-                                 {:seq 7 :time 1000 :agent "alice" :action "escalate_dispute"
+        s6  (replay/process-step sew/protocol ctx (:world s5)
+                                 {:seq 7 :time 1002 :agent "alice" :action "escalate_dispute"
                                   :params {:workflow-id 0}})]
     (testing "escalation rejected after finalization"
       (is (= :rejected (get-in s6 [:trace-entry :result]))))
@@ -689,3 +684,89 @@
                   :params {:workflow-id 0}}]))]
     (is (= :pass (:outcome r)))
     (is (= :ok (get-in r [:trace 1 :result])))))
+
+;; ---------------------------------------------------------------------------
+;; Section 19: Invariant-violation metric tracking
+;;
+;; Tests that accum-metrics correctly:
+;;   a. Increments :invariant-violations for every failing invariant
+;;   b. Records ONLY the failing invariants in :invariant-results
+;;   c. Ignores passing invariants (:holds? true)
+;;   d. Auto-cancel-after-timeout: full replay path where invariants hold
+;; ---------------------------------------------------------------------------
+
+(deftest test-accum-metrics-invariant-tracking
+  "accum-metrics increments :invariant-violations and records :invariant-results
+   only for entries where :holds? is false."
+  (let [accum-fn #'replay/accum-metrics
+        base-metrics {:total-escrows 0 :total-volume 0 :disputes-triggered 0
+                      :resolutions-executed 0 :pending-settlements-executed 0
+                      :attack-attempts 0 :attack-successes 0 :rejected-attacks 0
+                      :reverts 0 :invariant-violations 0 :invariant-results {}
+                      :double-settlements 0 :invalid-state-transitions 0 :funds-lost 0}
+        event       {:seq 0 :time 1000 :agent "alice" :action "advance_time" :params {}}
+        ;; Synthetic violations: conservation-of-funds fails, solvency passes
+        trace-entry {:result :ok
+                     :world  {:total-held {} :block-time 1000}
+                     :violations {:conservation-of-funds {:holds? false :violations ["held mismatch"]}
+                                  :solvency              {:holds? true  :violations []}}}
+        agent-index {}
+        world-before {:total-held {} :block-time 1000}]
+    (testing "violations map triggers increment"
+      (let [m (accum-fn base-metrics event trace-entry agent-index world-before)]
+        (is (= 1 (:invariant-violations m)))
+        (is (= {:conservation-of-funds :fail} (:invariant-results m)))
+        (is (not (contains? (:invariant-results m) :solvency))
+            "passing invariant must NOT appear in :invariant-results")))))
+
+(deftest test-accum-metrics-multiple-violations
+  "Multiple failing invariants in one step each appear in :invariant-results."
+  (let [accum-fn #'replay/accum-metrics
+        base-metrics {:total-escrows 0 :total-volume 0 :disputes-triggered 0
+                      :resolutions-executed 0 :pending-settlements-executed 0
+                      :attack-attempts 0 :attack-successes 0 :rejected-attacks 0
+                      :reverts 0 :invariant-violations 0 :invariant-results {}
+                      :double-settlements 0 :invalid-state-transitions 0 :funds-lost 0}
+        event       {:seq 0 :time 1000 :agent "alice" :action "advance_time" :params {}}
+        trace-entry {:result :ok
+                     :world  {:total-held {} :block-time 1000}
+                     :violations {:conservation-of-funds {:holds? false :violations ["mismatch"]}
+                                  :no-negative-balances  {:holds? false :violations ["negative"]}
+                                  :solvency              {:holds? true  :violations []}}}
+        m (accum-fn base-metrics event trace-entry {} {:total-held {} :block-time 1000})]
+    (is (= 1 (:invariant-violations m))
+        "aggregate counter increments once per step regardless of violation count")
+    (is (= {:conservation-of-funds :fail :no-negative-balances :fail}
+           (:invariant-results m)))
+    (is (not (contains? (:invariant-results m) :solvency)))))
+
+(deftest test-accum-metrics-no-violations-unchanged
+  "When :violations is nil (normal step), :invariant-violations stays zero."
+  (let [accum-fn #'replay/accum-metrics
+        base-metrics {:total-escrows 0 :total-volume 0 :disputes-triggered 0
+                      :resolutions-executed 0 :pending-settlements-executed 0
+                      :attack-attempts 0 :attack-successes 0 :rejected-attacks 0
+                      :reverts 0 :invariant-violations 0 :invariant-results {}
+                      :double-settlements 0 :invalid-state-transitions 0 :funds-lost 0}
+        event       {:seq 0 :time 1000 :agent "alice" :action "create_escrow"
+                     :params {:token "0xUSDC" :to "0xBob" :amount 5000}}
+        trace-entry {:result :ok :world {:total-held {} :block-time 1000} :violations nil}
+        m (accum-fn base-metrics event trace-entry {} {:total-held {} :block-time 1000})]
+    (is (= 0 (:invariant-violations m)))
+    (is (= {} (:invariant-results m)))))
+
+(deftest test-auto-cancel-after-timeout
+  "auto_cancel_disputed succeeds when block-time > dispute-timestamp + max-dispute-duration."
+  (let [r (replay/replay-scenario
+           (sc :params (assoc default-params :max-dispute-duration 500)
+               :events
+               [{:seq 0 :time 1000 :agent "alice" :action "create_escrow"
+                  :params {:token "0xUSDC" :to "0xBob" :amount 8000
+                            :custom-resolver "0xResolver"}}
+                {:seq 1 :time 1000 :agent "bob" :action "raise_dispute"
+                  :params {:workflow-id 0}}
+                {:seq 2 :time 1501 :agent "alice" :action "auto_cancel_disputed"
+                  :params {:workflow-id 0}}]))]
+    (is (= :pass (:outcome r)))
+    (is (= :ok (get-in r [:trace 2 :result])))
+    (is (= 0 (get-in r [:metrics :invariant-violations])))))

@@ -15,7 +15,8 @@
             [resolver-sim.protocols.sew.diff :as diff]
             [resolver-sim.canonical.actions :as canon]
             [resolver-sim.sim.minimizer :as minimizer]
-            [resolver-sim.sim.theory :as theory]
+            [resolver-sim.scenario.theory :as theory]
+            [resolver-sim.scenario.expectations :as expectations]
             [clojure.pprint :as pp]))
 
 ;; ---------------------------------------------------------------------------
@@ -209,8 +210,15 @@
          actors (:actors suite)
          token (:token suite)
          results (mapv (fn [trace]
-                         (let [effective-trace (cond-> trace
-                                                 proto (assoc :protocol-params proto)
+                         (let [;; Merge protocol-params: suite provides baseline defaults,
+                               ;; trace-level params take priority so per-trace overrides
+                               ;; (e.g. resolution-module, max-dispute-duration, escalation-resolvers)
+                               ;; are preserved rather than silently discarded.
+                               merged-proto (when proto
+                                              (merge (dissoc proto :protocol/id)
+                                                     (:protocol-params trace)))
+                               effective-trace (cond-> trace
+                                                 merged-proto (assoc :protocol-params merged-proto)
                                                  state (assoc :initial-block-time (:block-time state 1000))
                                                  authority (assoc :authority-params authority)
                                                  actors (assoc :agents (vec (concat (:agents trace []) actors)))
@@ -221,12 +229,13 @@
                                
                                ;; CDRS v1.1 Analysis
                                expect-res (when (:expectations trace)
-                                            (theory/evaluate-expectations res (:expectations trace)))
+                                            (expectations/evaluate-expectations res (:expectations trace)))
                                theory-res (when (:theory trace)
                                             (theory/evaluate-theory res (:theory trace)))]
                            
                            (when (= mode :save) (save-golden-report suite-key {:trace-id (:scenario-id trace) :golden-report report}))
                            {:trace-id (:scenario-id trace)
+                            :purpose  (:purpose trace)
                             :outcome (:outcome res)
                             :metrics (:metrics res)
                             :threshold-validation (validate-thresholds res thresholds)
@@ -235,9 +244,25 @@
                             :expectations expect-res
                             :theory theory-res}))
                        traces)
+         theory-ok? (fn [r]
+                      ;; Theory result is acceptable when:
+                      ;; - no theory block (:not-evaluated)
+                      ;; - claim was not falsified (:not-falsified)
+                      ;; - claim was falsified AND the scenario is explicitly a theory-falsification exercise
+                      ;; :inconclusive is treated as a soft warning, not a hard failure
+                      (let [status  (get-in r [:theory :status])
+                            purpose (keyword (or (:purpose r) ""))]
+                        (case status
+                          nil            true
+                          :not-evaluated true
+                          :not-falsified true
+                          :falsified     (= purpose :theory-falsification)
+                          :inconclusive  true
+                          true)))
          all-ok? (every? (fn [r] (and (= :pass (:outcome r))
                                       (:ok? (:threshold-validation r))
                                       (or (nil? (:expectations r)) (:ok? (:expectations r)))
+                                      (theory-ok? r)
                                       (if (= mode :verify) (:ok? (:golden-comparison r)) true)))
                          results)]
      {:suite-id suite-key
@@ -263,8 +288,11 @@
         actors (:actors suite)
         results (atom [])]
     (doseq [trace traces]
-      (let [effective-trace (cond-> trace
-                              proto (assoc :protocol-params proto)
+      (let [merged-proto (when proto
+                           (merge (dissoc proto :protocol/id)
+                                  (:protocol-params trace)))
+            effective-trace (cond-> trace
+                              merged-proto (assoc :protocol-params merged-proto)
                               state (assoc :initial-block-time (:block-time state 1000))
                               authority (assoc :authority-params authority)
                               actors (assoc :agents (vec (concat (:agents trace []) actors))))

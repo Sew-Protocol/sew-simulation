@@ -52,7 +52,7 @@
   ([world resolver-addr amount challenger bounty-bps]
    (let [current (get-stake world resolver-addr)
          actual  (min current amount)
-         world'  (-> (update-in world [:resolver-stakes resolver-addr] - actual)
+         world'  (-> (update-in world [:resolver-stakes resolver-addr] (fnil - 0) actual)
                      (update-in [:resolver-slash-total resolver-addr] (fnil + 0) actual)
                      (acct/distribute-slashed-funds actual challenger bounty-bps))]
      (assoc (t/ok world') :slashed-from-stake actual))))

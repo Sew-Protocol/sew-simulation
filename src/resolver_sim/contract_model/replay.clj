@@ -52,6 +52,76 @@
       :else             {:ok true})))
 
 ;; ---------------------------------------------------------------------------
+;; Metrics — registry (must precede validate-scenario which references it)
+;; ---------------------------------------------------------------------------
+
+;; SCOPE: deterministic trace metrics only.
+;;
+;; This registry covers metrics that the replay engine can compute from a
+;; single scenario execution (event log + world snapshots).  It intentionally
+;; excludes stochastic / population-level metrics such as:
+;;
+;;   :coalition/net-profit   — needs N-epoch batch run, not a single trace
+;;   :malice-mean-profit     — population average from sim/multi_epoch.clj
+;;   :dominance-ratio        — strategy-share statistic across resolver pool
+;;
+;; Those belong in a separate future registry, e.g.:
+;;
+;;   resolver-sim.sim.multi-epoch/known-metrics   (stochastic, multi-epoch)
+;;
+;; Do NOT add population/batch metrics here. Blending the two worlds would
+;; cause validate-scenario to accept :theory/falsifies-if conditions that
+;; the deterministic replay can never satisfy, producing silent :inconclusive
+;; results for the wrong reason.
+(def known-metrics
+  "Canonical set of metric keys emitted by the deterministic replay engine.
+
+   Any metric referenced in :expectations/:metrics or :theory/:falsifies-if
+   must be in this set. validate-scenario rejects scenarios that reference
+   unknown metrics so that :inconclusive results are never caused by typos
+   or references to unimplemented metrics.
+
+   All metrics below are LIVE — incremented by accum-metrics on each event.
+
+     :total-escrows                  accepted create_escrow calls
+     :total-volume                   sum of :amount for accepted create_escrow
+     :disputes-triggered             accepted raise_dispute calls
+     :resolutions-executed           accepted execute_resolution calls
+     :pending-settlements-executed   accepted execute_pending_settlement calls
+     :attack-attempts                adversarial events (per-event flag or agent type=attacker)
+     :attack-successes               adversarial events that were accepted
+     :rejected-attacks               adversarial events that were rejected
+     :reverts                        all rejected events (blunt aggregate)
+     :invariant-violations           aggregate count of invariant failures
+     :double-settlements             accepted settlement after a prior resolution
+     :invalid-state-transitions      rejected events with a state-logic error code
+     :funds-lost                     decrease in total-held from accepted adversarial events
+
+   NON-NUMERIC internal key (not in this set, not checkable via evaluate-metric-op):
+     :invariant-results  — map {inv-kw :fail}; used only by evaluate-invariants."
+  #{:total-escrows
+    :total-volume
+    :disputes-triggered
+    :resolutions-executed
+    :pending-settlements-executed
+    :attack-attempts
+    :attack-successes
+    :rejected-attacks
+    :reverts
+    :invariant-violations
+    :double-settlements
+    :invalid-state-transitions
+    :funds-lost})
+
+(defn- metric-key
+  "Coerce a metric name (string or keyword) to a keyword, stripping any
+   spurious leading colon (e.g. ':reverts' → :reverts)."
+  [x]
+  (let [s  (if (keyword? x) (name x) (str x))
+        s' (if (.startsWith s ":") (subs s 1) s)]
+    (keyword s')))
+
+;; ---------------------------------------------------------------------------
 ;; Input validation (Generic scenario structure)
 ;; ---------------------------------------------------------------------------
 
@@ -72,8 +142,41 @@
       (and (= version "1.1") (not (:id scenario)))
       {:ok false :error :missing-id :detail "v1.1 scenarios must have a unique :id"}
 
+      (and (= version "1.1") (not (:title scenario)))
+      {:ok false :error :missing-title :detail "v1.1 scenarios must have a human-readable :title"}
+
       (and (= version "1.1") (not (:purpose scenario)))
       {:ok false :error :missing-purpose :detail "v1.1 scenarios must declare a :purpose"}
+
+      ;; :theory-falsification scenarios must include a :theory block
+      (and (= version "1.1")
+           (= :theory-falsification (:purpose scenario))
+           (not (:theory scenario)))
+      {:ok false :error :theory-required
+       :detail "purpose :theory-falsification requires a :theory block"}
+
+      ;; :adversarial-robustness scenarios must include :theory or meaningful :expectations
+      (and (= version "1.1")
+           (= :adversarial-robustness (:purpose scenario))
+           (not (:theory scenario))
+           (empty? (get-in scenario [:expectations :metrics]))
+           (empty? (get-in scenario [:expectations :terminal]))
+           (empty? (get-in scenario [:expectations :invariants])))
+      {:ok false :error :adversarial-requires-analysis
+       :detail "purpose :adversarial-robustness requires :theory or non-trivial :expectations"}
+
+      ;; Validate :theory structure when present
+      (and (:theory scenario) (not (get-in scenario [:theory :claim-id])))
+      {:ok false :error :theory-missing-claim-id
+       :detail ":theory must include a :claim-id"}
+
+      (and (:theory scenario) (nil? (get-in scenario [:theory :assumptions])))
+      {:ok false :error :theory-missing-assumptions
+       :detail ":theory must include an :assumptions vector (may be empty)"}
+
+      (and (:theory scenario) (not (seq (get-in scenario [:theory :falsifies-if]))))
+      {:ok false :error :theory-missing-falsifies-if
+       :detail ":theory must include a non-empty :falsifies-if vector"}
 
       (not (:ok agent-check))
       agent-check
@@ -97,11 +200,34 @@
       {:ok false :error :unknown-agent-in-event
        :detail {:bad-refs (vec (filter #(not (contains? known-ids (:agent %))) events))}}
 
+      ;; All metric names in expectations.metrics and theory.falsifies-if must
+      ;; be in known-metrics. This prevents silent :inconclusive results caused
+      ;; by typos or references to unimplemented metrics.
+      (let [exp-metrics  (map #(metric-key (:name   %)) (get-in scenario [:expectations :metrics] []))
+            theory-metrics (map #(metric-key (:metric %)) (get-in scenario [:theory :falsifies-if] []))
+            all-refs      (concat exp-metrics theory-metrics)
+            unknown       (vec (remove known-metrics all-refs))]
+        (seq unknown))
+      {:ok false :error :unknown-metric-references
+       :detail {:unknown (vec (remove known-metrics
+                                (concat (map #(metric-key (:name   %)) (get-in scenario [:expectations :metrics] []))
+                                        (map #(metric-key (:metric %)) (get-in scenario [:theory :falsifies-if] [])))))
+                :known known-metrics}}
+
       :else {:ok true})))
 
 ;; ---------------------------------------------------------------------------
-;; Metrics (Generic)
+;; Metrics — accumulation
 ;; ---------------------------------------------------------------------------
+
+;; Error codes that indicate the escrow was in an incorrect state for the
+;; attempted action (as opposed to authorization or parameter failures).
+(def ^:private state-transition-error-codes
+  #{:transfer-not-pending
+    :transfer-not-in-dispute
+    :invalid-state-for-release
+    :invalid-state-for-refund
+    :resolution-without-settlement})
 
 (defn- zero-metrics []
   {:total-escrows                0
@@ -111,14 +237,55 @@
    :pending-settlements-executed 0
    :attack-attempts              0
    :attack-successes             0
+   :rejected-attacks             0
    :reverts                      0
-   :invariant-violations         0})
+   :invariant-violations         0
+   :double-settlements           0
+   :invalid-state-transitions    0
+   :funds-lost                   0
+   ;; Per-invariant failure map: {inv-kw :fail} for any invariant that
+   ;; violated at least once during the run. Invariants NOT in this map
+   ;; either passed throughout or were never exercised.  Used exclusively
+   ;; by evaluate-invariants — not evaluated by evaluate-metric-op.
+   :invariant-results            {}})
 
-(defn- accum-metrics [metrics event trace-entry agent-index]
+(defn- held-total
+  "Sum all total-held values across tokens in a world or world-snapshot map.
+   Accepts either a full world map (keyed :total-held) or a world-snapshot map."
+  [world]
+  (let [held (:total-held world {})]
+    (if (map? held) (apply + (vals held)) 0)))
+
+(defn- accum-metrics [metrics event trace-entry agent-index world-before]
   (let [action    (:action event)
         accepted? (= :ok (:result trace-entry))
         agent     (get agent-index (:agent event))
-        attack?   (= "attacker" (:type agent))]
+        ;; Per-event :adversarial? flag takes precedence over agent.type so
+        ;; that mixed-role actors (e.g. an honest buyer performing adversarial
+        ;; calls) can be classified at the event level without marking the whole
+        ;; agent type as "attacker" (which would inflate attack-successes for
+        ;; legitimate accepted actions by the same agent).
+        attack?   (or (:adversarial? event)
+                      (= "attacker" (:type agent)))
+        ;; double-settlements: a second accepted settlement on what is (for
+        ;; single-escrow scenarios) already a settled workflow.  Uses aggregate
+        ;; resolutions-executed as a proxy — imprecise for multi-escrow traces
+        ;; but correct for the current corpus.
+        settlement-action? (contains? #{"execute_resolution"
+                                        "execute_pending_settlement"} action)
+        double-settle? (and accepted?
+                            settlement-action?
+                            (pos? (:resolutions-executed metrics)))
+        ;; funds-lost: total-held decrease caused by an adversarial accepted
+        ;; action. Computed as max(0, held-before - held-after) so that
+        ;; refunds-into-held (impossible in normal operation) don't produce
+        ;; negative values. Works for multi-token traces since all tokens are
+        ;; summed. Does NOT fire for honest actions (attack? = false).
+        held-before (held-total world-before)
+        held-after  (held-total (:world trace-entry))
+        funds-lost-delta (if (and attack? accepted?)
+                           (max 0 (- held-before held-after))
+                           0)]
     (cond-> metrics
       (and accepted? (= action "create_escrow"))
       (-> (update :total-escrows inc)
@@ -139,11 +306,34 @@
       attack?
       (update :attack-attempts inc)
 
+      (and attack? (not accepted?))
+      (update :rejected-attacks inc)
+
       (not accepted?)
       (update :reverts inc)
 
+      ;; Increment aggregate violation counter and record which specific
+      ;; invariants failed.  :violations is a map {inv-kw result-map}
+      ;; from check-all / check-transition; only entries where :holds? is
+      ;; false should be marked :fail.
       (:violations trace-entry)
-      (update :invariant-violations inc))))
+      (-> (update :invariant-violations inc)
+          (update :invariant-results
+                  (fn [acc]
+                    (reduce (fn [m [kw r]]
+                              (if (:holds? r) m (assoc m kw :fail)))
+                            acc
+                            (:violations trace-entry)))))
+
+      double-settle?
+      (update :double-settlements inc)
+
+      (and (not accepted?)
+           (contains? state-transition-error-codes (:error trace-entry)))
+      (update :invalid-state-transitions inc)
+
+      (pos? funds-lost-delta)
+      (update :funds-lost + funds-lost-delta))))
 
 ;; ---------------------------------------------------------------------------
 ;; Workflow-id alias resolution (Generic)
@@ -253,7 +443,7 @@
                       step  (process-step protocol context world event)
                       entry (:trace-entry step)
                       new-trace (conj trace entry)
-                      new-metrics (accum-metrics metrics event entry agent-index)
+                      new-metrics (accum-metrics metrics event entry agent-index world)
                       new-alias-map (if (and (= "create_escrow" (:action event)) (= :ok (:result entry)) (:save-wf-as raw-event))
                                       (assoc wf-alias-map (:save-wf-as raw-event) (get-in entry [:extra :workflow-id]))
                                       wf-alias-map)]

@@ -2,7 +2,7 @@
   "id": "scenarios/s01-baseline-happy-path",
   "scenario-id": "s01-baseline-happy-path",
   "title": "Baseline Successful Release",
-  "description": "Standard escrow creation followed by buyer release.",
+  "description": "Standard escrow creation followed by buyer release. Regression check only — no game-theoretic claim.",
   "purpose": "regression",
   "schema-version": "1.1",
   "initial-block-time": 1000,
@@ -11,20 +11,13 @@
     { "id": "buyer", "address": "0xbuyer", "role": "buyer", "strategy": "honest" },
     { "id": "seller", "address": "0xseller", "role": "seller", "strategy": "honest" }
   ],
-  "theory": {
-    "claim-id": "claims/honest-release-works",
-    "claim": "Honest buyers can successfully release funds to sellers.",
-    "assumptions": ["Mempool is fair", "Token is standard ERC20"],
-    "falsifies-if": [
-      { "metric": "reverts", "op": ">", "value": 0 }
-    ]
-  },
   "expectations": {
     "terminal": [
       { "path": ["live-states", 0], "equals": "released" }
     ],
     "metrics": [
-      { "name": "total-escrows", "op": ":=", "value": 1 }
+      { "name": "total-escrows", "op": ":=", "value": 1 },
+      { "name": "reverts", "op": ":=", "value": 0 }
     ]
   },
   "events": [
