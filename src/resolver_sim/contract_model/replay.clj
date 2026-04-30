@@ -448,7 +448,7 @@
                                       (assoc wf-alias-map (:save-wf-as raw-event) (get-in entry [:extra :workflow-id]))
                                       wf-alias-map)]
                   (if (:halted? step)
-                    {:outcome :fail :scenario-id (:scenario-id scenario) :events-processed (count new-trace) :halted-at-seq (:seq event) :halt-reason :invariant-violation :trace new-trace :metrics (update new-metrics :invariant-violations inc)}
+                    {:outcome :fail :scenario-id (:scenario-id scenario) :events-processed (count new-trace) :halted-at-seq (:seq event) :halt-reason :invariant-violation :trace new-trace :metrics new-metrics}
                     (recur (:world step) (rest events) new-trace new-metrics new-alias-map)))))))))))
 
 (defn replay-scenario
