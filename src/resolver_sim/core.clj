@@ -246,6 +246,10 @@
 
         ; Simulate waterfall stress
         _ (println (format "\n🌊 Running waterfall stress test: %s" scenario-name))
+        _ (println (format "   Hypothesis: Waterfall maintains >80%% coverage under fraud rate threshold"))
+        _ (println (format "   Purpose: Verify senior/junior tier adequacy and pool solvency"))
+        _ (println (format "   Threshold: Coverage adequacy must be ≥80%% to pass"))
+        _ (println "")
         _ (println (format "   Seniors: %d | Juniors: %d"
                           (:n-seniors params 5)
                           (* (:n-seniors params 5) (:n-juniors-per-senior params 10))))
@@ -295,9 +299,27 @@
                 :results metrics}]
 
     ; Print key findings
-    (println (format "   Juniors exhausted: %.1f%%" (:juniors-exhausted-pct metrics)))
-    (println (format "   Coverage used: %.1f%%" (:seniors-coverage-used-avg-pct metrics)))
-    (println (format "   Adequacy score: %.1f%%" (:coverage-adequacy-score metrics)))
+    (let [adequacy (:coverage-adequacy-score metrics)
+          pass? (>= adequacy 80.0)]
+      (println (format "   Juniors exhausted: %.1f%%" (:juniors-exhausted-pct metrics)))
+      (println (format "   Coverage used: %.1f%%" (:seniors-coverage-used-avg-pct metrics)))
+      (println (format "   Adequacy score: %.1f%% (scale: 0–100)" adequacy))
+      (println "")
+      (if pass?
+        (println (format "   Status: ✅ PASS (%.1f%% ≥ 80%% threshold)" adequacy))
+        (println (format "   Status: ❌ FAIL (%.1f%% < 80%% threshold)" adequacy)))
+      (println "")
+      (if pass?
+        (println "   Interpretation: Pool is well-provisioned for stated fraud rate.")
+        (println "   Interpretation: ❌ CRITICAL — pool inadequate. Senior coverage insufficient."))
+      (println "")
+      (if (< adequacy 80.0)
+        (do
+          (println "   Recommendations:")
+          (println "   • Increase senior bond amounts (currently tied to utilization-factor)")
+          (println "   • Increase utilization-factor from current setting")
+          (println "   • Reduce fraud-slash-bps to test lower thresholds")
+          (println "   • Validate assumptions with higher fraud rates (target: 25%)"))))
 
     ; Write outputs
     (results/write-edn (format "%s/summary.edn" run-dir) summary)
