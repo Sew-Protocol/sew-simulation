@@ -127,7 +127,15 @@
     (cond-> {:seq           seq-n
              :cdrs_version  "0.1"
              :event_type    (str/upper-case (str/replace forge-action #"_" " "))
-             :step_type     (if (= result :ok) "protocol-transition" "economic-effect")
+             :step_type     (cond
+                         (not= result :ok)
+                         "protocol-transition"
+                         (= :transition/economic (:transition/type metadata))
+                         "economic-effect"
+                         (#{:transition/timeout :transition/maintenance} (:transition/type metadata))
+                         "environmental-change"
+                         :else
+                         "protocol-transition")
              :context_id    (or wf-alias "global")
              :actor         caller-role
              :timestamp     (:time entry 0)
@@ -173,6 +181,8 @@
      :scenario_id    (:scenario-id result)
      :description    (str "Generated trace: " (:scenario-id result))
      :fee_bps        (get-in scenario [:protocol-params :resolver-fee-bps] 100)
+     :metadata       {"scenario_class" (kw-val->str-flat (meta/classify-scenario scenario))
+                      "outcome_type"   (kw-val->str-flat (meta/classify-outcome result scenario))}
      :step_count     (count steps)
      :steps          steps
      ;; Resolution summary for all escrows in the trace

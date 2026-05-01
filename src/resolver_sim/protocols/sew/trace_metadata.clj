@@ -390,8 +390,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; B5. Scenario classifier
-;; RESERVED — no production callers. Wire-up point: call in sim/fixtures.clj
-;; run-suite to tag each result with :scenario/type for filtered reporting.
+;; Active — called from io/trace_export.clj to populate fixture :metadata block.
 ;; ---------------------------------------------------------------------------
 
 (defn classify-scenario
@@ -418,10 +417,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; B6. Outcome classifier
-;; RESERVED — no production callers. Wire-up point: call in replay-with-protocol
-;; to add :outcome/type to the result map, or in sim/fixtures.clj run-suite.
-;; Note: line 432 contains a dead branch (= :halt :invariant-violation) —
-;; should be (= halt :invariant-violation); fix when wiring up.
+;; Active — called from io/trace_export.clj to populate fixture :metadata block.
 ;; ---------------------------------------------------------------------------
 
 (defn classify-outcome
@@ -435,7 +431,6 @@
     (cond
       (and expected (= :fail outcome))   :expected-violation
       (and (= :pass outcome) (zero? violations)) :normal-completion
-      (= :halt :invariant-violation)     :invariant-failure
       (= halt :invariant-violation)      :invariant-failure
       (= halt :open-disputes-at-end)     :liveness-failure
       (= outcome :fail)                  :invariant-failure
@@ -580,7 +575,8 @@
        :else                                              :leakage)}))
 
 ;; ---------------------------------------------------------------------------
-;; C4. Issue / failure classifier (legacy retained)
+;; C4. Issue / failure classifier
+;; Active — called from io/trace_score.clj:81 to set :issue/type on scored results.
 ;; ---------------------------------------------------------------------------
 
 (defn classify-issue [result]
