@@ -220,15 +220,6 @@
 ;; Metrics — accumulation
 ;; ---------------------------------------------------------------------------
 
-;; Error codes that indicate the escrow was in an incorrect state for the
-;; attempted action (as opposed to authorization or parameter failures).
-(def ^:private state-transition-error-codes
-  #{:transfer-not-pending
-    :transfer-not-in-dispute
-    :invalid-state-for-release
-    :invalid-state-for-refund
-    :resolution-without-settlement})
-
 (defn- zero-metrics []
   {:total-escrows                0
    :total-volume                 0
@@ -256,9 +247,10 @@
   (let [held (:total-held world {})]
     (if (map? held) (apply + (vals held)) 0)))
 
-(defn- accum-metrics [metrics event trace-entry agent-index world-before]
-  (let [action    (:action event)
-        accepted? (= :ok (:result trace-entry))
+(defn- accum-metrics [protocol metrics event trace-entry agent-index world-before]
+  (let [result-kw (:result trace-entry)
+        error-kw  (:error trace-entry)
+        accepted? (= result-kw :ok)
         agent     (get agent-index (:agent event))
         ;; Per-event :adversarial? flag takes precedence over agent.type so
         ;; that mixed-role actors (e.g. an honest buyer performing adversarial
@@ -267,14 +259,14 @@
         ;; legitimate accepted actions by the same agent).
         attack?   (or (:adversarial? event)
                       (= "attacker" (:type agent)))
-        ;; double-settlements: a second accepted settlement on what is (for
-        ;; single-escrow scenarios) already a settled workflow.  Uses aggregate
-        ;; resolutions-executed as a proxy — imprecise for multi-escrow traces
-        ;; but correct for the current corpus.
-        settlement-action? (contains? #{"execute_resolution"
-                                        "execute_pending_settlement"} action)
+        tags      (engine/classify-event protocol event result-kw error-kw)
+        ;; double-settlements: a second accepted lifecycle-ending action on what
+        ;; is (for single-escrow scenarios) already a resolved/settled workflow.
+        ;; Uses aggregate resolutions-executed as a proxy — imprecise for
+        ;; multi-escrow traces but correct for the current corpus.
         double-settle? (and accepted?
-                            settlement-action?
+                            (or (contains? tags :dispute-resolved)
+                                (contains? tags :settlement-executed))
                             (pos? (:resolutions-executed metrics)))
         ;; funds-lost: total-held decrease caused by an adversarial accepted
         ;; action. Computed as max(0, held-before - held-after) so that
@@ -287,17 +279,17 @@
                            (max 0 (- held-before held-after))
                            0)]
     (cond-> metrics
-      (and accepted? (= action "create_escrow"))
+      (contains? tags :entity-created)
       (-> (update :total-escrows inc)
           (update :total-volume + (get-in event [:params :amount] 0)))
 
-      (and accepted? (= action "raise_dispute"))
+      (contains? tags :dispute-raised)
       (update :disputes-triggered inc)
 
-      (and accepted? (= action "execute_resolution"))
+      (contains? tags :dispute-resolved)
       (update :resolutions-executed inc)
 
-      (and accepted? (= action "execute_pending_settlement"))
+      (contains? tags :settlement-executed)
       (update :pending-settlements-executed inc)
 
       (and attack? accepted?)
@@ -328,25 +320,11 @@
       double-settle?
       (update :double-settlements inc)
 
-      (and (not accepted?)
-           (contains? state-transition-error-codes (:error trace-entry)))
+      (contains? tags :invalid-state-transition)
       (update :invalid-state-transitions inc)
 
       (pos? funds-lost-delta)
       (update :funds-lost + funds-lost-delta))))
-
-;; ---------------------------------------------------------------------------
-;; Workflow-id alias resolution (Generic)
-;; ---------------------------------------------------------------------------
-
-(defn- resolve-wf-alias
-  [event wf-alias-map]
-  (let [wf-val (get-in event [:params :workflow-id])]
-    (if (string? wf-val)
-      (if-let [int-id (get wf-alias-map wf-val)]
-        {:ok true :event (assoc-in event [:params :workflow-id] int-id)}
-        {:ok false :error :unresolved-alias :alias wf-val :seq (:seq event)})
-      {:ok true :event event})))
 
 ;; ---------------------------------------------------------------------------
 ;; Step Processing (Kernel)
@@ -428,25 +406,27 @@
             agent-index (:agent-index context)
             world0  (engine/init-world protocol scenario)
             events  (sort-by :seq (:events scenario))]
-        (loop [world world0 events events trace [] metrics (zero-metrics) wf-alias-map {}]
+        (loop [world world0 events events trace [] metrics (zero-metrics) id-alias-map {}]
           (if (empty? events)
-            (let [open-disputes (when-not (:allow-open-disputes? scenario)
-                                  (vec (for [[wf et] (:escrow-transfers world) :when (= :disputed (:escrow-state et))] wf)))]
-              (if (seq open-disputes)
-                {:outcome :fail :scenario-id (:scenario-id scenario) :events-processed (count trace) :halt-reason :open-disputes-at-end :detail {:open-disputes open-disputes} :trace trace :metrics metrics}
+            (let [open (when-not (:allow-open-disputes? scenario)
+                         (seq (engine/open-disputes protocol world)))]
+              (if open
+                {:outcome :fail :scenario-id (:scenario-id scenario) :events-processed (count trace) :halt-reason :open-disputes-at-end :detail {:open-disputes (vec open)} :trace trace :metrics metrics}
                 {:outcome :pass :scenario-id (:scenario-id scenario) :events-processed (count trace) :trace trace :metrics metrics}))
-            (let [raw-event (first events)
-                  alias-res (resolve-wf-alias raw-event wf-alias-map)]
+            (let [raw-event  (first events)
+                  alias-res  (engine/resolve-id-alias protocol raw-event id-alias-map)]
               (if-not (:ok alias-res)
                 {:outcome :invalid :scenario-id (:scenario-id scenario) :events-processed (count trace) :halted-at-seq (:seq raw-event) :halt-reason :unresolved-alias :detail (dissoc alias-res :ok) :trace trace :metrics metrics}
-                (let [event (:event alias-res)
-                      step  (process-step protocol context world event)
-                      entry (:trace-entry step)
-                      new-trace (conj trace entry)
-                      new-metrics (accum-metrics metrics event entry agent-index world)
-                      new-alias-map (if (and (= "create_escrow" (:action event)) (= :ok (:result entry)) (:save-wf-as raw-event))
-                                      (assoc wf-alias-map (:save-wf-as raw-event) (get-in entry [:extra :workflow-id]))
-                                      wf-alias-map)]
+                (let [event    (:event alias-res)
+                      step     (process-step protocol context world event)
+                      entry    (:trace-entry step)
+                      new-trace   (conj trace entry)
+                      new-metrics (accum-metrics protocol metrics event entry agent-index world)
+                      created     (when (and (= :ok (:result entry)) (:save-id-as raw-event))
+                                    (engine/created-id protocol (:action event) (:extra entry)))
+                      new-alias-map (if created
+                                      (assoc id-alias-map (:save-id-as raw-event) created)
+                                      id-alias-map)]
                   (if (:halted? step)
                     {:outcome :fail :scenario-id (:scenario-id scenario) :events-processed (count new-trace) :halted-at-seq (:seq event) :halt-reason :invariant-violation :trace new-trace :metrics new-metrics}
                     (recur (:world step) (rest events) new-trace new-metrics new-alias-map)))))))))))
@@ -456,25 +436,6 @@
    Callers that need a different protocol should use replay-with-protocol directly."
   [scenario]
   (replay-with-protocol @(requiring-resolve 'resolver-sim.protocols.sew/protocol) scenario))
-
-;; ---------------------------------------------------------------------------
-;; Legacy/Compatibility helpers (Bridge to SEW implementation)
-;; ---------------------------------------------------------------------------
-
-(defn- sew-protocol []
-  @(requiring-resolve 'resolver-sim.protocols.sew/protocol))
-
-(defn build-context [agents protocol-params]
-  (engine/build-execution-context (sew-protocol) agents protocol-params))
-
-(defn sew-dispatch-action [context world event]
-  (engine/dispatch-action (sew-protocol) context world event))
-
-(defn sew-check-invariants-single [world]
-  (engine/check-invariants-single (sew-protocol) world))
-
-(defn sew-check-invariants-transition [world-before world-after]
-  (engine/check-invariants-transition (sew-protocol) world-before world-after))
 
 (defn result->json-str
   "Serialize a replay result to a JSON string."

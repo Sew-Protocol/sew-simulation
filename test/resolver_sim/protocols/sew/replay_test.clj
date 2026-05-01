@@ -10,6 +10,7 @@
      - Escalation flows: full chain (0→1→2), mid-pending escalation, adversarial rejections"
   (:require [clojure.test :refer [deftest is testing]]
             [resolver-sim.contract-model.replay    :as replay]
+            [resolver-sim.protocols.protocol       :as engine]
             [resolver-sim.protocols.sew            :as sew]
             [resolver-sim.protocols.sew.invariants :as inv]
             [resolver-sim.protocols.sew.types     :as t]
@@ -445,7 +446,7 @@
                 {:id "resolver0" :address res-level-0  :type "resolver"}
                 {:id "resolver1" :address res-level-1  :type "resolver"}
                 {:id "resolver2" :address res-level-2  :type "resolver"}]]
-    (replay/build-context agents
+    (engine/build-execution-context sew/protocol agents
                           (assoc appeal-params :escalation-resolvers {:1 res-level-1 :2 res-level-2}))))
 
 (defn- initial-disputed-world
@@ -565,7 +566,7 @@
                       {:id "mallory"  :address "0xMallory"  :type "attacker"}
                       {:id "resolver0" :address res-level-0 :type "resolver"}
                       {:id "resolver1" :address res-level-1 :type "resolver"}]]
-          (replay/build-context agents
+          (engine/build-execution-context sew/protocol agents
                                 (assoc appeal-params :escalation-resolvers {:1 res-level-1})))
         w   (initial-disputed-world ctx-with-mallory)
         ;; Submit verdict → deferred
@@ -629,13 +630,13 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-wf-alias-save-and-resolve
-  ":save-wf-as captures the assigned workflow-id; subsequent events resolve the alias."
+  ":save-id-as captures the assigned workflow-id; subsequent events resolve the alias."
   (let [r (replay/replay-scenario
            (sc :events
                [{:seq 0 :time 1000 :agent "alice" :action "create_escrow"
                   :params {:token "0xUSDC" :to "0xBob" :amount 5000
                             :custom-resolver "0xResolver"}
-                  :save-wf-as "wf0"}
+                  :save-id-as "wf0"}
                 {:seq 1 :time 1001 :agent "alice" :action "release"
                   :params {:workflow-id "wf0"}}]))]
     (is (= :pass (:outcome r)))
@@ -649,10 +650,10 @@
            (sc :events
                [{:seq 0 :time 1000 :agent "alice" :action "create_escrow"
                   :params {:token "0xUSDC" :to "0xBob" :amount 3000}
-                  :save-wf-as "wf0"}
+                  :save-id-as "wf0"}
                 {:seq 1 :time 1001 :agent "alice" :action "create_escrow"
                   :params {:token "0xUSDC" :to "0xBob" :amount 4000}
-                  :save-wf-as "wf1"}
+                  :save-id-as "wf1"}
                 {:seq 2 :time 1002 :agent "alice" :action "release"
                   :params {:workflow-id "wf1"}}
                 {:seq 3 :time 1003 :agent "alice" :action "release"
@@ -664,7 +665,7 @@
     (is (= :ok (get-in r [:trace 3 :result])))))
 
 (deftest test-wf-alias-unresolved-returns-invalid
-  "A string alias with no prior :save-wf-as returns :invalid outcome."
+  "A string alias with no prior :save-id-as returns :invalid outcome."
   (let [r (replay/replay-scenario
            (sc :events
                [{:seq 0 :time 1000 :agent "alice" :action "create_escrow"
@@ -713,7 +714,7 @@
         agent-index {}
         world-before {:total-held {} :block-time 1000}]
     (testing "violations map triggers increment"
-      (let [m (accum-fn base-metrics event trace-entry agent-index world-before)]
+      (let [m (accum-fn sew/protocol base-metrics event trace-entry agent-index world-before)]
         (is (= 1 (:invariant-violations m)))
         (is (= {:conservation-of-funds :fail} (:invariant-results m)))
         (is (not (contains? (:invariant-results m) :solvency))
@@ -733,7 +734,7 @@
                      :violations {:conservation-of-funds {:holds? false :violations ["mismatch"]}
                                   :no-negative-balances  {:holds? false :violations ["negative"]}
                                   :solvency              {:holds? true  :violations []}}}
-        m (accum-fn base-metrics event trace-entry {} {:total-held {} :block-time 1000})]
+        m (accum-fn sew/protocol base-metrics event trace-entry {} {:total-held {} :block-time 1000})]
     (is (= 1 (:invariant-violations m))
         "aggregate counter increments once per step regardless of violation count")
     (is (= {:conservation-of-funds :fail :no-negative-balances :fail}
@@ -751,7 +752,7 @@
         event       {:seq 0 :time 1000 :agent "alice" :action "create_escrow"
                      :params {:token "0xUSDC" :to "0xBob" :amount 5000}}
         trace-entry {:result :ok :world {:total-held {} :block-time 1000} :violations nil}
-        m (accum-fn base-metrics event trace-entry {} {:total-held {} :block-time 1000})]
+        m (accum-fn sew/protocol base-metrics event trace-entry {} {:total-held {} :block-time 1000})]
     (is (= 0 (:invariant-violations m)))
     (is (= {} (:invariant-results m)))))
 

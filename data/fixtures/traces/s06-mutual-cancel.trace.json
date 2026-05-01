@@ -34,7 +34,7 @@
         "to": "0xseller",
         "amount": 1500
       },
-      "save-wf-as": "wf0"
+      "save-id-as": "wf0"
     },
     {
       "seq": 1,

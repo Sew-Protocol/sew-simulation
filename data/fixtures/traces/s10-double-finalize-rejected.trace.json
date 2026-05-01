@@ -46,7 +46,7 @@
         "to": "0xseller",
         "amount": 500
       },
-      "save-wf-as": "wf0"
+      "save-id-as": "wf0"
     },
     {
       "seq": 1,
@@ -59,7 +59,7 @@
         "amount": 500,
         "custom-resolver": "0xresolver"
       },
-      "save-wf-as": "wf1"
+      "save-id-as": "wf1"
     },
     {
       "seq": 2,

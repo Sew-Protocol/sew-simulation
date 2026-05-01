@@ -37,7 +37,7 @@
       "agent": "buyer",
       "action": "create_escrow",
       "params": { "token": "USDC", "to": "0xseller", "amount": 1000, "custom-resolver": "0xresolver" },
-      "save-wf-as": "wf0"
+      "save-id-as": "wf0"
     },
     {
       "seq": 1,

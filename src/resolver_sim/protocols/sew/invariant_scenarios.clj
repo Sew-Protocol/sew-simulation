@@ -4,7 +4,7 @@
    Each entry in `all-scenarios` is a scenario map accepted by
    resolver-sim.contract-model.replay/replay-scenario.
 
-   Events use :save-wf-as annotations on create_escrow steps and string
+   Events use :save-id-as annotations on create_escrow steps and string
    :workflow-id aliases (e.g. \"wf0\") on subsequent steps.  The replay
    engine resolves aliases lazily in the event loop.
 
@@ -71,7 +71,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "release"
      :params {:workflow-id "wf0"}}]})
 
@@ -91,7 +91,7 @@
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 4000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 2 :time 1120 :agent "resolver" :action "execute_resolution"
@@ -113,7 +113,7 @@
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 4000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 2 :time 1120 :agent "resolver" :action "execute_resolution"
@@ -135,7 +135,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Early attempt → rejected (240 s elapsed, need 300)
@@ -163,7 +163,7 @@
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver votes; creates pending-settlement (deadline = 1120+120 = 1240)
@@ -190,7 +190,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 1500}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "sender_cancel"
      :params {:workflow-id "wf0"}}
     {:seq 2 :time 1120 :agent "seller" :action "recipient_cancel"
@@ -213,7 +213,7 @@
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 3000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Wrong resolver → rejected
@@ -240,7 +240,7 @@
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     ;; Execute-resolution before dispute → rejected
     {:seq 1 :time 1060 :agent "buyer" :action "execute_resolution"
      :params {:workflow-id "wf0" :is-release true :resolution-hash "0xh"}}
@@ -284,15 +284,15 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer0" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 1000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1000 :agent "buyer1" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 2 :time 1000 :agent "buyer2" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 3000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf2"}
+     :save-id-as "wf2"}
     {:seq 3 :time 1060 :agent "buyer0" :action "release"
      :params {:workflow-id "wf0"}}
     {:seq 4 :time 1060 :agent "buyer1" :action "raise_dispute"
@@ -321,12 +321,12 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 500}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     ;; resolver acts as buyer for wf1 (creates to seller2, sets itself as resolver)
     {:seq 1 :time 1000 :agent "resolver" :action "create_escrow"
      :params {:token "USDC" :to "0xseller2" :amount 500
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 2 :time 1060 :agent "buyer" :action "release"
      :params {:workflow-id "wf0"}}
     {:seq 3 :time 1060 :agent "resolver" :action "raise_dispute"
@@ -359,7 +359,7 @@
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 1
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 2 :time 1120 :agent "resolver" :action "execute_resolution"
@@ -381,7 +381,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 10000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "release"
      :params {:workflow-id "wf0"}}]})
 
@@ -395,7 +395,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 10000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "release"
      :params {:workflow-id "wf0"}}]})
 
@@ -417,7 +417,7 @@
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Refund vote; creates pending-settlement (deadline = 1120+120 = 1240)
@@ -446,7 +446,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 2 :time 1120 :agent "resolver" :action "execute_resolution"
@@ -468,7 +468,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Module rejects 0xbadresolver → revert
@@ -492,7 +492,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "release"
      :params {:workflow-id "wf0"}}]})
 
@@ -512,7 +512,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 1000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Early → rejected
@@ -537,7 +537,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Kleros module authorizes 0xl0 at level 0 → finalized immediately
@@ -562,7 +562,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Escalation before any resolution → rejected (:no-resolution-to-appeal)
@@ -594,7 +594,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Three escalation attempts, all rejected (:no-resolution-to-appeal)
@@ -628,7 +628,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 resolves → creates pending (deadline = 1120+60 = 1180)
@@ -662,7 +662,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     ;; Seller agrees to cancel (sets recipient :agree-to-cancel, state stays :pending)
     {:seq 1 :time 1000 :agent "seller" :action "recipient_cancel"
      :params {:workflow-id "wf0"}}
@@ -690,7 +690,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Seller attempts preemptive escalation → rejected (:no-resolution-to-appeal)
@@ -737,13 +737,13 @@
      :params {:amount 3000}}
     {:seq 1 :time 1000 :agent "buyer0" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 2 :time 1000 :agent "buyer1" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 3 :time 1000 :agent "buyer2" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000}
-     :save-wf-as "wf2"}
+     :save-id-as "wf2"}
     {:seq 4 :time 1060 :agent "buyer0" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 5 :time 1060 :agent "buyer1" :action "raise_dispute"
@@ -809,7 +809,7 @@
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 8000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver submits decision → pending (deadline = 1120+120 = 1240)
@@ -874,7 +874,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules in favour of seller (release). Pending deadline = 1120+60 = 1180.
@@ -931,7 +931,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules release (buyer loses). Pending deadline = 1120+60 = 1180.
@@ -990,7 +990,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules release. Pending deadline = 1120+60 = 1180.
@@ -1043,7 +1043,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules refund (buyer wins). Pending deadline = 1120+60 = 1180.
@@ -1102,7 +1102,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules release (buyer loses). Pending deadline = 1120+60 = 1180.
@@ -1165,7 +1165,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules release (buyer loses). Pending deadline = 1120+60 = 1180.
@@ -1235,7 +1235,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules release (buyer loses). Pending deadline = 1120+60 = 1180.
@@ -1304,10 +1304,10 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer0" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1000 :agent "buyer1" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 4000}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 2 :time 1060 :agent "buyer0" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 3 :time 1060 :agent "buyer1" :action "raise_dispute"
@@ -1373,7 +1373,7 @@
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 8000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver submits decision → pending (deadline = 1120+120 = 1240)
@@ -1433,7 +1433,7 @@
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 8000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver submits decision → pending (deadline = 1120+120 = 1240)
@@ -1498,7 +1498,7 @@
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 8000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver submits decision → pending (deadline = 1120+120 = 1240)
@@ -1568,11 +1568,11 @@
    [{:seq 0 :time 1000 :agent "buyer0" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 8000
               :custom-resolver "0xresolver0"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1000 :agent "buyer1" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000
               :custom-resolver "0xresolver1"}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 2 :time 1060 :agent "buyer0" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 3 :time 1060 :agent "buyer1" :action "raise_dispute"
@@ -1642,7 +1642,7 @@
     {:seq 2 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 3 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 4 :time 1120 :agent "resolver" :action "execute_resolution"
@@ -1709,7 +1709,7 @@
     {:seq 1 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 2 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 3 :time 1120 :agent "resolver" :action "execute_resolution"
@@ -1755,7 +1755,7 @@
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 resolves with release → pending settlement, deadline = 1120+60 = 1180

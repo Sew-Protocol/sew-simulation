@@ -67,4 +67,48 @@
      action     — the action string that was dispatched
      result-kw  — :ok, :rejected, or :invariant-violated
      The map is stored verbatim as :trace-metadata in each trace entry.
-     Return nil for protocols that do not produce transition metadata."))
+     Return nil for protocols that do not produce transition metadata.")
+
+  (resolve-id-alias [protocol event id-alias-map]
+    "Resolve any ID alias in the event params to its integer ID.
+     id-alias-map — {alias-string → integer-id}
+
+     Called by the replay engine before dispatching each event.  The protocol
+     inspects the event params and, if an alias pattern is present, resolves it:
+       - If the alias is in id-alias-map → return {:ok true :event event'}
+         where event' has the alias replaced with the integer ID.
+       - If an alias pattern is present but not in id-alias-map → return
+         {:ok false :error :unresolved-alias :alias str :seq n}.
+       - If no alias is present → return {:ok true :event event} unchanged.
+
+     Protocols that do not use ID aliases should return {:ok true :event event}.")
+
+  (created-id [protocol action extra]
+    "If action just created a new tracked entity and succeeded, return its
+     integer ID from the extra map (as returned by dispatch-action), else nil.
+     Used by the replay engine to populate the id-alias-map after a successful
+     create event annotated with :save-id-as.
+
+     Protocols that do not assign integer IDs to created entities return nil.")
+
+  (open-disputes [protocol world]
+    "Return a seq of entity IDs that are still open/unresolved at end of scenario.
+     The replay engine calls this after the event loop when :allow-open-disputes?
+     is not set, to detect incomplete runs.
+     Return empty seq (or nil) when all entities have reached a terminal state.")
+
+  (classify-event [protocol event result-kw error-kw]
+    "Return a set of canonical metric tags for the completed event.
+     event      — the full event map {:action :params ...} that was dispatched
+     result-kw  — :ok, :rejected, or :invariant-violated
+     error-kw   — error keyword when result-kw is :rejected, else nil
+
+     Canonical tags recognised by the replay engine's accum-metrics:
+       :entity-created           accepted create action → :total-escrows, :total-volume
+       :dispute-raised           accepted raise action  → :disputes-triggered
+       :dispute-resolved         accepted resolve action → :resolutions-executed
+       :settlement-executed      accepted settle action → :pending-settlements-executed
+       :invalid-state-transition rejected with a state-logic error → :invalid-state-transitions
+
+     Return #{} for untagged events.
+     Protocols that do not produce lifecycle metrics should always return #{}.") )

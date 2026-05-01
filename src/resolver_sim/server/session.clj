@@ -15,8 +15,9 @@
      - Clojure is the sole authority: no state lives outside this store.
 
    Layering: server/* may import contract_model/*.  Must NOT import db/* or io/*."
-  (:require [resolver-sim.protocols.sew.types  :as t]
-            [resolver-sim.contract-model.replay :as replay])
+  (:require [resolver-sim.protocols.protocol        :as engine]
+            [resolver-sim.protocols.sew             :as sew]
+            [resolver-sim.contract-model.replay     :as replay])
   (:import [java.util.concurrent.locks ReentrantLock]))
 
 ;; ---------------------------------------------------------------------------
@@ -94,8 +95,8 @@
         validation (replay/validate-agents agent-list)]
     (if-not (:ok validation)
       validation
-      (let [context (replay/build-context agent-list params)
-            world0  (t/empty-world initial-block-time)
+      (let [context (engine/build-execution-context sew/protocol agent-list params)
+            world0  (engine/init-world sew/protocol {:initial-block-time initial-block-time})
             session {:world      world0
                      :context    context
                      :lock       (ReentrantLock.)
@@ -143,7 +144,7 @@
               (let [world   (:world current)
                     context (:context session)
                     evt     (keywordize event)
-                    step    (replay/process-step context world evt)]
+                    step    (replay/process-step sew/protocol context world evt)]
                 ;; Guard: only write back if the session still exists.
                 ;; Prevents resurrection of a partially-structured map when
                 ;; a destroy races with the tail of a step.

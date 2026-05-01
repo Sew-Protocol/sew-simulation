@@ -45,7 +45,7 @@
         "amount": 6000,
         "custom-resolver": "0xresolver"
       },
-      "save-wf-as": "wf0"
+      "save-id-as": "wf0"
     },
     {
       "seq": 1,

@@ -57,7 +57,7 @@
    :events
    [{:seq 0 :time 1001 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 100000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 2000 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver absent — no execute_resolution step.
@@ -82,7 +82,7 @@
    :events
    [{:seq 0 :time 1001 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 100000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 2000 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver cancels (false positive: should have released)
@@ -109,7 +109,7 @@
    ;; Escrow A
    [{:seq 0 :time 1001 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 100000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 2000 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver acts on escrow A (false positive cancel)
@@ -120,7 +120,7 @@
     ;; Escrow B — resolver exits; times out
     {:seq 4 :time 175900 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 80000}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 5 :time 176000 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf1"}}
     ;; Resolver absent for wf1; auto-cancel after 90 days from dispute raise
@@ -143,13 +143,13 @@
    ;; All three escrows created
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 100000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1010 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 50000}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 2 :time 1020 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 75000}
-     :save-wf-as "wf2"}
+     :save-id-as "wf2"}
     ;; All three disputed
     {:seq 3 :time 2000 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}

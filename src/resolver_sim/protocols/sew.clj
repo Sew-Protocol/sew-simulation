@@ -319,6 +319,16 @@
    :resolver-stakes     (:resolver-stakes world)
    :bond-distribution   (:bond-distribution world)})
 
+;; SEW-specific error codes that indicate a state-logic failure (as opposed to
+;; authorisation or parameter failures).  Used by classify-event to tag events
+;; for the :invalid-state-transitions metric.
+(def ^:private sew-state-error-codes
+  #{:transfer-not-pending
+    :transfer-not-in-dispute
+    :invalid-state-for-release
+    :invalid-state-for-refund
+    :resolution-without-settlement})
+
 ;; ---------------------------------------------------------------------------
 ;; SEWProtocol Implementation
 ;; ---------------------------------------------------------------------------
@@ -376,6 +386,34 @@
   (classify-transition [_ action result-kw]
     {:transition/type (meta/transition-type action)
      :effect/type     (meta/effect-type result-kw)
-     :resolution/path (meta/resolution-path action)}))
+     :resolution/path (meta/resolution-path action)})
+
+  (resolve-id-alias [_ event id-alias-map]
+    (let [wf-val (get-in event [:params :workflow-id])]
+      (if (string? wf-val)
+        (if-let [int-id (get id-alias-map wf-val)]
+          {:ok true :event (assoc-in event [:params :workflow-id] int-id)}
+          {:ok false :error :unresolved-alias :alias wf-val :seq (:seq event)})
+        {:ok true :event event})))
+
+  (created-id [_ action extra]
+    (when (= action "create_escrow")
+      (:workflow-id extra)))
+
+  (open-disputes [_ world]
+    (vec (for [[wf et] (:escrow-transfers world)
+               :when (= :disputed (:escrow-state et))]
+           wf)))
+
+  (classify-event [_ event result-kw error-kw]
+    (let [action    (:action event)
+          accepted? (= result-kw :ok)]
+      (cond-> #{}
+        (and accepted? (= action "create_escrow"))           (conj :entity-created)
+        (and accepted? (= action "raise_dispute"))           (conj :dispute-raised)
+        (and accepted? (= action "execute_resolution"))      (conj :dispute-resolved)
+        (and accepted? (= action "execute_pending_settlement")) (conj :settlement-executed)
+        (and (= result-kw :rejected)
+             (contains? sew-state-error-codes error-kw))    (conj :invalid-state-transition)))))
 
 (def protocol (SEWProtocol.))

@@ -81,7 +81,7 @@
 
 (defn- step->forge-step
   "Convert one replay trace entry into a CDRS-compliant Forge trace step."
-  [entry prev-proj scenario-events wf-alias-map token-sym]
+  [entry prev-proj scenario-events id-alias-map token-sym]
   (let [seq-n    (:seq entry)
         action   (:action entry)
         result   (:result entry)
@@ -102,10 +102,10 @@
                    (= action "create_escrow") (get-in entry [:extra :workflow-id])
                    :else (let [raw-wf-id (or (get-in raw-evt [:params :workflow-id])
                                             (get-in raw-evt [:params :workflow_id]))]
-                           (if (string? raw-wf-id) (get wf-alias-map raw-wf-id) raw-wf-id)))
+                           (if (string? raw-wf-id) (get id-alias-map raw-wf-id) raw-wf-id)))
 
-        save-wf-as (:save-wf-as raw-evt)
-        wf-alias   (or (some (fn [[k v]] (when (= v wf-id) k)) wf-alias-map)
+        _save-id-as (:save-id-as raw-evt)
+        wf-alias   (or (some (fn [[k v]] (when (= v wf-id) k)) id-alias-map)
                        (when wf-id (str "wf" wf-id)))
 
         expected-raw (projection->expected proj (or wf-id 0) token-sym)
@@ -148,14 +148,14 @@
   (let [trace       (:trace result)
         events      (:events scenario)
         last-world  (:world (last trace))
-        ;; Build a wf-alias-map by scanning trace for create_escrow :ok entries
-        wf-alias-map
+        ;; Build an id-alias-map by scanning trace for create_escrow :ok entries
+        id-alias-map
         (reduce (fn [m entry]
                   (let [raw (->> events (filter #(= (:seq %) (:seq entry))) first)]
                     (if (and (= (:action entry) "create_escrow")
                              (= (:result entry) :ok)
-                             (:save-wf-as raw))
-                      (assoc m (:save-wf-as raw) (get-in entry [:extra :workflow-id]))
+                             (:save-id-as raw))
+                      (assoc m (:save-id-as raw) (get-in entry [:extra :workflow-id]))
                       m)))
                 {}
                 trace)
@@ -166,7 +166,7 @@
                 (if (empty? entries)
                   acc
                   (let [entry (first entries)
-                        step  (step->forge-step entry prev-proj events wf-alias-map token-sym)]
+                        step  (step->forge-step entry prev-proj events id-alias-map token-sym)]
                     (recur (rest entries) (:projection entry) (conj acc step)))))]
     {:cdrs_version   "0.1"
      :schema_version "1"
@@ -176,7 +176,7 @@
      :step_count     (count steps)
      :steps          steps
      ;; Resolution summary for all escrows in the trace
-     :resolutions    (into {} (for [[alias id] wf-alias-map]
+     :resolutions    (into {} (for [[alias id] id-alias-map]
                                 [alias (meta/resolution-semantics last-world id)]))}))
 
 ;; ---------------------------------------------------------------------------
