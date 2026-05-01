@@ -1,0 +1,93 @@
+{
+  "id": "scenarios/eq-v10-incentive-compat-fail-attack-success",
+  "scenario-id": "eq-v10-incentive-compat-fail-attack-success",
+  "title": "Incentive Compatibility \u2014 FAIL (adversarial event succeeds)",
+  "description": "An adversarial buyer marks a valid raise_dispute call as adversarial. Since the dispute succeeds, attack-successes = 1, causing incentive-compatibility to return :fail. This demonstrates that adversarial actions reaching a profitable outcome falsify the compatibility claim. Not in normal suite \u2014 verified via unit tests.",
+  "purpose": "regression",
+  "_validator-test-note": "This trace produces mechanism-status :fail. Verified via equilibrium unit tests, not fixture suite.",
+  "schema-version": "1.1",
+  "initial-block-time": 1000,
+  "threat-tags": [
+    "adversarial-deviation"
+  ],
+  "agents": [
+    {
+      "id": "buyer",
+      "address": "0xbuyer",
+      "role": "buyer",
+      "strategy": "adversarial"
+    },
+    {
+      "id": "seller",
+      "address": "0xseller",
+      "role": "seller",
+      "strategy": "honest"
+    },
+    {
+      "id": "resolver",
+      "address": "0xresolver",
+      "role": "resolver",
+      "strategy": "honest"
+    }
+  ],
+  "theory": {
+    "claim-id": "claims/eq-incentive-compat-fail",
+    "claim": "An adversarial action that succeeds (attack-successes > 0) falsifies incentive-compatibility.",
+    "mechanism-properties": [
+      "incentive-compatibility"
+    ],
+    "falsifies-if": [],
+    "assumptions": []
+  },
+  "expectations": {
+    "terminal": [
+      {
+        "path": [
+          "live-states",
+          0
+        ],
+        "equals": "disputed"
+      }
+    ],
+    "metrics": [
+      {
+        "name": "attack-attempts",
+        "op": ":=",
+        "value": 1
+      },
+      {
+        "name": "attack-successes",
+        "op": ":=",
+        "value": 1
+      }
+    ]
+  },
+  "allow-open-disputes?": true,
+  "_allow-open-disputes-reason": "Dispute intentionally left open to isolate the incentive-compat fail case.",
+  "events": [
+    {
+      "seq": 0,
+      "time": 1000,
+      "agent": "buyer",
+      "action": "create_escrow",
+      "params": {
+        "token": "USDC",
+        "to": "0xseller",
+        "amount": 4000,
+        "custom-resolver": "0xresolver"
+      },
+      "save-id-as": "wf0"
+    },
+    {
+      "seq": 1,
+      "time": 1100,
+      "agent": "buyer",
+      "action": "raise_dispute",
+      "adversarial?": true,
+      "_note": "Valid buyer action, marked adversarial. Succeeds \u2192 attack-successes = 1 \u2192 incentive-compat FAIL.",
+      "params": {
+        "workflow-id": "wf0"
+      }
+    }
+  ]
+}

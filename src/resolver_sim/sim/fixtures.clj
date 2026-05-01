@@ -250,15 +250,25 @@
                       ;; - claim was not falsified (:not-falsified)
                       ;; - claim was falsified AND the scenario is explicitly a theory-falsification exercise
                       ;; :inconclusive is treated as a soft warning, not a hard failure
-                      (let [status  (get-in r [:theory :status])
-                            purpose (keyword (or (:purpose r) ""))]
-                        (case status
-                          nil            true
-                          :not-evaluated true
-                          :not-falsified true
-                          :falsified     (= purpose :theory-falsification)
-                          :inconclusive  true
-                          true)))
+                      ;;
+                      ;; Mechanism-property and equilibrium-concept results (CDRS v1.1):
+                      ;; - :fail → hard failure (same severity as expectations failure)
+                      ;; - :inconclusive / :not-applicable → soft warning (suite still passes)
+                      ;; - :not-checked → no properties declared; passes
+                      (let [status       (get-in r [:theory :status])
+                            purpose      (keyword (or (:purpose r) ""))
+                            mech-status  (get-in r [:theory :mechanism-status] :not-checked)
+                            eq-status    (get-in r [:theory :equilibrium-status] :not-checked)
+                            falsify-ok?  (case status
+                                           nil            true
+                                           :not-evaluated true
+                                           :not-falsified true
+                                           :falsified     (= purpose :theory-falsification)
+                                           :inconclusive  true
+                                           true)
+                            mech-ok?     (not= mech-status :fail)
+                            eq-ok?       (not= eq-status :fail)]
+                        (and falsify-ok? mech-ok? eq-ok?)))
          all-ok? (every? (fn [r] (and (= :pass (:outcome r))
                                       (:ok? (:threshold-validation r))
                                       (or (nil? (:expectations r)) (:ok? (:expectations r)))

@@ -174,9 +174,14 @@
       {:ok false :error :theory-missing-assumptions
        :detail ":theory must include an :assumptions vector (may be empty)"}
 
-      (and (:theory scenario) (not (seq (get-in scenario [:theory :falsifies-if]))))
+      ;; :falsifies-if may be absent or empty ONLY when mechanism-properties or
+      ;; equilibrium-concept are declared (mechanism-only theory blocks are valid).
+      (and (:theory scenario)
+           (not (seq (get-in scenario [:theory :falsifies-if])))
+           (empty? (get-in scenario [:theory :mechanism-properties]))
+           (empty? (get-in scenario [:theory :equilibrium-concept])))
       {:ok false :error :theory-missing-falsifies-if
-       :detail ":theory must include a non-empty :falsifies-if vector"}
+       :detail ":theory must include a non-empty :falsifies-if vector, or declare :mechanism-properties / :equilibrium-concept"}
 
       (not (:ok agent-check))
       agent-check

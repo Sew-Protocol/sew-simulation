@@ -13,13 +13,16 @@
      :assumptions    — vector of keywords; recorded but not programmatically
                        enforced (used for documentation and future constraint
                        checking).
+     :mechanism-properties — e.g. [:budget-balance :incentive-compatibility];
+                       evaluated as terminal trace proxy validations.
+     :equilibrium-concept  — e.g. [:dominant-strategy-equilibrium];
+                       evaluated as terminal trace proxy validations.
 
    METADATA (present in schema, recorded but not evaluated):
      :claim          — human-readable claim text; passed through to output.
+     :claim-strength — e.g. :single-trace-falsification; passed through.
      :game-class     — e.g. :repeated-stochastic-game; reserved for future
                        game-theoretic classification.
-     :equilibrium-concept — e.g. [:subgame-perfect-equilibrium]; reserved.
-     :mechanism-properties — e.g. [:incentive-compatibility]; reserved.
      :threat-model   — vector of threat actor descriptions; reserved.
 
    IGNORED (present in payoff-model, not evaluated here):
@@ -30,7 +33,8 @@
 
    See: docs/CDRS-v1.1-THEORY-SCHEMA.md for comprehensive field inventory,
    validation rules, examples by purpose, and future extensions."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [resolver-sim.scenario.equilibrium :as equilibrium]))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared value helpers (also used by scenario.expectations)
@@ -94,27 +98,41 @@
 ;;   :claim-id               ACTIVE      Yes — included in evidence output
 ;;   :assumptions            ACTIVE      No  — recorded in schema; not enforced here
 ;;   :falsifies-if           ACTIVE      Yes — core falsification logic
+;;   :mechanism-properties   ACTIVE      Yes — delegated to scenario.equilibrium
+;;   :equilibrium-concept    ACTIVE      Yes — delegated to scenario.equilibrium
 ;;   :claim                  METADATA    No  — human-readable text; passed through
+;;   :claim-strength         METADATA    No  — claim-strength label; passed through
 ;;   :game-class             RESERVED    No  — future game-theoretic classification
-;;   :equilibrium-concept    RESERVED    No  — future equilibrium validation
-;;   :mechanism-properties   RESERVED    No  — future mechanism property checks
 ;;   :threat-model           RESERVED    No  — documentation only
 ;;
 ;;   :payoff-model/*         IGNORED     No  — belongs to multi-epoch layer, not here
 ;;
-;; If you add :game-class or :equilibrium-concept to a scenario, those fields
-;; will be accepted and stored but will not affect evaluation results.
+;; If you add :game-class to a scenario, those fields will be accepted and
+;; stored but will not affect evaluation results.
 ;; To make them actionable, extend this function and update the docs.
+;;
+;; :mechanism-properties and :equilibrium-concept are now evaluated as terminal
+;; trace proxy validations via scenario.equilibrium/evaluate-equilibrium.
+;; Results are merged into the returned map as :mechanism-results,
+;; :mechanism-status, :equilibrium-results, :equilibrium-status.
 ;;
 ;; See: docs/CDRS-v1.1-THEORY-SCHEMA.md for the full schema reference.
 ;; ---------------------------------------------------------------------------
 
 (defn evaluate-theory
-  "Determine if a theoretical claim is falsified by observed metrics.
-   Returns {:status kw :falsified? bool :evidence [v-map]}.
+  "Determine if a theoretical claim is falsified by observed metrics, and
+   whether the terminal trace is consistent with declared mechanism properties
+   and equilibrium concepts.
 
-   Fields consumed from the theory map: :claim-id, :falsifies-if.
-   All other theory fields (see comment block above) are accepted but not evaluated.
+   Returns:
+   {:status kw :falsified? bool :evidence [v-map]
+    :mechanism-results  {property-kw → result-map}    ; when declared
+    :mechanism-status   :pass|:fail|:inconclusive|:not-checked
+    :equilibrium-results {concept-kw → result-map}   ; when declared
+    :equilibrium-status  :pass|:fail|:inconclusive|:not-checked}
+
+   Fields consumed from the theory map: :claim-id, :falsifies-if,
+   :mechanism-properties, :equilibrium-concept.
 
    :status is one of:
      :not-evaluated  — no theory block provided
@@ -123,19 +141,39 @@
      :inconclusive   — none of the tracked metrics were present in the result"
   [result theory]
   (if (nil? theory)
-    {:status :not-evaluated :falsified? false :evidence []}
+    {:status              :not-evaluated
+     :falsified?          false
+     :evidence            []
+     :mechanism-results   {}
+     :mechanism-status    :not-checked
+     :equilibrium-results {}
+     :equilibrium-status  :not-checked}
     (let [metrics  (:metrics result)
-          conds    (:falsifies-if theory)
-          all-nil? (every? #(nil? (get metrics (to-kw (:metric %)))) conds)
+          conds    (:falsifies-if theory [])
+          all-nil? (and (seq conds)
+                        (every? #(nil? (get metrics (to-kw (:metric %)))) conds))
           falsified (atom [])]
       (doseq [f conds]
         (let [actual (get metrics (to-kw (:metric f)))]
           (when (evaluate-metric-op (:op f) actual (:value f))
             (swap! falsified conj {:metric (:metric f) :op (:op f) :value (:value f) :actual actual}))))
-      (let [status (cond
-                     (seq @falsified) :falsified
-                     all-nil?         :inconclusive
-                     :else            :not-falsified)]
-        {:status     status
-         :falsified? (= status :falsified)
-         :evidence   @falsified}))))
+      (let [falsify-status (cond
+                             (seq @falsified) :falsified
+                             all-nil?         :inconclusive
+                             :else            :not-falsified)
+            eq-result (when (or (seq (:mechanism-properties theory))
+                                (seq (:equilibrium-concept theory)))
+                        (equilibrium/evaluate-equilibrium theory result))]
+        (merge
+         {:status     falsify-status
+          :falsified? (= falsify-status :falsified)
+          :evidence   @falsified}
+         (if eq-result
+           {:mechanism-results  (:mechanism-results eq-result)
+            :mechanism-status   (:mechanism-status eq-result)
+            :equilibrium-results (:equilibrium-results eq-result)
+            :equilibrium-status  (:equilibrium-status eq-result)}
+           {:mechanism-results   {}
+            :mechanism-status    :not-checked
+            :equilibrium-results {}
+            :equilibrium-status  :not-checked}))))))
