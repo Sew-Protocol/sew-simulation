@@ -189,7 +189,7 @@
           honest-ids     ["h1" "h2" "h3" "h4" "h5" "h6"]
           strategic-ids  ["s1" "s2" "s3" "s4"]
           [route-rng _]  (rng/split-rng (rng/make-rng 555))
-          result (router/route-epoch honest-ids strategic-ids trials
+          result (router/route-epoch honest-ids strategic-ids trials trials
                                      router/uniform-random route-rng)]
       ;; route-epoch asserts internally — if no exception, conservation holds
       (is (map? (:honest-attribution result)))

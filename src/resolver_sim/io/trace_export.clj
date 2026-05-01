@@ -252,7 +252,7 @@
 
 (defn- step->forge-step
   "Convert one replay trace entry into a CDRS-compliant Forge trace step."
-  [entry prev-proj scenario-events id-alias-map token-sym]
+  [entry prev-proj scenario-events id-alias-map token-sym addr->agent-id]
   (let [seq-n    (:seq entry)
         action   (:action entry)
         result   (:result entry)
@@ -265,8 +265,9 @@
 
         params   (case action
                    "create_escrow"
-                   {:to_role  (get-in raw-evt [:params :to] "seller")
-                    :amount   (get-in raw-evt [:params :amount] 0)}
+                   (let [raw-to (get-in raw-evt [:params :to] "seller")]
+                     {:to_role  (get addr->agent-id raw-to raw-to)
+                      :amount   (get-in raw-evt [:params :amount] 0)})
                    {})
 
         wf-id    (cond
@@ -334,6 +335,9 @@
   (let [trace       (:trace result)
         events      (:events scenario)
         last-world  (:world (last trace))
+        ;; Reverse map from simulation address → agent ID (for to_role resolution)
+        addr->agent-id
+        (into {} (map (fn [a] [(:address a) (:id a)]) (:agents scenario [])))
         ;; Build an id-alias-map by scanning trace for entity-create :ok entries.
         ;; Uses :event-tags rather than hardcoding "create_escrow".
         id-alias-map
@@ -352,7 +356,7 @@
                 (if (empty? entries)
                   acc
                   (let [entry (first entries)
-                        step  (step->forge-step entry prev-proj events id-alias-map token-sym)]
+                        step  (step->forge-step entry prev-proj events id-alias-map token-sym addr->agent-id)]
                     (recur (rest entries) (:projection entry) (conj acc step)))))]
     (let [trace-kind         (compute-trace-kind scenario trace)
           expected-semantics (compute-expected-semantics trace scenario last-world id-alias-map)]

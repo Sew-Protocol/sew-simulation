@@ -1,22 +1,29 @@
-(ns migrate-scenarios
-  (:require [resolver-sim.contract-model.invariant-scenarios :as sc]
-            [clojure.data.json :as json]
-            [clojure.java.io :as io]
-            [clojure.string :as str]))
+(require '[clojure.data.json :as json]
+         '[clojure.java.io :as io]
+         '[clojure.string :as str])
 
-(defn- kw->str [k]
-  (if (keyword? k) (name k) (str k)))
+(defn- infer-id [filename]
+  (keyword (str "scenarios/" (str/replace filename #"\.trace\.json$" ""))))
 
-(defn save-scenario [name scenario]
-  (let [filename (str "data/fixtures/traces/" (str/replace (str/lower-case name) #"[\s\W]+" "-") ".trace.json")]
-    (println "Saving" filename)
-    (with-open [w (io/writer filename)]
-      (json/write scenario w :key-fn kw->str :value-fn (fn [k v] (if (keyword? v) (name v) v))))))
+(defn- migrate-file [file]
+  (println "Migrating:" (.getName file))
+  (let [scenario (with-open [r (io/reader file)] (json/read r :key-fn keyword))
+        version (str (:schema-version scenario))]
+    (if (= version "1.0")
+      (let [new-scenario (assoc scenario
+                                :schema-version "1.1"
+                                :id (infer-id (.getName file))
+                                :purpose :regression
+                                :threat-tags [])]
+        (with-open [w (io/writer file)]
+          (json/write new-scenario w :key-fn name :value-fn (fn [k v] (if (keyword? v) (name v) v))))
+        (println "  DONE: Version 1.1 with regression purpose."))
+      (println "  SKIP: Already version" version))))
 
-(doseq [[name entry] sc/all-scenarios]
-  (if (vector? entry)
-    (doseq [sub entry]
-      (save-scenario (:scenario-id sub) sub))
-    (save-scenario name entry)))
+(defn -main []
+  (let [traces-dir (io/file "data/fixtures/traces")]
+    (doseq [f (.listFiles traces-dir)
+            :when (str/ends-with? (.getName f) ".trace.json")]
+      (migrate-file f))))
 
-(println "Migration complete.")
+(-main)
