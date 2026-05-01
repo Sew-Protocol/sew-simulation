@@ -77,7 +77,7 @@ Classification of the game-theoretic model.
 - **Required:** no
 - **Examples:** `:repeated-stochastic-game`, `:sealed-bid-auction`, `:all-pay-auction`
 - **Evaluation:** Reserved for future game-theoretic analysis; not used by current evaluator
-- **Design note:** This field will eventually drive additional statistical checks (e.g., equilibrium convergence analysis).
+- **Design note:** This field drives equilibrium proxy validation — see `:equilibrium-concept` below.
 
 #### `:equilibrium-concept` → vector of keywords (optional)
 
@@ -86,7 +86,7 @@ Expected equilibrium concept(s) for the mechanism.
 - **Type:** `[keyword ...]`
 - **Required:** no
 - **Examples:** `[:subgame-perfect-equilibrium]`, `[:dominant-strategy-equilibrium :bayesian-nash-equilibrium]`
-- **Evaluation:** Reserved for future equilibrium validation; not used by current evaluator
+- **Evaluation:** **ACTIVE** — evaluated by `scenario/equilibrium.clj` as terminal-state proxy checks. See [Equilibrium Proxy Validation](#equilibrium-proxy-validation) below.
 
 #### `:mechanism-properties` → vector of keywords (optional)
 
@@ -95,7 +95,7 @@ Properties the mechanism is claimed to satisfy.
 - **Type:** `[keyword ...]`
 - **Required:** no
 - **Examples:** `[:incentive-compatibility :budget-balance :individual-rationality]`
-- **Evaluation:** Reserved for future mechanism property verification; not used by current evaluator
+- **Evaluation:** **ACTIVE** — evaluated by `scenario/equilibrium.clj` as terminal-state proxy checks. See [Equilibrium Proxy Validation](#equilibrium-proxy-validation) below.
 
 #### `:threat-model` → vector of objects (optional)
 
@@ -435,9 +435,62 @@ All metrics usable in `:expectations/:metrics` and `:theory/:falsifies-if` must 
 |---|---|
 | `:claim` | documentation only |
 | `:game-class` | reserved for future game-theoretic analysis |
-| `:equilibrium-concept` | reserved for equilibrium validation |
-| `:mechanism-properties` | reserved for mechanism property verification |
 | `:threat-model` | documentation only |
+
+### Active Validation Fields
+| Field | Evaluator | Result key | Status values |
+|---|---|---|---|
+| `:mechanism-properties` | `scenario/equilibrium.clj` | `:mechanism-results`, `:mechanism-status` | `:pass` / `:fail` / `:inconclusive` / `:not-applicable` |
+| `:equilibrium-concept` | `scenario/equilibrium.clj` | `:equilibrium-results`, `:equilibrium-status` | `:pass` / `:fail` / `:inconclusive` / `:not-applicable` |
+
+---
+
+## Equilibrium Proxy Validation
+
+These fields activate **trace-end mechanism-property validation**: a lightweight falsification layer that checks whether realised terminal outcomes are consistent with claimed economic properties.
+
+> **Claim strength note:** These are *single-trace proxy checks*, not full game-theoretic proofs.
+> A `:pass` means "the realised trace is consistent with the claimed property." It does not prove equilibrium holds in all strategy profiles. Results are labelled with `:basis :single-trace-falsification` or `:basis :single-trace-terminal-proxy`.
+
+### Mechanism Properties
+
+| Property | Proxy condition | `:inconclusive` when | Severity |
+|---|---|---|---|
+| `:budget-balance` | `total-held[token] == 0` for all tokens, all escrows terminal | non-terminal escrows remain | hard |
+| `:incentive-compatibility` | `resolutions-executed > 0` and `invariant-violations == 0` | no disputes raised | hard |
+| `:individual-rationality` | `invariant-violations == 0` and `attack-successes == 0` | no payoff ledger (always inconclusive in single-trace) | hard |
+| `:collusion-resistance` | `coalition-net-profit <= 0` | coalition metric absent (always inconclusive in single-trace) | hard |
+| `:sybil-resistance` | `unauthorized-resolutions == 0` | metric absent | hard |
+
+### Equilibrium Concepts
+
+| Concept | Proxy condition | `:inconclusive` when | Severity |
+|---|---|---|---|
+| `:dominant-strategy-equilibrium` | `invariant-violations == 0` and `attack-successes == 0` | no adversarial events in trace | hard |
+| `:nash-equilibrium` | `attack-successes == 0` and `invariant-violations == 0` | no attack metrics | hard |
+| `:subgame-perfect-equilibrium` | — | **always inconclusive** for single-trace | soft |
+| `:bayesian-nash-equilibrium` | — | **always inconclusive** for single-trace | soft |
+
+### Status Semantics
+
+| Status | Meaning | Suite behaviour |
+|---|---|---|
+| `:pass` | Trace terminal state consistent with claimed property | passes |
+| `:fail` | Observed violation of claimed property | **hard failure** |
+| `:inconclusive` | Required evidence absent; cannot falsify or confirm | soft warning |
+| `:not-applicable` | Property does not apply to this trace (e.g. no escrows) | passes |
+| `:not-checked` | No properties declared in theory block | passes |
+
+### evaluate-theory Output Keys
+
+When `:mechanism-properties` or `:equilibrium-concept` are declared, `evaluate-theory` returns:
+
+```clojure
+{:mechanism-results  {<property-kw> {:property kw :status kw :severity kw :observed ... :expected ... :basis ...}}
+ :mechanism-status   :pass | :fail | :inconclusive | :not-applicable | :not-checked
+ :equilibrium-results {<concept-kw> {:property kw :status kw ...}}
+ :equilibrium-status  :pass | :fail | :inconclusive | :not-applicable | :not-checked}
+```
 
 ---
 
