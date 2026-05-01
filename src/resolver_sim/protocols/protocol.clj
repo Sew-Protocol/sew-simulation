@@ -66,7 +66,11 @@
     "Return a :trace-metadata map for a completed transition, or nil.
      action     — the action string that was dispatched
      result-kw  — :ok, :rejected, or :invariant-violated
-     The map is stored verbatim as :trace-metadata in each trace entry.
+     Canonical fields produced by SEWProtocol:
+       :transition/type  — semantic action category (see trace-metadata/transition-types)
+       :resolution/path  — resolution route, or :resolution/none
+     Note: :effect/type is intentionally absent — accounting effects depend on
+     world state at resolution time and cannot be derived from action name alone.
      Return nil for protocols that do not produce transition metadata.")
 
   (resolve-id-alias [protocol event id-alias-map]

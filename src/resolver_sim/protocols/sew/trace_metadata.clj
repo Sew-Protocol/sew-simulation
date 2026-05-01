@@ -349,7 +349,11 @@
 ;; ---------------------------------------------------------------------------
 
 (defn effect-type
-  "Map a step result keyword to its :effect/type keyword."
+  "DEPRECATED — no longer called by classify-transition.
+   :effect/type was removed from trace-metadata because accounting effects
+   cannot be correctly derived from action name alone (e.g. execute_resolution
+   can release, refund, or create a pending settlement depending on world state).
+   Retained here as vocabulary reference; do not call from new code."
   [result-kw]
   (case result-kw
     :ok                 :effect/state-change

@@ -148,12 +148,12 @@
   (let [trace       (:trace result)
         events      (:events scenario)
         last-world  (:world (last trace))
-        ;; Build an id-alias-map by scanning trace for create_escrow :ok entries
+        ;; Build an id-alias-map by scanning trace for entity-create :ok entries.
+        ;; Uses :event-tags rather than hardcoding "create_escrow".
         id-alias-map
         (reduce (fn [m entry]
                   (let [raw (->> events (filter #(= (:seq %) (:seq entry))) first)]
-                    (if (and (= (:action entry) "create_escrow")
-                             (= (:result entry) :ok)
+                    (if (and (contains? (:event-tags entry) :entity-created)
                              (:save-id-as raw))
                       (assoc m (:save-id-as raw) (get-in entry [:extra :workflow-id]))
                       m)))

@@ -385,7 +385,6 @@
 
   (classify-transition [_ action result-kw]
     {:transition/type (meta/transition-type action)
-     :effect/type     (meta/effect-type result-kw)
      :resolution/path (meta/resolution-path action)})
 
   (resolve-id-alias [_ event id-alias-map]

@@ -247,7 +247,7 @@
   (let [held (:total-held world {})]
     (if (map? held) (apply + (vals held)) 0)))
 
-(defn- accum-metrics [protocol metrics event trace-entry agent-index world-before]
+(defn- accum-metrics [metrics event trace-entry agent-index world-before]
   (let [result-kw (:result trace-entry)
         error-kw  (:error trace-entry)
         accepted? (= result-kw :ok)
@@ -259,7 +259,7 @@
         ;; legitimate accepted actions by the same agent).
         attack?   (or (:adversarial? event)
                       (= "attacker" (:type agent)))
-        tags      (engine/classify-event protocol event result-kw error-kw)
+        tags      (:event-tags trace-entry)
         ;; double-settlements: a second accepted lifecycle-ending action on what
         ;; is (for single-escrow scenarios) already a resolved/settled workflow.
         ;; Uses aggregate resolutions-executed as a proxy — imprecise for
@@ -336,7 +336,8 @@
   (let [event-time (:time event)
         now        (:block-time world)]
     (if (< event-time now)
-      (let [[proj proj-hash] (engine/compute-projection protocol world)]
+      (let [[proj proj-hash] (engine/compute-projection protocol world)
+            tags             (engine/classify-event protocol event :rejected :time-regression)]
         {:ok?    true
          :world  world
          :trace-entry {:seq             (:seq event)
@@ -346,6 +347,7 @@
                        :result          :rejected
                        :error           :time-regression
                        :extra           nil
+                       :event-tags      tags
                        :invariants-ok?  true
                        :violations      nil
                        :world           (engine/world-snapshot protocol world)
@@ -370,6 +372,8 @@
                                     (when-not (:ok? inv-trans)  (:violations inv-trans))))]
 
         (let [result-kw    (cond violated? :invariant-violated ok? :ok :else :rejected)
+              error-kw     (when-not ok? (:error result))
+              event-tags   (engine/classify-event protocol event result-kw error-kw)
               final-world  (if violated? world-t world-next)
               [proj ph]    (engine/compute-projection protocol final-world)]
           {:ok?    (and ok? (not violated?))
@@ -380,8 +384,9 @@
             :agent           (:agent event)
             :action          (:action event)
             :result          result-kw
-            :error           (when-not ok? (:error result))
+            :error           error-kw
             :extra           (:extra result)
+            :event-tags      event-tags
             :invariants-ok?  (if ok? (and (:ok? inv-single) (:ok? inv-trans)) true)
             :violations      all-violations
             :trace-metadata  (engine/classify-transition protocol (:action event) result-kw)
@@ -421,7 +426,7 @@
                       step     (process-step protocol context world event)
                       entry    (:trace-entry step)
                       new-trace   (conj trace entry)
-                      new-metrics (accum-metrics protocol metrics event entry agent-index world)
+                      new-metrics (accum-metrics metrics event entry agent-index world)
                       created     (when (and (= :ok (:result entry)) (:save-id-as raw-event))
                                     (engine/created-id protocol (:action event) (:extra entry)))
                       new-alias-map (if created
