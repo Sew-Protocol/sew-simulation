@@ -188,6 +188,8 @@
    Returns nil if session not found."
   [session-id]
   (when-let [s (get @sessions session-id)]
+    ;; :escrow-transfers is SEW-specific world state; intentional here since
+    ;; session.clj is SEW-wired via sew/protocol.
     {:step-count   (:step-count s)
      :block-time   (get-in s [:world :block-time])
      :escrow-count (count (get-in s [:world :escrow-transfers]))}))

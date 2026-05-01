@@ -172,7 +172,7 @@
      :schema_version "1"
      :scenario_id    (:scenario-id result)
      :description    (str "Generated trace: " (:scenario-id result))
-     :fee_bps        (get-in scenario [:protocol-params :escrow-fee-bps] 100)
+     :fee_bps        (get-in scenario [:protocol-params :resolver-fee-bps] 100)
      :step_count     (count steps)
      :steps          steps
      ;; Resolution summary for all escrows in the trace

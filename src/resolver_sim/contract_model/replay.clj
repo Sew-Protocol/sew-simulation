@@ -400,8 +400,8 @@
   (let [validation (validate-scenario scenario)]
     (if-not (:ok validation)
       {:outcome :invalid :scenario-id (:scenario-id scenario) :events-processed 0 :trace [] :metrics (zero-metrics) :halt-reason (:error validation)}
-      (let [agents   (get-in scenario [:metadata :agents] (:agents scenario))
-            p-params (get-in scenario [:metadata :protocol_params] (get scenario :protocol-params {}))
+      (let [agents   (:agents scenario)
+            p-params (get scenario :protocol-params {})
             context  (engine/build-execution-context protocol agents p-params)
             agent-index (:agent-index context)
             world0  (engine/init-world protocol scenario)
