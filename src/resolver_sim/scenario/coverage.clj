@@ -61,9 +61,10 @@
   [dir]
   (let [d (io/file dir)]
     (if (.isDirectory d)
-      (->> (.listFiles d)
+      (->> (file-seq d)
+           (filter #(.isFile %))
            (filter #(str/ends-with? (.getName %) ".trace.json"))
-           (sort-by #(.getName %))
+           (sort-by #(.getPath %))
            (keep read-trace-metadata)
            vec)
       [])))

@@ -4,6 +4,7 @@
 # Usage:
 #   ./scripts/test.sh            # run all suites (unit + invariants + fixtures)
 #   ./scripts/test.sh unit       # Clojure unit tests only
+#   ./scripts/test.sh generators # Generator + equilibrium regression tests (pinned seeds)
 #   ./scripts/test.sh invariants # S01–S41 deterministic invariant scenarios only
 #   ./scripts/test.sh suites     # fixture suite runner (all-invariants + equilibrium-validation)
 #
@@ -40,6 +41,22 @@ run_invariants() {
   return $?
 }
 
+run_generators() {
+  echo "Running generator regression tests (pinned seeds)..."
+  clojure -M:test -e "
+(require '[clojure.test :as t])
+(require '[resolver-sim.generators.equilibrium-test])
+(require '[resolver-sim.generators.fixtures-test])
+(require '[resolver-sim.properties.invariants-test])
+(let [results (t/run-tests
+                'resolver-sim.generators.equilibrium-test
+                'resolver-sim.generators.fixtures-test
+                'resolver-sim.properties.invariants-test)]
+  (when (pos? (+ (:error results) (:fail results)))
+    (System/exit 1)))"
+  return $?
+}
+
 run_suites() {
   echo "Running fixture suites (all-invariants + equilibrium-validation)..."
   clojure -M:test -e "
@@ -64,11 +81,16 @@ case "$MODE" in
   invariants)
     run_invariants || FAILURES=$((FAILURES + 1))
     ;;
+  generators)
+    run_generators || FAILURES=$((FAILURES + 1))
+    ;;
   suites)
     run_suites || FAILURES=$((FAILURES + 1))
     ;;
   all)
     run_unit       || FAILURES=$((FAILURES + 1))
+    echo ""
+    run_generators || FAILURES=$((FAILURES + 1))
     echo ""
     run_invariants || FAILURES=$((FAILURES + 1))
     echo ""
@@ -76,7 +98,7 @@ case "$MODE" in
     ;;
   *)
     echo "Unknown mode: $MODE"
-    echo "Usage: $0 [unit|invariants|suites|all]"
+    echo "Usage: $0 [unit|generators|invariants|suites|all]"
     exit 1
     ;;
 esac

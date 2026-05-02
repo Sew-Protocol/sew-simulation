@@ -46,7 +46,34 @@ from sew_sim.grpc_client import SimulationClient, managed_session
 def load_scenario(path: str | Path) -> dict:
     """Load and parse a scenario JSON file. Keys remain snake_case (as in file)."""
     with open(path) as f:
-        return json.load(f)
+        return _normalize_scenario_keys(json.load(f))
+
+
+def _kebab_to_snake_key(key: Any) -> Any:
+    return key.replace("-", "_") if isinstance(key, str) else key
+
+
+def _normalize_obj_keys(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {_kebab_to_snake_key(k): _normalize_obj_keys(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_normalize_obj_keys(v) for v in value]
+    return value
+
+
+def _normalize_scenario_keys(scenario: dict) -> dict:
+    """
+    Normalize legacy scenario key styles to Python canonical snake_case.
+
+    Supported compatibility transforms:
+      - kebab-case keys -> snake_case recursively
+      - save_wf_as      -> save_id_as
+    """
+    normalized = _normalize_obj_keys(scenario)
+    for ev in normalized.get("events", []):
+        if isinstance(ev, dict) and "save_wf_as" in ev and "save_id_as" not in ev:
+            ev["save_id_as"] = ev.pop("save_wf_as")
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +117,7 @@ class GrpcReplayRunner:
         schema_version == "1.0").
         """
         sid = session_id or str(uuid.uuid4())
+        scenario = _normalize_scenario_keys(scenario)
         scenario_id = scenario.get("scenario_id", "unknown")
         agents = scenario.get("agents", [])
         params = scenario.get("protocol_params", {})
