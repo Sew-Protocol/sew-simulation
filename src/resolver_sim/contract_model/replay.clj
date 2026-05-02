@@ -404,6 +404,8 @@
 ;; Public API (Generic)
 ;; ---------------------------------------------------------------------------
 
+(require '[clojure.tools.logging :as log])
+
 (defn replay-with-protocol
   "Replay a scenario map using a specific DisputeProtocol implementation."
   [protocol scenario]
@@ -415,18 +417,22 @@
             context  (engine/build-execution-context protocol agents p-params)
             agent-index (:agent-index context)
             world0  (engine/init-world protocol scenario)
-            events  (sort-by :seq (:events scenario))]
+            events  (sort-by :seq (:events scenario))
+            scenario-id (:scenario-id scenario)]
+        (log/info :scenario/start {:id scenario-id})
         (loop [world world0 events events trace [] metrics (zero-metrics) id-alias-map {}]
           (if (empty? events)
             (let [open (when-not (:allow-open-disputes? scenario)
                          (seq (engine/open-disputes protocol world)))]
               (if open
-                {:outcome :fail :scenario-id (:scenario-id scenario) :events-processed (count trace) :halt-reason :open-disputes-at-end :detail {:open-disputes (vec open)} :trace trace :metrics metrics}
-                {:outcome :pass :scenario-id (:scenario-id scenario) :events-processed (count trace) :trace trace :metrics metrics}))
+                {:outcome :fail :scenario-id scenario-id :events-processed (count trace) :halt-reason :open-disputes-at-end :detail {:open-disputes (vec open)} :trace trace :metrics metrics}
+                (do
+                  (log/info :scenario/end {:id scenario-id :outcome :pass})
+                  {:outcome :pass :scenario-id scenario-id :events-processed (count trace) :trace trace :metrics metrics})))
             (let [raw-event  (first events)
                   alias-res  (engine/resolve-id-alias protocol raw-event id-alias-map)]
               (if-not (:ok alias-res)
-                {:outcome :invalid :scenario-id (:scenario-id scenario) :events-processed (count trace) :halted-at-seq (:seq raw-event) :halt-reason :unresolved-alias :detail (dissoc alias-res :ok) :trace trace :metrics metrics}
+                {:outcome :invalid :scenario-id scenario-id :events-processed (count trace) :halted-at-seq (:seq raw-event) :halt-reason :unresolved-alias :detail (dissoc alias-res :ok) :trace trace :metrics metrics}
                 (let [event    (:event alias-res)
                       step     (process-step protocol context world event)
                       entry    (:trace-entry step)
@@ -437,8 +443,15 @@
                       new-alias-map (if created
                                       (assoc id-alias-map (:save-id-as raw-event) created)
                                       id-alias-map)]
+                  
+                  ;; Telemetry hook
+                  (tap> {:scenario-id scenario-id :seq (:seq event) :world world :entry entry})
+                  (log/debug :scenario/step {:id scenario-id :seq (:seq event) :action (:action event)})
+
                   (if (:halted? step)
-                    {:outcome :fail :scenario-id (:scenario-id scenario) :events-processed (count new-trace) :halted-at-seq (:seq event) :halt-reason :invariant-violation :trace new-trace :metrics new-metrics}
+                    (do
+                      (log/error :scenario/halt {:id scenario-id :seq (:seq event) :reason :invariant-violation})
+                      {:outcome :fail :scenario-id scenario-id :events-processed (count new-trace) :halted-at-seq (:seq event) :halt-reason :invariant-violation :trace new-trace :metrics new-metrics})
                     (recur (:world step) (rest events) new-trace new-metrics new-alias-map)))))))))))
 
 (defn replay-scenario
