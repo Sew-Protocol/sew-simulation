@@ -233,6 +233,17 @@
                                theory-res (when (:theory trace)
                                             (theory/evaluate-theory res (:theory trace)))]
                            
+                           (when (not= :pass (:outcome res))
+                             (println (str "DEBUG: Trace " (:scenario-id trace) " failed with " (:outcome res) " reason " (:halt-reason res)))
+                             (when (= (:outcome res) :fail)
+                               (let [last-entry (last (:trace res))
+                                     violations (:violations last-entry)]
+                                 (println (str "       Halted at seq " (:seq last-entry) " action " (:action last-entry)))
+                                 (doseq [[inv-kw res-map] violations]
+                                   (when-not (:holds? res-map)
+                                     (println (str "       VIOLATION: " inv-kw " details: " (:violations res-map))))))))
+
+
                            (when (= mode :save) (save-golden-report suite-key {:trace-id (:scenario-id trace) :golden-report report}))
                            {:trace-id (:scenario-id trace)
                             :purpose  (:purpose trace)

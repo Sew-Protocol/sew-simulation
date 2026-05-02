@@ -163,16 +163,20 @@
                              :else            :not-falsified)
             eq-result (when (or (seq (:mechanism-properties theory))
                                 (seq (:equilibrium-concept theory)))
-                        (equilibrium/evaluate-equilibrium theory result))]
+                        (equilibrium/evaluate-equilibrium theory result))
+            spe-result (get-in eq-result [:equilibrium-results :subgame-perfect-equilibrium])]
         (merge
          {:status     falsify-status
           :falsified? (= falsify-status :falsified)
           :evidence   @falsified}
          (if eq-result
-           {:mechanism-results  (:mechanism-results eq-result)
-            :mechanism-status   (:mechanism-status eq-result)
-            :equilibrium-results (:equilibrium-results eq-result)
-            :equilibrium-status  (:equilibrium-status eq-result)}
+           (cond-> {:mechanism-results  (:mechanism-results eq-result)
+                    :mechanism-status   (:mechanism-status eq-result)
+                    :equilibrium-results (:equilibrium-results eq-result)
+                    :equilibrium-status  (:equilibrium-status eq-result)}
+             spe-result (merge {:spe-status     (get-in spe-result [:observed :spe-status] :inconclusive)
+                                :spe-summary    (get-in spe-result [:observed :spe-summary])
+                                :spe-violations (get-in spe-result [:observed :spe-violations] [])}))
            {:mechanism-results   {}
             :mechanism-status    :not-checked
             :equilibrium-results {}

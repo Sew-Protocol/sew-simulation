@@ -59,7 +59,15 @@
 
             ;; Collect actors from trace entries
             actors
-            (into #{} (keep :agent trace))]
+            (into #{} (keep :agent trace))
+
+            ;; Distill decisions for SPE validation
+            decisions (vec (keep (fn [entry]
+                                   (when (contains? #{"raise_dispute" "escalate_dispute" "release"
+                                                      "sender_cancel" "recipient_cancel" "execute_resolution"}
+                                                    (:action entry))
+                                     (select-keys entry [:seq :time :agent :action :extra])))
+                                 trace))]
 
         {:terminal-world
          {:escrows             escrows
@@ -97,4 +105,7 @@
           :dispute-count     (get metrics :disputes-triggered 0)
           :escalation-levels escalation-levels
           :terminal-time     (get world :block-time 0)
-          :halt-reason       (:halt-reason result nil)}}))))
+          :halt-reason       (:halt-reason result nil)}
+
+         :decisions decisions
+         :raw-trace trace}))))

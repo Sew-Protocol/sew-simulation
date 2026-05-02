@@ -57,8 +57,16 @@
                              :fail "✗"
                              "?") " Equilibrium: " (name status)))
       (doseq [[k v] results]
-        (println (str "      - " (name k) ": " (name (:status v))))
-        (when (:note v) (println "        Note:" (:note v)))))))
+        (if (= k :subgame-perfect-equilibrium)
+          (let [obs (:observed v)]
+            (println (str "      - " (name k) ": " (name (:status v))))
+            (when (:spe-summary obs)
+              (println (str "        Summary: " (:spe-summary obs))))
+            (doseq [violation (:spe-violations obs)]
+              (println (str "        ✗ " (:summary violation)))))
+          (do
+            (println (str "      - " (name k) ": " (name (:status v))))
+            (when (:note v) (println "        Note:" (:note v)))))))))
 
 (defn print-suite-results [suite-result]
   (println (str "\nSuite: " (:suite-id suite-result)))

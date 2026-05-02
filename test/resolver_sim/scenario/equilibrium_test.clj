@@ -226,12 +226,71 @@
 ;; SPE / BNE — always :inconclusive
 ;; ---------------------------------------------------------------------------
 
-(deftest test-spe-always-inconclusive
-  (testing "subgame-perfect-equilibrium always returns :inconclusive"
-    (let [proj (projection {:attack-successes 0 :invariant-violations 0})
+(deftest test-subgame-perfect-equilibrium
+  (testing "SPE inconclusive when no strategic decisions made"
+    (let [proj {:raw-trace [{:world {}}] :decisions [] :terminal-world {:terminal? true}}
           result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
                      :subgame-perfect-equilibrium)]
-      (is (= :inconclusive (:status result))))))
+      (is (= :inconclusive (:status result)))
+      (is (= :no-decisions (:basis result)))))
+
+  (testing "SPE inconclusive when trace is not terminal"
+    (let [proj {:raw-trace [{:world {}}]
+                :decisions [{:seq 1 :agent "buyer" :action "escalate_dispute"}]
+                :terminal-world {:terminal? false}}
+          result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
+                     :subgame-perfect-equilibrium)]
+      (is (= :inconclusive (:status result)))
+      (is (= :insufficient-information (:basis result)))))
+
+  (testing "SPE PASS: rational escalation (won after appeal)"
+    (let [proj {:raw-trace [{:world {:claimable {"e1" {"buyer" 0}}}}    ; t=0
+                            {:world {:bond-balances {"e1" {"buyer" 50}}}}  ; t=1 (escalate)
+                            {:world {:claimable {"e1" {"buyer" 150}}}}] ; t=2 (won: escrow 100 + bond 50)
+                :decisions [{:seq 1 :agent "buyer" :action "escalate_dispute"}]
+                :terminal-world {:terminal? true}}
+          result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
+                     :subgame-perfect-equilibrium)]
+      (is (= :pass (:status result)))
+      (is (= 1 (get-in result [:observed :decisions-checked])))
+      (is (= :pass (get-in result [:observed :spe-status])))))
+
+  (testing "SPE FAIL: irrational escalation (lost after appeal)"
+    (let [proj {:raw-trace [{:world {:claimable {"e1" {"buyer" 0}}}}    ; t=0
+                            {:world {:bond-balances {"e1" {"buyer" 50}}}}  ; t=1 (escalate)
+                            {:world {:claimable {"e1" {"buyer" 0}}}}] ; t=2 (lost: bond slashed)
+                :decisions [{:seq 1 :agent "buyer" :action "escalate_dispute"}]
+                :terminal-world {:terminal? true}}
+          result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
+                     :subgame-perfect-equilibrium)]
+      (is (= :fail (:status result)))
+      (is (= 1 (count (get-in result [:observed :spe-violations]))))
+      (is (= 50 (get-in result [:offending 0 :loss])))
+      (is (= :ex-post-regret (get-in result [:offending 0 :class])))))
+
+  (testing "SPE PASS: rational dispute"
+    (let [proj {:raw-trace [{:world {:claimable {"e1" {"seller" 0}}}}
+                            {:world {:claimable {"e1" {"seller" 0}}}}
+                            {:world {:claimable {"e1" {"seller" 100}}}}]
+                :decisions [{:seq 1 :agent "seller" :action "raise_dispute"}]
+                :terminal-world {:terminal? true}}
+          result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
+                     :subgame-perfect-equilibrium)]
+      (is (= :pass (:status result)))))
+
+  (testing "SPE FAIL: multiple violations"
+    (let [proj {:raw-trace [{:world {:claimable {"e1" {"a" 0 "b" 0}}}}
+                            {:world {:bond-balances {"e1" {"a" 10}}}} ; a escalate
+                            {:world {:bond-balances {"e1" {"a" 10 "b" 10}}}} ; b escalate
+                            {:world {:claimable {"e1" {"a" 0 "b" 0}}}}] ; both lost
+                :decisions [{:seq 1 :agent "a" :action "escalate_dispute"}
+                            {:seq 2 :agent "b" :action "escalate_dispute"}]
+                :terminal-world {:terminal? true}}
+          result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
+                     :subgame-perfect-equilibrium)]
+      (is (= :fail (:status result)))
+      (is (= 2 (count (get-in result [:observed :spe-violations])))))))
+
 
 (deftest test-bne-always-inconclusive
   (testing "bayesian-nash-equilibrium always returns :inconclusive"

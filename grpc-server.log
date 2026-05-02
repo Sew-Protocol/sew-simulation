@@ -1,6 +1,3 @@
 nohup: ignoring input
-Syntax error reading source at (resolver_sim/contract_model/replay.clj:432:103).
-Unmatched delimiter: )
-
-Full report at:
-/tmp/clojure-4027772616207107972.edn
+[grpc] SimulationEngine listening on port 7070
+[grpc] Press Ctrl+C to stop.

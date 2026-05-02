@@ -29,6 +29,26 @@
   [world resolver-addr]
   (get-in world [:resolver-stakes resolver-addr] 0))
 
+(defn withdraw-stake
+  "Withdraw stake for a resolver address.
+
+   Guards:
+     - amount must be positive
+     - resolver must have enough stake
+
+   Returns {:ok bool :world world' :error kw}."
+  [world resolver-addr amount]
+  (let [current (get-stake world resolver-addr)]
+    (cond
+      (or (nil? amount) (not (number? amount)) (<= amount 0))
+      (t/fail :invalid-amount)
+
+      (> amount current)
+      (t/fail :insufficient-stake)
+
+      :else
+      (t/ok (update-in world [:resolver-stakes resolver-addr] (fnil - 0) amount)))))
+
 (defn can-handle-escrow?
   "True if the resolver's stake is sufficient for the given escrow amount."
   [world resolver-addr escrow-amount]

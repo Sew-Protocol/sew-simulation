@@ -687,7 +687,45 @@
     (is (= :ok (get-in r [:trace 1 :result])))))
 
 ;; ---------------------------------------------------------------------------
-;; Section 19: Invariant-violation metric tracking
+;; Section 19b: withdraw_stake behavior
+;; ---------------------------------------------------------------------------
+
+(deftest test-withdraw-stake-blocked-during-active-dispute
+  (let [r (replay/replay-scenario
+           (sc :events
+               [{:seq 0 :time 1000 :agent "resolver" :action "register_stake"
+                 :params {:amount 5000}}
+                {:seq 1 :time 1000 :agent "alice" :action "create_escrow"
+                 :params {:token "0xUSDC" :to "0xBob" :amount 3000
+                          :custom-resolver "0xResolver"}}
+                {:seq 2 :time 1001 :agent "bob" :action "raise_dispute"
+                 :params {:workflow-id 0}}
+                {:seq 3 :time 1002 :agent "resolver" :action "withdraw_stake"
+                 :params {:amount 1000}}]))]
+    (is (= :pass (:outcome r)))
+    (is (= :rejected (get-in r [:trace 3 :result])))
+    (is (= :active-disputes-block-withdrawal (get-in r [:trace 3 :error])))))
+
+(deftest test-withdraw-stake-succeeds-after-dispute-resolution
+  (let [r (replay/replay-scenario
+           (sc :params (assoc default-params :appeal-window-duration 0)
+               :events
+               [{:seq 0 :time 1000 :agent "resolver" :action "register_stake"
+                 :params {:amount 5000}}
+                {:seq 1 :time 1000 :agent "alice" :action "create_escrow"
+                 :params {:token "0xUSDC" :to "0xBob" :amount 3000
+                          :custom-resolver "0xResolver"}}
+                {:seq 2 :time 1001 :agent "bob" :action "raise_dispute"
+                 :params {:workflow-id 0}}
+                {:seq 3 :time 1002 :agent "resolver" :action "execute_resolution"
+                 :params {:workflow-id 0 :is-release true}}
+                {:seq 4 :time 1003 :agent "resolver" :action "withdraw_stake"
+                 :params {:amount 1000}}]))]
+    (is (= :pass (:outcome r)))
+    (is (= :ok (get-in r [:trace 4 :result])))))
+
+;; ---------------------------------------------------------------------------
+;; Section 20: Invariant-violation metric tracking
 ;;
 ;; Tests that accum-metrics correctly:
 ;;   a. Increments :invariant-violations for every failing invariant

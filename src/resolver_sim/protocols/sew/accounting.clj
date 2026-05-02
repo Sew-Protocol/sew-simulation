@@ -122,16 +122,15 @@
 (defn post-appeal-bond
   "Record an appeal bond posted by appellant for workflow-id.
    Deducts protocol fee into :bond-fees; records net in :bond-balances.
-
-   snap — ModuleSnapshot map for this workflow (for appeal-bond-protocol-fee-bps)
-   token — bond token address
-   amount — gross bond amount"
+   Also updates :total-held and :total-bonds-posted (cumulative)."
   [world workflow-id appellant snap token amount]
   (let [fee-bps (or (:appeal-bond-protocol-fee-bps snap) 0)
         {:keys [fee net]} (payoffs/calculate-appeal-bond-fee amount fee-bps)]
     (-> world
         (update-in [:bond-balances workflow-id appellant] (fnil + 0) net)
-        (update-in [:bond-fees token] (fnil + 0) fee))))
+        (update-in [:bond-fees token] (fnil + 0) fee)
+        (update-in [:total-bonds-posted token] (fnil + 0) amount)
+        (add-held token amount))))
 
 (defn distribute-slashed-funds
   "Internal: distribute slashed funds according to 50/30/20 split.
@@ -168,12 +167,15 @@
 
 (defn return-bond
   "Return the posted bond to a winning appellant.
-   Clears :bond-balances entry.
+   Clears :bond-balances entry and credits :claimable.
 
    Guard: bond balance must be > 0."
   [world workflow-id appellant]
   (let [amount (get-in world [:bond-balances workflow-id appellant] 0)]
     (if (zero? amount)
       (t/fail :no-bond-to-return)
-      (let [world' (assoc-in world [:bond-balances workflow-id appellant] 0)]
+      (let [world' (-> world
+                       (assoc-in [:bond-balances workflow-id appellant] 0)
+                       (record-claimable workflow-id appellant amount))]
         (assoc (t/ok world') :returned amount)))))
+

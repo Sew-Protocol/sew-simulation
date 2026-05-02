@@ -67,6 +67,14 @@
   (let [et (t/get-transfer world workflow-id)]
     {:allowed? (= caller (:from et)) :reason-code 0}))
 
+(defn- has-active-dispute-for-resolver?
+  [world resolver-addr]
+  (boolean
+   (some (fn [[_ et]]
+           (and (= :disputed (:escrow-state et))
+                (= resolver-addr (:dispute-resolver et))))
+         (:escrow-transfers world))))
+
 ;; ---------------------------------------------------------------------------
 ;; Dispatch (The SEW State Machine Actions)
 ;; ---------------------------------------------------------------------------
@@ -188,6 +196,17 @@
       ar
       (let [amount (get-in event [:params :amount] 0)]
         (t/ok (reg/register-stake world (:address ar) amount))))))
+
+(defmethod apply-action "withdraw_stake"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (let [resolver-addr (:address ar)
+            amount       (get-in event [:params :amount])]
+        (if (has-active-dispute-for-resolver? world resolver-addr)
+          (t/fail :active-disputes-block-withdrawal)
+          (reg/withdraw-stake world resolver-addr amount))))))
 
 (defmethod apply-action "register_resolver_bond"
   [{:keys [agent-index]} world event]
@@ -317,7 +336,9 @@
    :escrow-amounts     (into {} (map (fn [[id et]] [id (:amount-after-fee et)])
                                      (:escrow-transfers world)))
    :resolver-stakes     (:resolver-stakes world)
-   :bond-distribution   (:bond-distribution world)})
+   :bond-distribution   (:bond-distribution world)
+   :claimable           (:claimable world {})
+   :bond-balances       (:bond-balances world {})})
 
 ;; SEW-specific error codes that indicate a state-logic failure (as opposed to
 ;; authorisation or parameter failures).  Used by classify-event to tag events

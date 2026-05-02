@@ -7,5 +7,6 @@
   :suites/timelock-regression {:file "timelock-regression.edn" :title "Timelock regression scenarios" :class :safety :criticality :high}
   :suites/token-pathologies {:file "token-pathologies.edn" :title "Token-based pathologies (FoT/Rebasing)" :class :adversarial :criticality :high}
   :suites/equilibrium-validation {:file "equilibrium-validation.edn" :title "Trace-end mechanism-property and equilibrium-concept validation" :class :safety :criticality :high}
+  :suites/spe-validation {:file "spe-validation.edn" :title "Subgame Perfect Equilibrium (SPE) Proxy Validation" :class :safety :criticality :high}
 }
 :suites/withdrawal-adversarial {:file "withdrawal-adversarial.edn" :title "Adversarial withdrawal and settlement suite" :class :adversarial :criticality :critical}

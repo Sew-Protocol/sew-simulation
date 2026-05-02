@@ -58,10 +58,10 @@ run_generators() {
 }
 
 run_suites() {
-  echo "Running fixture suites (all-invariants + equilibrium-validation)..."
+  echo "Running fixture suites (all-invariants + equilibrium-validation + spe-validation)..."
   clojure -M:test -e "
 (require '[resolver-sim.sim.fixtures :as f])
-(let [suites [:suites/all-invariants :suites/equilibrium-validation]
+(let [suites [:suites/all-invariants :suites/equilibrium-validation :suites/spe-validation]
       results (map (fn [id] [id (f/run-suite id)]) suites)
       any-fail (some (fn [[_ r]] (not (:ok? r))) results)]
   (doseq [[suite-id result] results]
@@ -69,7 +69,7 @@ run_suites() {
     (when-not (:ok? result)
       (doseq [r (:results result)]
         (when (not= :pass (:outcome r))
-          (println \"  FAIL:\" (:scenario-id r) (:outcome r))))))
+          (println (str \"  FAIL: \" (:trace-id r) \" [\" (:outcome r) \"]\"))))))
   (when any-fail (System/exit 1)))"
   return $?
 }
