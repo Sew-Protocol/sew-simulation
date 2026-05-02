@@ -19,6 +19,7 @@ import tempfile
 import uuid
 from unittest.mock import MagicMock, call, patch
 
+import grpc
 import pytest
 
 from sew_sim.grpc_client import SimulationClient, managed_session
@@ -542,6 +543,14 @@ class TestIntegration:
     @pytest.fixture
     def client(self):
         c = SimulationClient(host="localhost", port=7070)
+        try:
+            probe_sid = str(uuid.uuid4())
+            resp = c.start_session(probe_sid, AGENTS)
+            if not resp.get("ok"):
+                pytest.skip(f"gRPC server probe failed: {resp.get('error')}")
+            c.destroy_session(probe_sid)
+        except grpc.RpcError:
+            pytest.skip("Clojure gRPC server is not running on localhost:7070")
         yield c
         c.close()
 

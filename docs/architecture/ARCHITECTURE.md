@@ -247,12 +247,17 @@ Key findings documented in `docs/results/PHASE_YZA_FINDINGS.md`.
 
 ## Testing
 
-- **Deterministic invariant suite** (S01–S41): `clojure -M:run -- --invariants`
-  (in-process, no gRPC; ~1 s)
-- **Fixture suite runner**: `clojure -M -e "(require '[resolver-sim.sim.fixtures :as f])(f/run-suite :suites/all-invariants)"`
-- **Unit tests**: `./scripts/test.sh`
-  - `test/resolver_sim/protocols/sew/*_test.clj` — SEW state machine, invariants, lifecycle
-  - `test/resolver_sim/contract_model/replay_bridge_test.clj` — kernel bridge functions
-  - `test/resolver_sim/protocols/protocol_adapter_test.clj` — SEWProtocol + DummyProtocol parity
-  - `test/resolver_sim/db/` — XTDB persistence (requires live XTDB on localhost:5432)
-- **Protocol adapter tests**: `clojure -M:test -e "(require '[resolver-sim.protocols.protocol-adapter-test :as t]) (clojure.test/run-tests 'resolver-sim.protocols.protocol-adapter-test)"`
+**Canonical test runner:** `./scripts/test.sh [mode]`
+
+| Mode | What runs | Command |
+|---|---|---|
+| `all` (default) | unit + invariants + suites | `./scripts/test.sh` |
+| `unit` | Clojure unit tests only | `./scripts/test.sh unit` |
+| `invariants` | S01–S41 deterministic scenarios | `./scripts/test.sh invariants` |
+| `suites` | Fixture suites (all-invariants + equilibrium-validation) | `./scripts/test.sh suites` |
+
+Unit test namespaces:
+- `test/resolver_sim/protocols/sew/*_test.clj` — SEW state machine, invariants, lifecycle
+- `test/resolver_sim/contract_model/replay_bridge_test.clj` — kernel bridge functions
+- `test/resolver_sim/protocols/protocol_adapter_test.clj` — SEWProtocol + DummyProtocol parity
+- `test/resolver_sim/db/` — XTDB persistence (requires live XTDB on localhost:5432)

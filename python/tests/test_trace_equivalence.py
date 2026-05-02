@@ -1,8 +1,12 @@
 import json
 import subprocess
+import shutil
 import pytest
 from pathlib import Path
 from sew_sim.anvil_runner import AnvilRunner, BUYER_ADDR, RESOLVER_ADDR, DEPLOYER_ADDR
+
+
+pytestmark = pytest.mark.integration
 
 # ---------------------------------------------------------------------------
 # Clojure Replay Helper
@@ -82,6 +86,11 @@ def test_trace_equivalence(scenario):
     Generate a Clojure trace and verify Anvil matches it step-by-step.
     """
     print(f"\nTesting scenario: {scenario['scenario-id']}")
+
+    if shutil.which("clojure") is None:
+        pytest.skip("clojure is not installed or not on PATH")
+    if shutil.which("anvil") is None or shutil.which("cast") is None or shutil.which("forge") is None:
+        pytest.skip("Foundry tools (anvil/cast/forge) are required for trace equivalence")
     
     # 1. Get reference trace from Clojure
     result = get_clojure_trace(scenario)

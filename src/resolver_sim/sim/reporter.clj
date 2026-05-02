@@ -48,6 +48,18 @@
     (when (= status :inconclusive)
       (println "      - No tracked metrics matched the falsifies-if conditions"))))
 
+(defn print-equilibrium [theory]
+  (let [status (get theory :equilibrium-status :not-checked)
+        results (get theory :equilibrium-results {})]
+    (when (not= status :not-checked)
+      (println (str "    " (case status
+                             :pass "✓"
+                             :fail "✗"
+                             "?") " Equilibrium: " (name status)))
+      (doseq [[k v] results]
+        (println (str "      - " (name k) ": " (name (:status v))))
+        (when (:note v) (println "        Note:" (:note v)))))))
+
 (defn print-suite-results [suite-result]
   (println (str "\nSuite: " (:suite-id suite-result)))
   (println (str "Overall Status: " (if (:ok? suite-result) "PASS" "FAIL")))
@@ -55,7 +67,8 @@
   (doseq [r (:results suite-result)]
     (println (str "[" (:outcome r) "] " (:trace-id r)))
     (print-expectations (:expectations r))
-    (print-theory (:theory r) (:purpose r))))
+    (print-theory (:theory r) (:purpose r))
+    (print-equilibrium (:theory r))))
 
 ;; ---------------------------------------------------------------------------
 ;; Coverage reporting

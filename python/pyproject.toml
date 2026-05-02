@@ -28,7 +28,7 @@ packages = ["sew_sim"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-p no:cov"
+addopts = "-p no:cov -m 'not integration'"
 markers = [
     "integration: requires running Clojure gRPC server on localhost:7070",
 ]
