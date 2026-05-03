@@ -225,14 +225,23 @@
     (if-not (:ok ar)
       ar
       (let [resolver-addr (:address ar)
-            amount       (get-in event [:params :amount])]
+            amount       (get-in event [:params :amount])
+            current      (reg/get-stake world resolver-addr)
+            pending-slash-amount (reduce + 0
+                                  (for [[_ slash] (:pending-fraud-slashes world)
+                                        :when (and (= (:resolver slash) resolver-addr)
+                                                   (#{:pending :appealed} (:status slash)))]
+                                    (:amount slash)))]
         (cond
           (has-active-dispute-for-resolver? world resolver-addr)
           (t/fail :active-disputes-block-withdrawal)
-          
+
+          (> pending-slash-amount (- current amount))
+          (t/fail :pending-slash-blocks-withdrawal)
+
           (> (get-in world [:resolver-frozen-until resolver-addr] 0) (:block-time world))
           (t/fail :resolver-frozen)
-          
+
           :else
           (reg/withdraw-stake world resolver-addr amount))))))
 

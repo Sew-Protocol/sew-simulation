@@ -34,9 +34,9 @@ def s34_phase_k_auto_slash_robustness() -> tuple[RunResult, bool]:
       - Attack is net-negative or net-zero, making it economically non-viable.
     """
     agents_meta = [
-        {"id": "buyer",    "address": "0xbuyer",    "type": "honest"},
+        {"id": "buyer",    "address": "0xbuyer",    "strategy": "honest"},
         {"id": "r0",       "address": "0xres0",     "type": "malicious"},
-        {"id": "r1",       "address": "0xres1",     "type": "resolver"},
+        {"id": "r1",       "address": "0xres1",     "role": "resolver"},
     ]
     
     # Protocol params: 0% fraud detection, 100% reversal slash

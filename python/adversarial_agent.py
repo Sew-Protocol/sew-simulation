@@ -391,11 +391,11 @@ def run_adversarial_session(
     start_payload = {
         "session_id": session_id,
         "agents": trace_agents or [
-            {"id": "buyer", "address": "0xbuyer", "type": "honest"},
-            {"id": "seller", "address": "0xseller", "type": "honest"},
-            {"id": "resolver", "address": "0xresolver", "type": "resolver"},
-            {"id": "governance", "address": "0xgovernance", "type": "governance"},
-            {"id": "keeper", "address": "0xkeeper", "type": "keeper"},
+            {"id": "buyer", "address": "0xbuyer", "strategy": "honest"},
+            {"id": "seller", "address": "0xseller", "strategy": "honest"},
+            {"id": "resolver", "address": "0xresolver", "role": "resolver"},
+            {"id": "governance", "address": "0xgovernance", "role": "governance"},
+            {"id": "keeper", "address": "0xkeeper", "role": "keeper"},
         ],
     }
     if trace_params:

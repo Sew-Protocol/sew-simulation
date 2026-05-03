@@ -16,10 +16,10 @@ def test_readiness():
     print("Starting Readiness Smoke Test...")
     
     agents = [
-        {"id": "buyer", "address": "0x111", "type": "honest"},
-        {"id": "seller", "address": "0x222", "type": "honest"},
-        {"id": "resolver", "address": "0x333", "type": "resolver"},
-        {"id": "gov", "address": "0x000", "type": "governance"}
+        {"id": "buyer", "address": "0x111", "strategy": "honest"},
+        {"id": "seller", "address": "0x222", "strategy": "honest"},
+        {"id": "resolver", "address": "0x333", "role": "resolver"},
+        {"id": "gov", "address": "0x000", "role": "governance"}
     ]
     
     with SimulationClient() as client:

@@ -1,16 +1,17 @@
 (ns resolver-sim.contract-model.replay
   "Open-world scenario replay engine. (Protocol Simulation Kernel)
+  
+    Provides the deterministic harness for executing scenarios. This engine 
+    is designed as a protocol-agnostic template and is currently instantiated 
+    for the SEW Protocol. Implementation details (actions, invariants, 
+    snapshots) are protocol-specific.
 
-   Provides the deterministic harness for executing scenarios. This engine 
-   is designed as a protocol-agnostic template and is currently instantiated 
-   for the SEW Protocol. Implementation details (actions, invariants, 
-   snapshots) are protocol-specific.")
-   DisputeProtocol implementation.
+    DisputeProtocol implementation.
 
-   ## Replay Invariants
-   After every successful transition:
-     1. protocol/check-invariants-single
-     2. protocol/check-invariants-transition"
+    ## Replay Invariants
+    After every successful transition:
+      1. protocol/check-invariants-single
+      2. protocol/check-invariants-transition"
    (:require [clojure.data.json              :as json]
              [clojure.stacktrace             :as st]
              [clojure.string                :as str]
@@ -37,7 +38,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn validate-agents
-  "Validate a list of agent maps {:id :address :type ...} for structural correctness.
+  "Validate a list of agent maps {:id :address :role :strategy ...} for structural correctness.
    Returns {:ok true} or {:ok false :error kw :detail {...}}.
 
    Checks: non-empty, unique :id values, unique :address values."
@@ -266,7 +267,8 @@
         ;; agent type as "attacker" (which would inflate attack-successes for
         ;; legitimate accepted actions by the same agent).
         attack?   (or (:adversarial? event)
-                      (= "attacker" (:type agent)))
+                      (= "malicious" (:strategy agent))
+                      (= "attacker" (:role agent)))
         tags      (:event-tags trace-entry)
         ;; double-settlements: a second accepted lifecycle-ending action on what
         ;; is (for single-escrow scenarios) already a resolved/settled workflow.

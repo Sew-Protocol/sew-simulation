@@ -5,9 +5,9 @@
             [resolver-sim.protocols.sew :as sew]))
 
 (def default-agents
-  [{:id "buyer" :type "honest" :address "0xBuyer"}
-   {:id "seller" :type "honest" :address "0xSeller"}
-   {:id "resolver" :type "resolver" :address "0xResolver"}])
+  [{:id "buyer" :strategy "honest" :address "0xBuyer"}
+   {:id "seller" :strategy "honest" :address "0xSeller"}
+   {:id "resolver" :role "resolver" :address "0xResolver"}])
 
 (def default-protocol-params
   {:resolver-fee-bps 50

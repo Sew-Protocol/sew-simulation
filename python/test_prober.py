@@ -3,8 +3,8 @@ from sew_sim.adversarial import AdversarialProber
 
 def run_probe():
     agents = [
-        {"id": "buyer", "address": "0x111", "type": "honest"},
-        {"id": "seller", "address": "0x222", "type": "honest"}
+        {"id": "buyer", "address": "0x111", "strategy": "honest"},
+        {"id": "seller", "address": "0x222", "strategy": "honest"}
     ]
     
     # Minimal base scenario

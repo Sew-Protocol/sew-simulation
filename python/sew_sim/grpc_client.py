@@ -95,7 +95,7 @@ class SimulationClient:
         """
         Allocate a new simulation session on the Clojure server.
 
-        agents — list of dicts: [{"id": "buyer1", "address": "0x...", "type": "honest"}]
+        agents — list of dicts: [{"id": "buyer1", "address": "0x...", "strategy": "honest"}]
         Returns {"session_id": str, "ok": bool, "error": str|None}
         """
         return self._start({

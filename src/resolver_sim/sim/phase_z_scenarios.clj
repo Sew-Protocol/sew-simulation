@@ -50,9 +50,9 @@
    :initial-block-time 1000
    :seed            421
    :agents
-   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :type "honest"}
-    {:id "seller" :address "0x0000000000000000000000000000000000001002" :type "honest"}
-    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :type "resolver"}]
+   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :strategy "honest"}
+    {:id "seller" :address "0x0000000000000000000000000000000000001002" :strategy "honest"}
+    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :role "resolver"}]
    :protocol-params params-dr3
    :events
    [{:seq 0 :time 1001 :agent "buyer" :action "create_escrow"
@@ -75,9 +75,9 @@
    :initial-block-time 1000
    :seed            422
    :agents
-   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :type "honest"}
-    {:id "seller" :address "0x0000000000000000000000000000000000001002" :type "honest"}
-    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :type "attacker"}]
+   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :strategy "honest"}
+    {:id "seller" :address "0x0000000000000000000000000000000000001002" :strategy "honest"}
+    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :strategy "malicious" :role "resolver"}]
    :protocol-params params-dr3
    :events
    [{:seq 0 :time 1001 :agent "buyer" :action "create_escrow"
@@ -101,9 +101,9 @@
    :initial-block-time 1000
    :seed            423
    :agents
-   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :type "honest"}
-    {:id "seller" :address "0x0000000000000000000000000000000000001002" :type "honest"}
-    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :type "attacker"}]
+   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :strategy "honest"}
+    {:id "seller" :address "0x0000000000000000000000000000000000001002" :strategy "honest"}
+    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :strategy "malicious" :role "resolver"}]
    :protocol-params params-dr3
    :events
    ;; Escrow A
@@ -135,9 +135,9 @@
    :initial-block-time 1000
    :seed            424
    :agents
-   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :type "honest"}
-    {:id "seller" :address "0x0000000000000000000000000000000000001002" :type "honest"}
-    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :type "honest"}]
+   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :strategy "honest"}
+    {:id "seller" :address "0x0000000000000000000000000000000000001002" :strategy "honest"}
+    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :strategy "honest"}]
    :protocol-params params-dr3
    :events
    ;; All three escrows created

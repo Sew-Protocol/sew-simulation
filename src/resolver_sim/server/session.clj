@@ -51,14 +51,17 @@
 
 (defn- normalise-agents
   "Accept agents as seq of maps (string or keyword keys) and return keyword-keyed maps.
-   Converts :id :address :type to ensure downstream agent-index works correctly."
+   Converts :id :address :role :strategy to ensure downstream agent-index works correctly.
+   :role = structural role (resolver/governance/keeper), 
+   :strategy = behavioral strategy (honest/rational/malicious)."
   [agents]
   (mapv (fn [a]
-          (let [m (keywordize a)]
-            (cond-> m
-              (string? (:id m))      (update :id str)
-              (string? (:address m)) (update :address str)
-              (string? (:type m))    (update :type str))))
+        (let [m (keywordize a)]
+          (cond-> m
+            (string? (:id m))       (update :id str)
+            (string? (:address m))  (update :address str)
+            (string? (:role m))     (update :role str)
+            (string? (:strategy m)) (update :strategy str))))
         agents))
 
 (defn- normalise-params
@@ -79,7 +82,7 @@
   "Create a new session with the given agents and protocol-params.
 
    session-id       — caller-supplied string (typically a UUID)
-   agents           — seq of agent maps {:id :address :type ...} (string keys OK)
+   agents           — seq of agent maps {:id :address :role :strategy ...} (string keys OK)
    protocol-params  — map of protocol params (string keys OK)
    initial-block-time — initial block timestamp for world0
 
@@ -210,7 +213,7 @@
           agent-index (get-in s [:context :agent-index] {})
           actor       (get agent-index actor-id)
           actor-addr  (:address actor)
-          actor-type  (some-> (:type actor) name)
+          actor-type  (some-> (or (:role actor) (:type actor)) name)
           governance? (or (= actor-id "governance") (= actor-type "governance"))
           keeper?     (or (= actor-id "keeper") (= actor-type "keeper"))
           resolver?   (or (= actor-id "resolver") (= actor-type "resolver"))

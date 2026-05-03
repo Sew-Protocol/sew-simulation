@@ -1,8 +1,16 @@
 (ns resolver-sim.economics.payoffs
   "Economic logic for the SEW protocol.
    Centralizes payoff, fee, and bounty calculations for the SEW protocol
-   to ensure consistency across the simulation and contract model.")
+   to ensure consistency across the simulation and contract model."
   (:require [resolver-sim.protocols.sew.types :as t]))
+
+;; Fee denominator constant
+(def ^:private fee-denominator 10000)
+
+(defn- compute-fee
+  "Compute fee from amount and fee bps using integer division (uint256 semantics)."
+  [amount fee-bps]
+  (quot (* amount fee-bps) fee-denominator))
 
 ;; ---------------------------------------------------------------------------
 ;; Escrow Fees
@@ -12,7 +20,7 @@
   "Calculate the fee for a new escrow.
    Mirrors EscrowVault fee logic."
   [amount fee-bps]
-  (t/compute-fee amount fee-bps))
+  (compute-fee amount fee-bps))
 
 ;; ---------------------------------------------------------------------------
 ;; Bonds & Appeal Fees

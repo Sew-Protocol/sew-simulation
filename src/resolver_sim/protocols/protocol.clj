@@ -21,7 +21,7 @@
 
   (build-execution-context [protocol agents protocol-params]
     "Build an execution context from agent list and protocol parameters.
-     agents          — [{:id str :address str :type str ...}]
+     agents          — [{:id str :address str :role str :strategy str ...}]
      protocol-params — map of protocol-specific config (same shape as
                        :protocol-params in a scenario map)
      Returns a context map passed opaquely to every dispatch-action call.
