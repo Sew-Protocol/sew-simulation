@@ -7,8 +7,8 @@
    keeps tests, docs, and TraceEquivalence integration stable.
 
    This namespace is pure — no I/O, no DB, no side effects.
-   It reads only world-snapshot fields and accumulated metrics that are
-   guaranteed to exist in any replay result (protocol-agnostic).")
+   It currently reads SEW-specific world-snapshot fields and metrics; 
+   this structure provides a template for future protocol integration.")
 
 ;; ---------------------------------------------------------------------------
 ;; Terminal-state helpers

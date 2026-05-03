@@ -124,6 +124,20 @@
      :ok         (boolean (:ok result))
      :error      (some-> (:error result) name)}))
 
+(defn- handle-get-session-state
+  "GetSessionState: return the full internal world map.
+   req: {:session-id}"
+  [req]
+  (let [sid    (:session-id req)
+        result (session/get-session-state sid)]
+    (if (:ok result)
+      {:session-id sid
+       :ok         true
+       :world      (:world result)}
+      {:session-id sid
+       :ok         false
+       :error      (some-> (:error result) name)})))
+
 (defn- handle-suggest-actions
   "SuggestActions: return advisory valid-ish actions from Clojure-owned state.
    req: {:session-id :actor-id}"
@@ -179,6 +193,7 @@
   (let [start-m   (make-method "StartSession")
         step-m    (make-method "Step")
         destroy-m (make-method "DestroySession")
+        state-m   (make-method "GetSessionState")
         suggest-m (make-method "SuggestActions")
         signals-m (make-method "SessionSignals")
         payoff-m  (make-method "EvaluatePayoff")
@@ -187,6 +202,7 @@
                       (.addMethod start-m)
                       (.addMethod step-m)
                       (.addMethod destroy-m)
+                      (.addMethod state-m)
                       (.addMethod suggest-m)
                       (.addMethod signals-m)
                       (.addMethod payoff-m)
@@ -196,6 +212,7 @@
         (.addMethod start-m   (unary-handler handle-start))
         (.addMethod step-m    (unary-handler handle-step))
         (.addMethod destroy-m (unary-handler handle-destroy))
+        (.addMethod state-m   (unary-handler handle-get-session-state))
         (.addMethod suggest-m (unary-handler handle-suggest-actions))
         (.addMethod signals-m (unary-handler handle-session-signals))
         (.addMethod payoff-m  (unary-handler handle-evaluate-payoff))
@@ -230,6 +247,14 @@
   "Return bound port for the running server, or nil if not running."
   []
   (some-> @server .getPort))
+
+(defn stop!
+  "Stop the running gRPC server."
+  []
+  (when-let [srv @server]
+    (.shutdown srv)
+    (reset! server nil)
+    (println "[grpc] Server stopped.")))
 
 (defn await-termination
   "Block until the server shuts down. Useful for CLI entry points."

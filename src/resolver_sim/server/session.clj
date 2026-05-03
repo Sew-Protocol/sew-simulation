@@ -46,8 +46,7 @@
   "Recursively convert string keys in a nested map to keywords."
   (cond
     (map? m)    (into {} (map (fn [[k v]] [(if (string? k) (keyword k) k) (keywordize v)]) m))
-    (vector? m) (mapv keywordize m)
-    (seq? m)    (map keywordize m)
+    (sequential? m) (mapv keywordize m)
     :else       m))
 
 (defn- normalise-agents
@@ -136,18 +135,15 @@
       {:ok false :error :session-not-found :detail {:session-id session-id}}
       (with-lock (:lock session)
         (fn []
-          ;; Re-read inside the lock — destroy-session! may have removed the
-          ;; session while this thread was blocked waiting for the lock.
           (let [current (get @sessions session-id)]
             (if-not current
               {:ok false :error :session-not-found :detail {:session-id session-id}}
               (let [world   (:world current)
                     context (:context session)
                     evt     (keywordize event)
-                    step    (replay/process-step sew/protocol context world evt)]
-                ;; Guard: only write back if the session still exists.
-                ;; Prevents resurrection of a partially-structured map when
-                ;; a destroy races with the tail of a step.
+                    _ (println "[DEBUG] dispatching step. event=" evt)
+                    step    (replay/process-step sew/protocol context world evt)
+                    _ (println "[DEBUG] step processed.")]
                 (swap! sessions
                        (fn [s]
                          (if (contains? s session-id)
@@ -182,6 +178,13 @@
   "Return a seq of active session IDs. Useful for monitoring."
   []
   (keys @sessions))
+
+(defn get-session-state
+  "Return the full internal world map of a session."
+  [session-id]
+  (if-let [s (get @sessions session-id)]
+    {:ok true :world (:world s)}
+    {:ok false :error :session-not-found :detail {:session-id session-id}}))
 
 (defn session-info
   "Return a lean info map for a session: {:step-count :block-time :escrow-count}.

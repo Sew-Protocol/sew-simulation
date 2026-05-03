@@ -1,7 +1,9 @@
 (ns resolver-sim.canonical.actions
-  "Canonical vocabulary for protocol actions.
-   Decouples implementation-specific actions (e.g., 'create_escrow')
-   from the protocol's behavioral model.")
+  "SEW Protocol action vocabulary.
+
+   Provides a decoupling layer between gRPC action strings and 
+   internal behavior-model keywords. This structure serves as a 
+   template for future protocol integration.")
 
 (def action-map
   "Mapping of implementation actions to canonical identifiers."

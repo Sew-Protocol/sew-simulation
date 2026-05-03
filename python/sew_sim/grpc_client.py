@@ -70,6 +70,11 @@ class SimulationClient:
             request_serializer=_encode,
             response_deserializer=_decode,
         )
+        self._get_state = self._channel.unary_unary(
+            f"/{_SERVICE}/GetSessionState",
+            request_serializer=_encode,
+            response_deserializer=_decode,
+        )
         self._destroy = self._channel.unary_unary(
             f"/{_SERVICE}/DestroySession",
             request_serializer=_encode,
@@ -119,6 +124,13 @@ class SimulationClient:
           response["trace_entry"]["extra"]["workflow_id"]
         """
         return self._step({"session_id": session_id, "event": event})
+
+    def get_session_state(self, session_id: str) -> dict:
+        """
+        Query the full internal world state of a session.
+        Returns {"session_id": str, "ok": bool, "world": dict, "error": str|None}.
+        """
+        return self._get_state({"session_id": session_id})
 
     def destroy_session(self, session_id: str) -> dict:
         """Free session resources. Returns {"session_id": str, "ok": bool}."""

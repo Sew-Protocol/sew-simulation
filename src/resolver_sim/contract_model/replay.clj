@@ -1,17 +1,20 @@
 (ns resolver-sim.contract-model.replay
-  "Open-world scenario replay engine. (Protocol-Agnostic Kernel)
+  "Open-world scenario replay engine. (Protocol Simulation Kernel)
 
-   Provides the deterministic harness for executing scenarios.
-   Implementation details (actions, invariants, snapshots) are delegated to a
+   Provides the deterministic harness for executing scenarios. This engine 
+   is designed as a protocol-agnostic template and is currently instantiated 
+   for the SEW Protocol. Implementation details (actions, invariants, 
+   snapshots) are protocol-specific.")
    DisputeProtocol implementation.
 
    ## Replay Invariants
    After every successful transition:
      1. protocol/check-invariants-single
      2. protocol/check-invariants-transition"
-  (:require [clojure.data.json              :as json]
-            [clojure.string                :as str]
-            [resolver-sim.protocols.protocol :as engine]))
+   (:require [clojure.data.json              :as json]
+             [clojure.stacktrace             :as st]
+             [clojure.string                :as str]
+             [resolver-sim.protocols.protocol :as engine]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -364,10 +367,13 @@
             result     (try
                          (engine/dispatch-action protocol context world-t event)
                          (catch Exception e
+                           (println "[CRITICAL] Dispatch Exception:" (.getMessage e))
+                           (.printStackTrace e)
                            {:ok false :error :dispatch-exception
-                            :detail {:message (.getMessage e)}}))
+                            :detail {:message (.getMessage e)
+                                     :stack   (with-out-str (st/print-stack-trace e))}}))
             ok?        (:ok result)
-            world-next (if ok? (:world result) world-t)
+            world-next (if (and ok? (:world result)) (:world result) world-t)
 
             inv-single (when ok? (engine/check-invariants-single protocol world-next))
             inv-trans  (when ok? (engine/check-invariants-transition protocol world-t world-next))
@@ -391,8 +397,8 @@
             :result          result-kw
             :error           error-kw
             :extra           (:extra result)
-            :event-tags      event-tags
-            :invariants-ok?  (if ok? (and (:ok? inv-single) (:ok? inv-trans)) true)
+            :detail          (:detail result)
+            :event-tags      event-tags            :invariants-ok?  (if ok? (and (:ok? inv-single) (:ok? inv-trans)) true)
             :violations      all-violations
             :trace-metadata  (engine/classify-transition protocol (:action event) result-kw)
             :world           (engine/world-snapshot protocol final-world)

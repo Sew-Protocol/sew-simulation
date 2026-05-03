@@ -7,6 +7,7 @@
             [resolver-sim.protocols.sew.lifecycle      :as lc]
             [resolver-sim.protocols.sew.resolution     :as res]
             [resolver-sim.protocols.sew.registry       :as reg]
+            [resolver-sim.protocols.sew.accounting     :as acct]
             [resolver-sim.protocols.sew.authority      :as auth]
             [resolver-sim.protocols.sew.trace-metadata :as meta]
             [resolver-sim.protocols.sew.invariants     :as inv]))
@@ -30,6 +31,11 @@
   (if-let [agent (get agent-index agent-id)]
     {:ok true :address (:address agent)}
     {:ok false :error :unknown-agent :detail {:agent-id agent-id}}))
+
+(defn- check-paused [world]
+  (if (:paused? world)
+    (t/fail :protocol-paused)
+    {:ok true}))
 
 ;; Defaults below are the on-chain contract defaults from BaseEscrow/EscrowFactory.
 ;; Non-zero on-chain defaults:
@@ -88,50 +94,58 @@
         ar      (resolve-address agent-index (:agent event))]
     (if-not (:ok ar)
       ar
-      (let [caller (:address ar)
-            token  (:token p)
-            to     (:to p)
-            amount (:amount p)]
-        ;; Guard against Long overflow in fee arithmetic
-        (if (or (nil? amount) (<= amount 0) (> amount max-safe-amount))
-          {:ok false :error :amount-out-of-safe-range
-           :detail {:amount amount :max max-safe-amount}}
-          (let [cres     (get p :custom-resolver)
-                settings (t/make-escrow-settings {:custom-resolver cres})
-                result   (lc/create-escrow world caller token to amount settings snapshot)]
-            (if (:ok result)
-              (assoc result :extra {:workflow-id (:workflow-id result)})
-              result)))))))
+      (if (:paused? world)
+        (t/fail :protocol-paused)
+        (let [caller (:address ar)
+              token  (:token p)
+              to     (:to p)
+              amount (:amount p)]
+          ;; Guard against Long overflow in fee arithmetic
+          (if (or (nil? amount) (<= amount 0) (> amount max-safe-amount))
+            {:ok false :error :amount-out-of-safe-range
+             :detail {:amount amount :max max-safe-amount}}
+            (let [cres     (get p :custom-resolver)
+                  settings (t/make-escrow-settings {:custom-resolver cres})
+                  result   (lc/create-escrow world caller token to amount settings snapshot)]
+              (if (:ok result)
+                (assoc result :extra {:workflow-id (:workflow-id result)})
+                result))))))))
 
 (defmethod apply-action "raise_dispute"
   [{:keys [agent-index]} world event]
   (let [ar (resolve-address agent-index (:agent event))]
     (if-not (:ok ar)
       ar
-      (lc/raise-dispute world (get-in event [:params :workflow-id]) (:address ar)))))
+      (if (:paused? world)
+        (t/fail :protocol-paused)
+        (lc/raise-dispute world (get-in event [:params :workflow-id]) (:address ar))))))
 
 (defmethod apply-action "execute_resolution"
   [{:keys [agent-index resolution-module-fn resolution-level-map]} world event]
   (let [ar (resolve-address agent-index (:agent event))]
     (if-not (:ok ar)
       ar
-      (let [p               (:params event)
-            workflow-id     (:workflow-id p)
-            is-release      (get p :is-release true)
-            resolution-hash (get p :resolution-hash "0xsimhash")
-            ;; Kleros mode: build module fn per-step so it reads the live dispute level
-            ;; from world (level changes after each escalation).
-            effective-rm-fn (or (when resolution-level-map
-                                  (auth/make-kleros-module
-                                   resolution-level-map
-                                   #(t/dispute-level world %)))
-                                resolution-module-fn)]
-        (res/execute-resolution world workflow-id (:address ar)
-                                is-release resolution-hash effective-rm-fn)))))
+      (if (:paused? world)
+        (t/fail :protocol-paused)
+        (let [p               (:params event)
+              workflow-id     (:workflow-id p)
+              is-release      (get p :is-release true)
+              resolution-hash (get p :resolution-hash "0xsimhash")
+              ;; Kleros mode: build module fn per-step so it reads the live dispute level
+              ;; from world (level changes after each escalation).
+              effective-rm-fn (or (when resolution-level-map
+                                    (auth/make-kleros-module
+                                     resolution-level-map
+                                     #(t/dispute-level world %)))
+                                  resolution-module-fn)]
+          (res/execute-resolution world workflow-id (:address ar)
+                                  is-release resolution-hash effective-rm-fn))))))
 
 (defmethod apply-action "execute_pending_settlement"
   [_ctx world event]
-  (res/execute-pending-settlement world (get-in event [:params :workflow-id])))
+  (if (:paused? world)
+    (t/fail :protocol-paused)
+    (res/execute-pending-settlement world (get-in event [:params :workflow-id]))))
 
 (defmethod apply-action "automate_timed_actions"
   [_ctx world event]
@@ -142,23 +156,29 @@
   (let [ar (resolve-address agent-index (:agent event))]
     (if-not (:ok ar)
       ar
-      (lc/release world (get-in event [:params :workflow-id])
-                  (:address ar) sender-only-release))))
+      (if (:paused? world)
+        (t/fail :protocol-paused)
+        (lc/release world (get-in event [:params :workflow-id])
+                    (:address ar) sender-only-release)))))
 
 (defmethod apply-action "sender_cancel"
   [{:keys [agent-index]} world event]
   (let [ar (resolve-address agent-index (:agent event))]
     (if-not (:ok ar)
       ar
-      ;; nil cancel-strategy → mutual-consent path only
-      (lc/sender-cancel world (get-in event [:params :workflow-id]) (:address ar) nil))))
+      (if (:paused? world)
+        (t/fail :protocol-paused)
+        ;; nil cancel-strategy → mutual-consent path only
+        (lc/sender-cancel world (get-in event [:params :workflow-id]) (:address ar) nil)))))
 
 (defmethod apply-action "recipient_cancel"
   [{:keys [agent-index]} world event]
   (let [ar (resolve-address agent-index (:agent event))]
     (if-not (:ok ar)
       ar
-      (lc/recipient-cancel world (get-in event [:params :workflow-id]) (:address ar) nil))))
+      (if (:paused? world)
+        (t/fail :protocol-paused)
+        (lc/recipient-cancel world (get-in event [:params :workflow-id]) (:address ar) nil)))))
 
 (defmethod apply-action "auto_cancel_disputed"
   [_ctx world event]
@@ -169,12 +189,14 @@
   (let [ar (resolve-address agent-index (:agent event))]
     (if-not (:ok ar)
       ar
-      (let [workflow-id (get-in event [:params :workflow-id])
-            result      (res/escalate-dispute world workflow-id (:address ar) escalation-fn)]
-        (if (:ok result)
-          (assoc result :extra {:new-level    (:new-level result)
-                                :new-resolver (:new-resolver result)})
-          result)))))
+      (if (:paused? world)
+        (t/fail :protocol-paused)
+        (let [workflow-id (get-in event [:params :workflow-id])
+              result      (res/escalate-dispute world workflow-id (:address ar) escalation-fn)]
+          (if (:ok result)
+            (assoc result :extra {:new-level    (:new-level result)
+                                  :new-resolver (:new-resolver result)})
+            result))))))
 
 (defmethod apply-action "rotate_dispute_resolver"
   [{:keys [agent-index]} world event]
@@ -204,9 +226,41 @@
       ar
       (let [resolver-addr (:address ar)
             amount       (get-in event [:params :amount])]
-        (if (has-active-dispute-for-resolver? world resolver-addr)
+        (cond
+          (has-active-dispute-for-resolver? world resolver-addr)
           (t/fail :active-disputes-block-withdrawal)
+          
+          (> (get-in world [:resolver-frozen-until resolver-addr] 0) (:block-time world))
+          (t/fail :resolver-frozen)
+          
+          :else
           (reg/withdraw-stake world resolver-addr amount))))))
+
+(defmethod apply-action "withdraw_escrow"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (let [p           (:params event)
+            workflow-id (:workflow-id p)]
+        (println "[DEBUG] dispatch withdraw_escrow. event=" event)
+        (acct/withdraw-escrow world workflow-id (:address ar))))))
+
+(defmethod apply-action "withdraw_fees"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (let [p     (:params event)
+            token (:token p)]
+        (acct/withdraw-fees world token)))))
+
+(defmethod apply-action "set_paused"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (t/ok (assoc world :paused? (get-in event [:params :paused?] true))))))
 
 (defmethod apply-action "register_resolver_bond"
   [{:keys [agent-index]} world event]

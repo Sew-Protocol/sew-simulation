@@ -17,6 +17,7 @@
       :senior-bonds        {addr {:coverage-max nat-int :reserved-coverage nat-int}}
       :resolver-frozen-until {addr nat-int}          ; freeze expiry (0 = not frozen)
       :resolver-epoch-slashed {addr {:epoch-start nat-int :amount nat-int}}
+      :paused?             boolean                   ; protocol pause state
       :block-time          nat-int}                  ; injected clock
 
    Every operation function signature:
@@ -200,6 +201,7 @@
     :resolver-frozen-until {} ; {addr nat-int} — resolver freeze expiry (0 = not frozen)
     :resolver-epoch-slashed {} ; {addr {:epoch-start nat-int :amount nat-int}} — per-epoch slash cap
     :token-fot-bps          {} ; {token-addr nat-int} — Fee-on-Transfer BPS per token (0 = normal ERC20)
+    :paused?                false
     :block-time          block-time}))
 
 ;; ---------------------------------------------------------------------------
@@ -259,9 +261,10 @@
   (get-in world [:pending-settlements workflow-id] empty-pending-settlement))
 
 (defn escrow-state
-  "Current EscrowState keyword for workflow-id."
+  "Current EscrowState keyword for workflow-id. Normalizes string IDs."
   [world workflow-id]
-  (get-in world [:escrow-transfers workflow-id :escrow-state]))
+  (let [wf-id (if (string? workflow-id) workflow-id (str workflow-id))]
+    (get-in world [:escrow-transfers wf-id :escrow-state])))
 
 (defn terminal-state?
   "True if the escrow is in an absorbing (terminal) state."
@@ -269,9 +272,10 @@
   (contains? #{:released :refunded :resolved} (escrow-state world workflow-id)))
 
 (defn valid-workflow-id?
-  "True if workflow-id exists in escrow-transfers."
+  "True if workflow-id exists in escrow-transfers. Normalizes string IDs."
   [world workflow-id]
-  (contains? (:escrow-transfers world) workflow-id))
+  (let [wf-id (if (string? workflow-id) workflow-id (str workflow-id))]
+    (contains? (:escrow-transfers world) wf-id)))
 
 (defn dispute-level
   "Current escalation round for workflow-id (0 = initial, 1 = senior, 2 = external).

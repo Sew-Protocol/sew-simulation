@@ -1,7 +1,7 @@
 (ns resolver-sim.economics.payoffs
-  "Canonical economic logic for the SEW protocol.
-   Centralizes payoff, fee, and bounty calculations to ensure consistency
-   across the simulation and contract model."
+  "Economic logic for the SEW protocol.
+   Centralizes payoff, fee, and bounty calculations for the SEW protocol
+   to ensure consistency across the simulation and contract model.")
   (:require [resolver-sim.protocols.sew.types :as t]))
 
 ;; ---------------------------------------------------------------------------
