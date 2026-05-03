@@ -202,9 +202,15 @@
     (let [world       (:world s)
           transfers   (get world :escrow-transfers {})
           ids         (vec (keys transfers))
+          pending-settlements (get world :pending-settlements {})
+          pending-slashes (get world :pending-fraud-slashes {})
           agent-index (get-in s [:context :agent-index] {})
           actor       (get agent-index actor-id)
           actor-addr  (:address actor)
+          actor-type  (some-> (:type actor) name)
+          governance? (or (= actor-id "governance") (= actor-type "governance"))
+          keeper?     (or (= actor-id "keeper") (= actor-type "keeper"))
+          resolver?   (or (= actor-id "resolver") (= actor-type "resolver"))
           templates
           (vec
            (concat
@@ -225,7 +231,9 @@
              (fn [[wf et]]
                (let [st (:escrow-state et)
                      from (:from et)
-                     to   (:to et)]
+                     to   (:to et)
+                     disputed? (= st :disputed)
+                     resolver-addr (:dispute-resolver et)]
                  (cond
                    ;; Pending: participants may cancel (role-specific) or raise dispute.
                    (= st :pending)
@@ -238,13 +246,66 @@
                       [{:actor-id actor-id :action "recipient_cancel" :params {:id wf}}
                        {:actor-id actor-id :action "raise_dispute" :params {:id wf}}]))
 
-                   ;; Disputed: keep suggestion conservative; usually requires resolver path.
-                   (= st :disputed)
-                   []
+                   ;; Disputed lifecycle candidates.
+                   disputed?
+                   (concat
+                    (when (or (= actor-addr resolver-addr) resolver?)
+                      [{:actor-id actor-id
+                        :action "execute_resolution"
+                        :params {:workflow-id wf :is-release true :resolution-hash "0xadv"}}
+                       {:actor-id actor-id
+                        :action "execute_resolution"
+                        :params {:workflow-id wf :is-release false :resolution-hash "0xadv"}}])
+                    (when governance?
+                      [{:actor-id actor-id
+                        :action "propose_fraud_slash"
+                        :params {:workflow-id wf
+                                 :resolver-addr (or resolver-addr "0xresolver")
+                                 :amount (max 1 (quot (long (or (:amount-after-fee et) 0)) 10))}}])
+                    (when keeper?
+                      [{:actor-id actor-id
+                        :action "execute_pending_settlement"
+                        :params {:workflow-id wf}}]))
 
                    :else
                    [])))
-             transfers))))]
+             transfers)
+
+            ;; Governance slash lifecycle suggestions.
+            (when governance?
+              (mapcat
+               (fn [[slash-id slash]]
+                 (let [status (:status slash)]
+                   (cond
+                     (= status :pending)
+                     [{:actor-id actor-id :action "execute_fraud_slash" :params {:workflow-id slash-id}}
+                      {:actor-id actor-id :action "resolve_appeal" :params {:workflow-id slash-id :upheld? true}}
+                      {:actor-id actor-id :action "resolve_appeal" :params {:workflow-id slash-id :upheld? false}}]
+
+                     (= status :appealed)
+                     [{:actor-id actor-id :action "resolve_appeal" :params {:workflow-id slash-id :upheld? true}}
+                      {:actor-id actor-id :action "resolve_appeal" :params {:workflow-id slash-id :upheld? false}}]
+
+                     :else
+                     [])))
+               pending-slashes))
+
+            ;; Resolver appeal suggestions for slash lifecycle.
+            (when resolver?
+              (mapcat
+               (fn [[slash-id slash]]
+                 (if (= (:status slash) :pending)
+                   [{:actor-id actor-id :action "appeal_slash" :params {:workflow-id slash-id}}]
+                   []))
+               pending-slashes))
+
+            ;; Keeper execution suggestions for existing pending settlements.
+            (when keeper?
+              (for [[wf pending] pending-settlements
+                    :when (:exists pending)]
+                {:actor-id actor-id
+                 :action "execute_pending_settlement"
+                 :params {:workflow-id wf}}))))]
       {:ok true
        :session-id session-id
        :actor-id actor-id
@@ -257,12 +318,24 @@
   [session-id]
   (if-let [s (get @sessions session-id)]
     (let [world     (:world s)
-          transfers (get world :escrow-transfers {})]
+          transfers (get world :escrow-transfers {})
+          pending-slashes (get world :pending-fraud-slashes {})]
       {:ok true
        :session-id session-id
        :block-time (get world :block-time 0)
        :active-workflow-ids (vec (keys transfers))
        :pending-count (get world :pending-count 0)
+       :pending-fraud-slashes
+       (into {}
+             (map (fn [[slash-id v]]
+                    [slash-id {:resolver (:resolver v)
+                               :amount (get v :amount 0)
+                               :status (some-> (:status v) name)
+                               :appeal-deadline (get v :appeal-deadline 0)
+                               :proposed-at (get v :proposed-at 0)}])
+                  pending-slashes))
+       :resolver-slash-total (get world :resolver-slash-total {})
+       :resolver-frozen-until (get world :resolver-frozen-until {})
        :total-fees (get world :total-fees {})
        :total-held (get world :total-held {})
        :resolver-stakes (get world :resolver-stakes {})})
@@ -285,7 +358,45 @@
        :session-id session-id
        :actor-id actor-id
        :stake-locked staked
+       :slash-loss-realized (get (get world :resolver-slash-total {}) actor-id 0)
        :claimable claim
        :bond-locked bonded
        :net-pnl net})
+    {:ok false :error :session-not-found :detail {:session-id session-id}}))
+
+(defn evaluate-attack-objective
+  "Evaluate objective-oriented score from canonical world for adversarial search.
+   objective: resolver_fraud_profit (default)."
+  [session-id actor-id objective]
+  (if-let [s (get @sessions session-id)]
+    (let [world      (:world s)
+          objective' (or objective "resolver_fraud_profit")
+          stakes     (get world :resolver-stakes {})
+          slashed    (get world :resolver-slash-total {})
+          claimable  (get world :claimable {})
+          bonds      (get world :bond-balances {})
+          staked     (get stakes actor-id 0)
+          slash-loss (get slashed actor-id 0)
+          claim      (reduce + 0 (for [[_ wc] claimable] (get wc actor-id 0)))
+          bonded     (reduce + 0 (for [[_ wb] bonds] (get wb actor-id 0)))
+          net-resolver-profit (- (+ staked claim bonded) slash-loss)
+          fraud-slash-pending
+          (reduce + 0
+                  (for [[_ p] (get world :pending-fraud-slashes {})
+                        :when (= actor-id (:resolver p))]
+                    (get p :amount 0)))
+          score (case objective'
+                  "resolver_fraud_profit" net-resolver-profit
+                  net-resolver-profit)]
+      {:ok true
+       :session-id session-id
+       :actor-id actor-id
+       :objective objective'
+       :score score
+       :decomposition {:stake-locked staked
+                       :claimable claim
+                       :bond-locked bonded
+                       :slash-loss-realized slash-loss
+                       :slash-loss-pending fraud-slash-pending
+                       :net-resolver-profit net-resolver-profit}})
     {:ok false :error :session-not-found :detail {:session-id session-id}}))

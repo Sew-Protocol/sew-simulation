@@ -78,6 +78,37 @@ def _weighted_choice(candidates, rejection_counts, active_ids):
     return weighted[-1][1]
 
 
+def _objective_guided_choice(
+    candidates,
+    rejection_counts,
+    active_ids,
+    evaluate_objective,
+    session_id,
+    objective_actor,
+    objective_name,
+):
+    """Select candidate using objective-guided sampling plus prior weighting.
+
+    Keep Clojure as objective authority by querying EvaluateAttackObjective.
+    """
+    if not candidates:
+        return None, None
+
+    base_choice = _weighted_choice(candidates, rejection_counts, active_ids)
+    before = evaluate_objective(
+        {
+            "session_id": session_id,
+            "actor_id": objective_actor,
+            "objective": objective_name,
+        }
+    )
+    before_score = before.get("score") if before.get("ok") else None
+
+    # With current server surfaces we do not have dry-run transition scoring yet;
+    # keep a hook by preferring weighted choice and returning current score.
+    return base_choice, before_score
+
+
 def _apply_suppression(candidates, suppressed_until, seq):
     """Filter out temporarily suppressed (actor, action, id) tuples."""
     filtered = []
@@ -91,12 +122,53 @@ def _apply_suppression(candidates, suppressed_until, seq):
     return filtered
 
 
+def _phase_filter_candidates(candidates, phase):
+    """Apply phase-based role/action filtering.
+
+    phase=build   -> prioritize buyer/seller bootstrapping and dispute creation.
+    phase=exploit -> prioritize resolver/governance/keeper lifecycle actions.
+    """
+    if not candidates:
+        return candidates
+
+    if phase == "build":
+        keep = []
+        for c in candidates:
+            actor = c.get("actor_id")
+            action = c.get("action")
+            if actor in ("buyer", "seller") or action in ("create_escrow", "raise_dispute"):
+                keep.append(c)
+        return keep or candidates
+
+    if phase == "exploit":
+        keep = []
+        exploit_actions = {
+            "execute_resolution",
+            "propose_fraud_slash",
+            "appeal_slash",
+            "resolve_appeal",
+            "execute_fraud_slash",
+            "execute_pending_settlement",
+        }
+        for c in candidates:
+            actor = c.get("actor_id")
+            action = c.get("action")
+            if actor in ("resolver", "governance", "keeper") or action in exploit_actions:
+                keep.append(c)
+        return keep or candidates
+
+    return candidates
+
+
 def run_adversarial_session(
     target_effective_steps=20,
     max_attempts=80,
     guided_ratio=0.75,
     rejected_step_weight=0.15,
     seed=None,
+    objective_actor="resolver",
+    objective_name="resolver_fraud_profit",
+    attack_success_threshold=1.0,
 ):
     if seed is not None:
         random.seed(seed)
@@ -140,6 +212,11 @@ def run_adversarial_session(
         request_serializer=json_serializer,
         response_deserializer=json_deserializer
     )
+    evaluate_objective = channel.unary_unary(
+        '/sew.simulation.SimulationEngine/EvaluateAttackObjective',
+        request_serializer=json_serializer,
+        response_deserializer=json_deserializer
+    )
 
     session_id = str(uuid.uuid4())
     
@@ -149,6 +226,9 @@ def run_adversarial_session(
         "agents": [
             {"id": "buyer", "address": "0xbuyer", "type": "honest"},
             {"id": "seller", "address": "0xseller", "type": "honest"},
+            {"id": "resolver", "address": "0xresolver", "type": "resolver"},
+            {"id": "governance", "address": "0xgovernance", "type": "governance"},
+            {"id": "keeper", "address": "0xkeeper", "type": "keeper"},
         ],
     })
 
@@ -159,6 +239,10 @@ def run_adversarial_session(
     ok_count = 0
     rejected_count = 0
     effective_steps = 0.0
+    best_objective_score = None
+    successful_attack = False
+    successful_attack_step = None
+    successful_attack_score = None
     
     try:
         # 2. Adversarial loop with effective-step budgeting
@@ -167,25 +251,44 @@ def run_adversarial_session(
             print(f"Probing seq {seq}...")
             hints_buyer = suggest_actions({"session_id": session_id, "actor_id": "buyer"})
             hints_seller = suggest_actions({"session_id": session_id, "actor_id": "seller"})
+            hints_resolver = suggest_actions({"session_id": session_id, "actor_id": "resolver"})
+            hints_governance = suggest_actions({"session_id": session_id, "actor_id": "governance"})
+            hints_keeper = suggest_actions({"session_id": session_id, "actor_id": "keeper"})
 
             suggested = []
             if hints_buyer.get("ok"):
                 suggested.extend(hints_buyer.get("suggested_actions", []))
             if hints_seller.get("ok"):
                 suggested.extend(hints_seller.get("suggested_actions", []))
+            if hints_resolver.get("ok"):
+                suggested.extend(hints_resolver.get("suggested_actions", []))
+            if hints_governance.get("ok"):
+                suggested.extend(hints_governance.get("suggested_actions", []))
+            if hints_keeper.get("ok"):
+                suggested.extend(hints_keeper.get("suggested_actions", []))
 
             suggested = _apply_suppression(suggested, suppressed_until, seq)
+            phase = "build" if not active_ids else "exploit"
+            suggested = _phase_filter_candidates(suggested, phase)
 
             use_guided = bool(suggested) and (random.random() < guided_ratio)
             if use_guided:
-                choice = _weighted_choice(suggested, rejection_counts, active_ids)
+                choice, pre_choice_score = _objective_guided_choice(
+                    suggested,
+                    rejection_counts,
+                    active_ids,
+                    evaluate_objective,
+                    session_id,
+                    objective_actor,
+                    objective_name,
+                )
                 action = choice.get("action", _choose_action(active_ids))
                 suggested_actor = choice.get("actor_id", "buyer")
                 suggested_params = choice.get("params", {})
             else:
                 # Chaos lane: deliberately explores beyond guided suggestions.
                 action = _choose_action(active_ids)
-                suggested_actor = random.choice(["buyer", "seller"])
+                suggested_actor = random.choice(["buyer", "seller", "resolver", "governance", "keeper"])
                 suggested_params = {}
 
             # Actor selection: alternate for create; mostly buyer for adversarial probes.
@@ -238,7 +341,25 @@ def run_adversarial_session(
 
                 signals = session_signals({"session_id": session_id})
                 payoff = evaluate_payoff({"session_id": session_id, "actor_id": "buyer"})
+                objective = evaluate_objective(
+                    {
+                        "session_id": session_id,
+                        "actor_id": objective_actor,
+                        "objective": objective_name,
+                    }
+                )
                 if signals.get("ok") and payoff.get("ok"):
+                    score = objective.get("score") if objective.get("ok") else None
+                    if score is not None:
+                        best_objective_score = score if best_objective_score is None else max(best_objective_score, score)
+                        if (not successful_attack) and (score >= attack_success_threshold):
+                            successful_attack = True
+                            successful_attack_step = seq
+                            successful_attack_score = score
+                            print(
+                                f"SUCCESSFUL_ATTACK objective={objective_name} actor={objective_actor} "
+                                f"score={score} threshold={attack_success_threshold} step={seq}"
+                            )
                     print(
                         "    signals:",
                         {
@@ -249,9 +370,16 @@ def run_adversarial_session(
                         "payoff:",
                         {
                             "stake_locked": payoff.get("stake_locked"),
+                            "slash_loss_realized": payoff.get("slash_loss_realized"),
                             "claimable": payoff.get("claimable"),
                             "bond_locked": payoff.get("bond_locked"),
                             "net_pnl": payoff.get("net_pnl"),
+                        },
+                        "objective:",
+                        {
+                            "name": objective.get("objective") if objective.get("ok") else None,
+                            "score": score,
+                            "decomposition": objective.get("decomposition") if objective.get("ok") else None,
                         },
                     )
             seq += 1
@@ -268,6 +396,13 @@ def run_adversarial_session(
                 "guided_ratio": guided_ratio,
                 "rejected_step_weight": rejected_step_weight,
                 "active_ids": active_ids,
+                "best_objective_score": best_objective_score,
+                "objective_actor": objective_actor,
+                "objective_name": objective_name,
+                "successful_attack": successful_attack,
+                "successful_attack_step": successful_attack_step,
+                "successful_attack_score": successful_attack_score,
+                "attack_success_threshold": attack_success_threshold,
             }
         )
             
@@ -281,6 +416,9 @@ if __name__ == "__main__":
     parser.add_argument("--guided-ratio", type=float, default=0.75)
     parser.add_argument("--rejected-step-weight", type=float, default=0.15)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--objective-actor", type=str, default="resolver")
+    parser.add_argument("--objective-name", type=str, default="resolver_fraud_profit")
+    parser.add_argument("--attack-success-threshold", type=float, default=1.0)
     args = parser.parse_args()
 
     run_adversarial_session(
@@ -289,4 +427,7 @@ if __name__ == "__main__":
         guided_ratio=args.guided_ratio,
         rejected_step_weight=args.rejected_step_weight,
         seed=args.seed,
+        objective_actor=args.objective_actor,
+        objective_name=args.objective_name,
+        attack_success_threshold=args.attack_success_threshold,
     )

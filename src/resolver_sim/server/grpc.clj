@@ -142,6 +142,14 @@
   [req]
   (session/evaluate-payoff (:session-id req) (:actor-id req)))
 
+(defn- handle-evaluate-attack-objective
+  "EvaluateAttackObjective: objective score/decomposition from canonical world.
+   req: {:session-id :actor-id :objective}"
+  [req]
+  (session/evaluate-attack-objective (:session-id req)
+                                     (:actor-id req)
+                                     (:objective req)))
+
 ;; ---------------------------------------------------------------------------
 ;; Unary call handler wrapper
 ;; ---------------------------------------------------------------------------
@@ -174,6 +182,7 @@
         suggest-m (make-method "SuggestActions")
         signals-m (make-method "SessionSignals")
         payoff-m  (make-method "EvaluatePayoff")
+        objective-m (make-method "EvaluateAttackObjective")
         svc-desc  (-> (ServiceDescriptor/newBuilder "sew.simulation.SimulationEngine")
                       (.addMethod start-m)
                       (.addMethod step-m)
@@ -181,6 +190,7 @@
                       (.addMethod suggest-m)
                       (.addMethod signals-m)
                       (.addMethod payoff-m)
+                      (.addMethod objective-m)
                       (.build))]
     (-> (ServerServiceDefinition/builder svc-desc)
         (.addMethod start-m   (unary-handler handle-start))
@@ -189,6 +199,7 @@
         (.addMethod suggest-m (unary-handler handle-suggest-actions))
         (.addMethod signals-m (unary-handler handle-session-signals))
         (.addMethod payoff-m  (unary-handler handle-evaluate-payoff))
+        (.addMethod objective-m (unary-handler handle-evaluate-attack-objective))
         (.build))))
 
 ;; ---------------------------------------------------------------------------
