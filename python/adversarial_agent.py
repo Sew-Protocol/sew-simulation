@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 import time
 import random
@@ -136,7 +137,14 @@ def _phase_filter_candidates(candidates, phase):
         for c in candidates:
             actor = c.get("actor_id")
             action = c.get("action")
-            if actor in ("buyer", "seller") or action in ("create_escrow", "raise_dispute"):
+            # Strict build gating: only buyer/seller should seed escrow/dispute flow.
+            if actor in ("buyer", "seller") and action in (
+                "create_escrow",
+                "raise_dispute",
+                "release",
+                "sender_cancel",
+                "recipient_cancel",
+            ):
                 keep.append(c)
         return keep or candidates
 
@@ -160,6 +168,141 @@ def _phase_filter_candidates(candidates, phase):
     return candidates
 
 
+def _load_trace_events(trace_path):
+    with open(trace_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data
+
+
+def _normalise_event_params_for_grpc(params, alias_map):
+    p = dict(params or {})
+    for k in ("workflow-id", "workflow_id", "id"):
+        if k in p and isinstance(p[k], str) and p[k] in alias_map:
+            p[k] = alias_map[p[k]]
+    # gRPC server accepts either workflow-id or id depending on action handlers;
+    # keep original keys but mirror id for compatibility when applicable.
+    if "workflow-id" in p and "id" not in p:
+        p["id"] = p["workflow-id"]
+    if "workflow_id" in p and "id" not in p:
+        p["id"] = p["workflow_id"]
+    return p
+
+
+def _replay_trace_prefix(step_session, session_id, trace_doc, prefix_steps=None):
+    events = trace_doc.get("events", [])
+    n = len(events) if prefix_steps is None else max(0, min(prefix_steps, len(events)))
+    alias_map = {}
+    accepted = 0
+    rejected = 0
+    active_ids = []
+
+    for i, ev in enumerate(events[:n]):
+        params = _normalise_event_params_for_grpc(ev.get("params", {}), alias_map)
+        req = {
+            "session_id": session_id,
+            "event": {
+                "seq": ev.get("seq", i),
+                "time": ev.get("time", 1000 + i * 10),
+                "agent": ev.get("agent"),
+                "action": ev.get("action"),
+                "params": params,
+            },
+        }
+        resp = step_session(req)
+        result = resp.get("result")
+        if result == "ok":
+            accepted += 1
+        else:
+            rejected += 1
+
+        save_alias = ev.get("save-id-as")
+        if save_alias and result == "ok":
+            real_id = _extract_candidate_id(resp, active_ids)
+            alias_map[save_alias] = real_id
+            if real_id not in active_ids:
+                active_ids.append(real_id)
+
+    return {
+        "replayed_steps": n,
+        "accepted": accepted,
+        "rejected": rejected,
+        "alias_map": alias_map,
+        "active_ids": active_ids,
+    }
+
+
+def _candidate_mutations_for_action(action, event):
+    params = dict(event.get("params") or {})
+    wf = params.get("workflow-id", params.get("workflow_id", params.get("id", "wf0")))
+    if action == "execute_resolution":
+        p1 = dict(params)
+        p1["is-release"] = True
+        p1["is_release"] = True
+        p2 = dict(params)
+        p2["is-release"] = False
+        p2["is_release"] = False
+        return [
+            {"tag": "resolution-release", "action": "execute_resolution", "params": p1},
+            {"tag": "resolution-refund", "action": "execute_resolution", "params": p2},
+            {"tag": "slash-after-resolution", "action": "propose_fraud_slash", "params": {"workflow-id": wf, "resolver-addr": "0xresolver", "amount": 500}},
+        ]
+    if action == "execute_pending_settlement":
+        return [
+            {"tag": "keep-settlement", "action": "execute_pending_settlement", "params": params},
+            {"tag": "slash-instead-of-settlement", "action": "propose_fraud_slash", "params": {"workflow-id": wf, "resolver-addr": "0xresolver", "amount": 500}},
+        ]
+    if action == "propose_fraud_slash":
+        return [
+            {"tag": "execute-slash", "action": "execute_fraud_slash", "params": {"workflow-id": wf}},
+            {"tag": "resolve-appeal-deny", "action": "resolve_appeal", "params": {"workflow-id": wf, "upheld?": False}},
+            {"tag": "resolve-appeal-uphold", "action": "resolve_appeal", "params": {"workflow-id": wf, "upheld?": True}},
+        ]
+    # eq-v9 / eq-v10 focused templates (adversarial-dispute traces)
+    if action == "raise_dispute":
+        return [
+            {"tag": "resolver-self-dispute", "action": "raise_dispute", "params": {"workflow-id": wf}},
+            {"tag": "force-release-after-dispute", "action": "execute_resolution", "params": {"workflow-id": wf, "is-release": True, "is_release": True, "resolution-hash": "0xhash"}},
+            {"tag": "force-refund-after-dispute", "action": "execute_resolution", "params": {"workflow-id": wf, "is-release": False, "is_release": False, "resolution-hash": "0xhash"}},
+        ]
+    if action == "create_escrow":
+        base_to = params.get("to", "0xseller")
+        base_token = params.get("token", "USDC")
+        return [
+            {"tag": "micro-escrow", "action": "create_escrow", "params": {"token": base_token, "to": base_to, "amount": 1}},
+            {"tag": "jumbo-escrow", "action": "create_escrow", "params": {"token": base_token, "to": base_to, "amount": 1000000}},
+            {"tag": "self-recipient-escrow", "action": "create_escrow", "params": {"token": base_token, "to": "0xbuyer", "amount": params.get("amount", 4000)}},
+        ]
+    return []
+
+
+def _build_trace_mutants(trace_doc, mutation_action, max_mutants=5):
+    events = trace_doc.get("events", [])
+    mutants = []
+    for i, ev in enumerate(events):
+        if ev.get("action") != mutation_action:
+            continue
+        for cand in _candidate_mutations_for_action(mutation_action, ev):
+            m_events = [dict(x) for x in events]
+            replaced = dict(m_events[i])
+            replaced["action"] = cand["action"]
+            replaced["params"] = cand.get("params", {})
+            m_events[i] = replaced
+            mutant_id = f"{mutation_action}@{i}:{cand.get('tag', cand['action'])}"
+            mutants.append(
+                {
+                    "mutant_id": mutant_id,
+                    "mutation_index": i,
+                    "base_action": mutation_action,
+                    "mutated_action": cand["action"],
+                    "mutation_tag": cand.get("tag", cand["action"]),
+                    "events": m_events,
+                }
+            )
+            if len(mutants) >= max_mutants:
+                return mutants
+    return mutants
+
+
 def run_adversarial_session(
     target_effective_steps=20,
     max_attempts=80,
@@ -169,6 +312,13 @@ def run_adversarial_session(
     objective_actor="resolver",
     objective_name="resolver_fraud_profit",
     attack_success_threshold=1.0,
+    build_target_active_ids=2,
+    seed_trace=None,
+    prefix_steps=None,
+    mutation_action=None,
+    mutation_index=-1,
+    max_mutants=0,
+    mutation_id=None,
 ):
     if seed is not None:
         random.seed(seed)
@@ -221,16 +371,36 @@ def run_adversarial_session(
     session_id = str(uuid.uuid4())
     
     # 1. Initialize with both buyer/seller so role-specific transitions are possible.
-    start_session({
+    trace_doc = _load_trace_events(seed_trace) if seed_trace else None
+    if trace_doc and mutation_action and (mutation_index >= 0 or mutation_id):
+        muts = _build_trace_mutants(trace_doc, mutation_action, max_mutants=max(1, max_mutants or 1))
+        if muts:
+            if mutation_id:
+                chosen = next((m for m in muts if m["mutant_id"] == mutation_id), None)
+                if chosen is None:
+                    chosen = muts[0]
+            else:
+                chosen = muts[min(mutation_index, len(muts) - 1)]
+            trace_doc = dict(trace_doc)
+            trace_doc["events"] = chosen["events"]
+            print("TRACE_MUTATION_APPLIED", {k: v for k, v in chosen.items() if k != "events"})
+            print("TRACE_MUTATION_CATALOG", [{k: v for k, v in m.items() if k != "events"} for m in muts])
+    trace_agents = trace_doc.get("agents") if trace_doc else None
+    trace_params = trace_doc.get("protocol-params") if trace_doc else None
+
+    start_payload = {
         "session_id": session_id,
-        "agents": [
+        "agents": trace_agents or [
             {"id": "buyer", "address": "0xbuyer", "type": "honest"},
             {"id": "seller", "address": "0xseller", "type": "honest"},
             {"id": "resolver", "address": "0xresolver", "type": "resolver"},
             {"id": "governance", "address": "0xgovernance", "type": "governance"},
             {"id": "keeper", "address": "0xkeeper", "type": "keeper"},
         ],
-    })
+    }
+    if trace_params:
+        start_payload["protocol_params"] = trace_params
+    start_session(start_payload)
 
     active_ids = []
     rejection_counts = defaultdict(int)
@@ -243,8 +413,41 @@ def run_adversarial_session(
     successful_attack = False
     successful_attack_step = None
     successful_attack_score = None
+    trace_seed_meta = {
+        "seed_trace": seed_trace,
+        "prefix_steps": prefix_steps,
+        "replayed_steps": 0,
+        "replay_accepted": 0,
+        "replay_rejected": 0,
+    }
     
     try:
+        if trace_doc:
+            replay_info = _replay_trace_prefix(
+                step_session,
+                session_id,
+                trace_doc,
+                prefix_steps=prefix_steps,
+            )
+            active_ids = list(replay_info["active_ids"])
+            trace_seed_meta.update(
+                {
+                    "replayed_steps": replay_info["replayed_steps"],
+                    "replay_accepted": replay_info["accepted"],
+                    "replay_rejected": replay_info["rejected"],
+                }
+            )
+            print(
+                "TRACE_SEED_REPLAY",
+                {
+                    "trace": seed_trace,
+                    "replayed_steps": replay_info["replayed_steps"],
+                    "accepted": replay_info["accepted"],
+                    "rejected": replay_info["rejected"],
+                    "active_ids": active_ids,
+                },
+            )
+
         # 2. Adversarial loop with effective-step budgeting
         seq = 0
         while attempts < max_attempts and effective_steps < target_effective_steps:
@@ -268,7 +471,7 @@ def run_adversarial_session(
                 suggested.extend(hints_keeper.get("suggested_actions", []))
 
             suggested = _apply_suppression(suggested, suppressed_until, seq)
-            phase = "build" if not active_ids else "exploit"
+            phase = "build" if len(active_ids) < build_target_active_ids else "exploit"
             suggested = _phase_filter_candidates(suggested, phase)
 
             use_guided = bool(suggested) and (random.random() < guided_ratio)
@@ -288,7 +491,11 @@ def run_adversarial_session(
             else:
                 # Chaos lane: deliberately explores beyond guided suggestions.
                 action = _choose_action(active_ids)
-                suggested_actor = random.choice(["buyer", "seller", "resolver", "governance", "keeper"])
+                # Keep chaos lane phase-aware to reduce non-productive invalid spam.
+                if phase == "build":
+                    suggested_actor = random.choice(["buyer", "seller"])
+                else:
+                    suggested_actor = random.choice(["resolver", "governance", "keeper", "buyer", "seller"])
                 suggested_params = {}
 
             # Actor selection: alternate for create; mostly buyer for adversarial probes.
@@ -385,8 +592,7 @@ def run_adversarial_session(
             seq += 1
 
         print("\nRun summary:")
-        print(
-            {
+        summary = {
                 "attempts": attempts,
                 "ok_count": ok_count,
                 "rejected_count": rejected_count,
@@ -403,11 +609,117 @@ def run_adversarial_session(
                 "successful_attack_step": successful_attack_step,
                 "successful_attack_score": successful_attack_score,
                 "attack_success_threshold": attack_success_threshold,
+                "build_target_active_ids": build_target_active_ids,
+                "trace_seed": trace_seed_meta,
             }
-        )
+        print(summary)
+        return summary
             
     finally:
         destroy_session({"session_id": session_id})
+
+
+def run_mutant_sweep(
+    seed_trace,
+    mutation_action,
+    max_mutants,
+    common_kwargs,
+):
+    trace_doc = _load_trace_events(seed_trace)
+    mutants = _build_trace_mutants(trace_doc, mutation_action, max_mutants=max_mutants)
+    if not mutants:
+        print("MUTANT_SWEEP no mutants generated")
+        return []
+
+    print("MUTANT_SWEEP_CATALOG", [{k: v for k, v in m.items() if k != "events"} for m in mutants])
+    results = []
+    for m in mutants:
+        print("MUTANT_SWEEP_RUN", m["mutant_id"])
+        summary = run_adversarial_session(
+            seed_trace=seed_trace,
+            mutation_action=mutation_action,
+            mutation_id=m["mutant_id"],
+            **common_kwargs,
+        )
+        results.append(
+            {
+                "mutant_id": m["mutant_id"],
+                "mutation_tag": m.get("mutation_tag"),
+                "mutated_action": m.get("mutated_action"),
+                "successful_attack": summary.get("successful_attack"),
+                "best_objective_score": summary.get("best_objective_score"),
+                "rejected_count": summary.get("rejected_count"),
+                "attempts": summary.get("attempts"),
+            }
+        )
+
+    ranked = sorted(
+        results,
+        key=lambda r: (
+            0 if r["successful_attack"] else 1,
+            -(r["best_objective_score"] or 0),
+            r["rejected_count"] or 0,
+        ),
+    )
+    print("MUTANT_SWEEP_RANKED", ranked)
+    return ranked
+
+
+def run_portfolio_sweep(
+    traces,
+    mutation_actions,
+    max_mutants,
+    common_kwargs,
+):
+    leaderboard = []
+    for trace in traces:
+        for action in mutation_actions:
+            print("PORTFOLIO_SWEEP_START", {"trace": trace, "mutation_action": action})
+            ranked = run_mutant_sweep(
+                seed_trace=trace,
+                mutation_action=action,
+                max_mutants=max_mutants,
+                common_kwargs=common_kwargs,
+            )
+            for row in ranked:
+                leaderboard.append(
+                    {
+                        "trace": trace,
+                        "mutation_action": action,
+                        **row,
+                    }
+                )
+
+    leaderboard = sorted(
+        leaderboard,
+        key=lambda r: (
+            0 if r.get("successful_attack") else 1,
+            -(r.get("best_objective_score") or 0),
+            r.get("rejected_count") or 0,
+        ),
+    )
+    print("PORTFOLIO_SWEEP_LEADERBOARD", leaderboard)
+    return leaderboard
+
+
+def run_mutation_coverage_preflight(traces, mutation_actions, max_mutants):
+    report = []
+    for trace in traces:
+        trace_doc = _load_trace_events(trace)
+        actions_present = [ev.get("action") for ev in trace_doc.get("events", [])]
+        for action in mutation_actions:
+            mutants = _build_trace_mutants(trace_doc, action, max_mutants=max_mutants)
+            report.append(
+                {
+                    "trace": trace,
+                    "mutation_action": action,
+                    "events_with_action": sum(1 for a in actions_present if a == action),
+                    "mutant_candidates": len(mutants),
+                    "sample_mutant_ids": [m["mutant_id"] for m in mutants[:3]],
+                }
+            )
+    print("MUTATION_COVERAGE_PREFLIGHT", report)
+    return report
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Adversarial SEW gRPC probe runner")
@@ -419,9 +731,25 @@ if __name__ == "__main__":
     parser.add_argument("--objective-actor", type=str, default="resolver")
     parser.add_argument("--objective-name", type=str, default="resolver_fraud_profit")
     parser.add_argument("--attack-success-threshold", type=float, default=1.0)
+    parser.add_argument("--build-target-active-ids", type=int, default=2)
+    parser.add_argument("--seed-trace", type=str, default=None)
+    parser.add_argument("--prefix-steps", type=str, default="all")
+    parser.add_argument("--mutation-action", type=str, default=None)
+    parser.add_argument("--mutation-index", type=int, default=-1)
+    parser.add_argument("--max-mutants", type=int, default=5)
+    parser.add_argument("--mutation-id", type=str, default=None)
+    parser.add_argument("--sweep-mutants", action="store_true")
+    parser.add_argument("--portfolio-traces", type=str, default=None,
+                        help="Comma-separated trace paths for portfolio sweep")
+    parser.add_argument("--portfolio-actions", type=str, default=None,
+                        help="Comma-separated mutation actions for portfolio sweep")
+    parser.add_argument("--coverage-preflight", action="store_true",
+                        help="Only report mutation coverage for trace/action combinations")
     args = parser.parse_args()
 
-    run_adversarial_session(
+    prefix_steps = None if args.prefix_steps == "all" else int(args.prefix_steps)
+
+    common_kwargs = dict(
         target_effective_steps=args.target_effective_steps,
         max_attempts=args.max_attempts,
         guided_ratio=args.guided_ratio,
@@ -430,4 +758,44 @@ if __name__ == "__main__":
         objective_actor=args.objective_actor,
         objective_name=args.objective_name,
         attack_success_threshold=args.attack_success_threshold,
+        build_target_active_ids=args.build_target_active_ids,
+        prefix_steps=prefix_steps,
+        mutation_index=args.mutation_index,
+        max_mutants=args.max_mutants,
     )
+
+    if args.coverage_preflight:
+        if not args.portfolio_traces or not args.portfolio_actions:
+            raise SystemExit("--coverage-preflight requires --portfolio-traces and --portfolio-actions")
+        traces = [t.strip() for t in args.portfolio_traces.split(",") if t.strip()]
+        actions = [a.strip() for a in args.portfolio_actions.split(",") if a.strip()]
+        run_mutation_coverage_preflight(
+            traces=traces,
+            mutation_actions=actions,
+            max_mutants=args.max_mutants,
+        )
+    elif args.portfolio_traces and args.portfolio_actions:
+        traces = [t.strip() for t in args.portfolio_traces.split(",") if t.strip()]
+        actions = [a.strip() for a in args.portfolio_actions.split(",") if a.strip()]
+        run_portfolio_sweep(
+            traces=traces,
+            mutation_actions=actions,
+            max_mutants=args.max_mutants,
+            common_kwargs=common_kwargs,
+        )
+    elif args.sweep_mutants:
+        if not args.seed_trace or not args.mutation_action:
+            raise SystemExit("--sweep-mutants requires --seed-trace and --mutation-action")
+        run_mutant_sweep(
+            seed_trace=args.seed_trace,
+            mutation_action=args.mutation_action,
+            max_mutants=args.max_mutants,
+            common_kwargs=common_kwargs,
+        )
+    else:
+        run_adversarial_session(
+            seed_trace=args.seed_trace,
+            mutation_action=args.mutation_action,
+            mutation_id=args.mutation_id,
+            **common_kwargs,
+        )
