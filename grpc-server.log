@@ -1,3 +1,5 @@
-nohup: ignoring input
-[grpc] SimulationEngine listening on port 7070
-[grpc] Press Ctrl+C to stop.
+SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+[grpc] SimulationEngine listening on port 50051
+#object[io.grpc.internal.ServerImpl 0x1da745a2 "ServerImpl{logId=2, transportServer=NettyServer{logId=1, addresses=[0.0.0.0/0.0.0.0:50051]}}"]

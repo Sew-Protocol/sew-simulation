@@ -42,4 +42,21 @@
               :task (clojure {:dir "."}
                              "-M" "-e"
                              "(require '[resolver-sim.scenario.coverage :as cov] '[resolver-sim.sim.reporter :as r]) (r/print-coverage (cov/coverage-report (or (first *command-line-args*) \"data/fixtures/traces\")))"
-                             *args*)}}}
+                             *args*)}
+
+  adv:broad {:doc "Run adversarial agent broad discovery preset"
+             :task (shell "python3 python/adversarial_agent.py --target-effective-steps 40 --max-attempts 300 --guided-ratio 0.65 --rejected-step-weight 0.10" )}
+
+  adv:deep {:doc "Run adversarial agent deeper exploit-chain preset"
+            :task (shell "python3 python/adversarial_agent.py --target-effective-steps 80 --max-attempts 800 --guided-ratio 0.80 --rejected-step-weight 0.05")}
+
+  adv:server {:doc "Start gRPC simulation server on 50051 in background"
+              :task (shell "nohup clojure -M -e \"(require 'resolver-sim.server.grpc) (resolver-sim.server.grpc/start! 50051) (resolver-sim.server.grpc/await-termination)\" > grpc-server.log 2>&1 &" "sleep 2" "ss -ltnp | grep 50051 || true")}
+
+  adv:all:broad {:doc "Start server (if needed) then run broad adversarial preset"
+                 :task (do (run 'adv:server)
+                           (run 'adv:broad))}
+
+  adv:all:deep {:doc "Start server (if needed) then run deep adversarial preset"
+                :task (do (run 'adv:server)
+                          (run 'adv:deep))}}}

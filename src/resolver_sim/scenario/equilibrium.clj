@@ -327,42 +327,44 @@
         decision-nodes    (filter #(strategic-actions (:action %)) decisions)]
     (cond
       (empty? decision-nodes)
-      (inconclusive :subgame-perfect-equilibrium :no-decisions
+      (inconclusive :subgame-perfect-equilibrium :absent-evidence
                     "no strategic decision nodes (disputes/escalations) in this trace")
 
       (not (:terminal? terminal-world))
-      (inconclusive :subgame-perfect-equilibrium :insufficient-information
+      (inconclusive :subgame-perfect-equilibrium :multi-trace-required
                     "trace ends before settlement; cannot evaluate ex-post regret")
 
       :else
       (let [terminal-state (:world (last raw-trace))
             violations (keep (fn [decision]
-                               (let [t-idx   (:seq decision)
+                               (let [t-idx   (:index decision)
                                      agent   (:agent decision)
                                      action  (:action decision)]
                                  (when (and (strategic-actions action)
-                                            (pos? t-idx))
+                                             (some? t-idx)
+                                             (< t-idx (count raw-trace)))
                                    (let [world-at     (:world (nth raw-trace t-idx))
                                          w-at         (get-agent-wealth world-at agent)
                                          w-T          (get-agent-wealth terminal-state agent)]
                                      (when (< w-T w-at)
-                                       {:seq      t-idx
+                                        {:index    t-idx
+                                         :seq      (:seq decision)
                                         :agent    agent
                                         :action   action
                                         :loss     (- w-at w-T)
                                         :class    :ex-post-regret
-                                        :summary  (str "Agent " agent " " action " at seq " t-idx
+                                         :summary  (str "Agent " agent " " action " at node " t-idx
                                                        " led to net loss of " (- w-at w-T))})))))
                              decisions)]
         (if (seq violations)
-          (fail :subgame-perfect-equilibrium :single-trace-metric-proxy
+          (fail :subgame-perfect-equilibrium :single-trace-node-proxy
                 {:spe-status     :fail
                  :spe-summary    (str "observed " (count violations) " strategic actions led to avoidable net losses")
                  :spe-violations (vec violations)}
                 {:spe-status :pass}
                 violations)
           (let [checked (count decision-nodes)]
-            (pass :subgame-perfect-equilibrium :single-trace-metric-proxy
+            (pass :subgame-perfect-equilibrium :single-trace-node-proxy
                   {:spe-status     :pass
                    :spe-summary    (str "all " checked " strategic decisions resulted in non-negative terminal payoff contributions")
                    :spe-violations []

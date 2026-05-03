@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "google/protobuf/struct.proto";
+
 // Service contract documentation for the SEW Simulation Engine.
 //
 // This file is DOCUMENTATION ONLY. The Clojure server uses io.grpc with a

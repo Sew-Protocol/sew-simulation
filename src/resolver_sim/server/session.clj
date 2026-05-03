@@ -193,3 +193,99 @@
     {:step-count   (:step-count s)
      :block-time   (get-in s [:world :block-time])
      :escrow-count (count (get-in s [:world :escrow-transfers]))}))
+
+(defn suggest-actions
+  "Return lightweight action suggestions for an actor without executing anything.
+   This is intentionally advisory to avoid duplicating full protocol transition logic."
+  [session-id actor-id]
+  (if-let [s (get @sessions session-id)]
+    (let [world       (:world s)
+          transfers   (get world :escrow-transfers {})
+          ids         (vec (keys transfers))
+          agent-index (get-in s [:context :agent-index] {})
+          actor       (get agent-index actor-id)
+          actor-addr  (:address actor)
+          templates
+          (vec
+           (concat
+            ;; Always legal: can attempt to create a new escrow.
+            (when actor
+              (let [counterparty (->> agent-index
+                                      vals
+                                      (remove #(= (:id %) actor-id))
+                                      first)]
+                [{:actor-id actor-id
+                  :action "create_escrow"
+                  :params {:token "USDC"
+                           :to (or (:address counterparty) "0xseller")
+                           :amount 5000}}]))
+
+            ;; State-aware, actor-specific suggestions per workflow.
+            (mapcat
+             (fn [[wf et]]
+               (let [st (:escrow-state et)
+                     from (:from et)
+                     to   (:to et)]
+                 (cond
+                   ;; Pending: participants may cancel (role-specific) or raise dispute.
+                   (= st :pending)
+                   (concat
+                    (when (= actor-addr from)
+                      [{:actor-id actor-id :action "sender_cancel" :params {:id wf}}
+                       {:actor-id actor-id :action "release" :params {:id wf}}
+                       {:actor-id actor-id :action "raise_dispute" :params {:id wf}}])
+                    (when (= actor-addr to)
+                      [{:actor-id actor-id :action "recipient_cancel" :params {:id wf}}
+                       {:actor-id actor-id :action "raise_dispute" :params {:id wf}}]))
+
+                   ;; Disputed: keep suggestion conservative; usually requires resolver path.
+                   (= st :disputed)
+                   []
+
+                   :else
+                   [])))
+             transfers))))]
+      {:ok true
+       :session-id session-id
+       :actor-id actor-id
+       :active-workflow-ids ids
+       :suggested-actions templates})
+    {:ok false :error :session-not-found :detail {:session-id session-id}}))
+
+(defn session-signals
+  "Return read-only risk/economic signals for adversarial strategy search."
+  [session-id]
+  (if-let [s (get @sessions session-id)]
+    (let [world     (:world s)
+          transfers (get world :escrow-transfers {})]
+      {:ok true
+       :session-id session-id
+       :block-time (get world :block-time 0)
+       :active-workflow-ids (vec (keys transfers))
+       :pending-count (get world :pending-count 0)
+       :total-fees (get world :total-fees {})
+       :total-held (get world :total-held {})
+       :resolver-stakes (get world :resolver-stakes {})})
+    {:ok false :error :session-not-found :detail {:session-id session-id}}))
+
+(defn evaluate-payoff
+  "Return a simple realised payoff projection for actor-id from canonical world.
+   Keeps payoff logic in Clojure so Python does not duplicate it."
+  [session-id actor-id]
+  (if-let [s (get @sessions session-id)]
+    (let [world     (:world s)
+          stakes    (get world :resolver-stakes {})
+          claimable (get world :claimable {})
+          bonds     (get world :bond-balances {})
+          staked    (get stakes actor-id 0)
+          claim     (reduce + 0 (for [[_ wc] claimable] (get wc actor-id 0)))
+          bonded    (reduce + 0 (for [[_ wb] bonds] (get wb actor-id 0)))
+          net       (+ staked claim bonded)]
+      {:ok true
+       :session-id session-id
+       :actor-id actor-id
+       :stake-locked staked
+       :claimable claim
+       :bond-locked bonded
+       :net-pnl net})
+    {:ok false :error :session-not-found :detail {:session-id session-id}}))

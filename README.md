@@ -83,6 +83,46 @@ nohup clojure -M:run -- -S --port 7070 > grpc-server.log 2>&1 &
 python3 python/invariant_suite.py
 ```
 
+### Adversarial strategy presets (stake-withdraw / fraud discovery)
+
+These presets are tuned for **attack discovery throughput** rather than minimizing rejected actions.
+They use effective-step budgeting so failed probes do not prematurely end a run.
+
+#### Broad discovery preset
+```bash
+python3 python/adversarial_agent.py \
+  --target-effective-steps 40 \
+  --max-attempts 300 \
+  --guided-ratio 0.65 \
+  --rejected-step-weight 0.10
+```
+
+#### Deeper exploit-chain preset
+```bash
+python3 python/adversarial_agent.py \
+  --target-effective-steps 80 \
+  --max-attempts 800 \
+  --guided-ratio 0.80 \
+  --rejected-step-weight 0.05
+```
+
+Tip: for reproducible runs, add `--seed <int>`.
+
+Convenience aliases are also available via `bb`:
+
+```bash
+# Start/verify gRPC server on :50051
+bb adv:server
+
+# Presets
+bb adv:broad
+bb adv:deep
+
+# One-shot helpers (start server, then run preset)
+bb adv:all:broad
+bb adv:all:deep
+```
+
 ### Verify Solidity equivalence
 ```bash
 # From sew-protocol repo
