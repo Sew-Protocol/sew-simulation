@@ -1344,10 +1344,10 @@
 ;;      Pending deadline = 1120+120 = 1240.
 ;;   3. Governance proposes a fraud slash (amount=500).
 ;;      Slash appeal-deadline = 1130+120 = 1250.
-;;   4. Resolver does NOT appeal.  The appeal window passes.
-;;   5. Governance executes the slash at t=1255 (>1250) → slash :executed;
+;;   4. Resolver does not appeal.
+;;   5. Keeper executes the pending settlement first → escrow :released.
+;;   6. Governance executes the slash at t=1255 (>1250) → slash :executed;
 ;;      resolver stake is debited by min(stake, 500).
-;;   6. Keeper executes the pending settlement → escrow :released.
 ;;
 ;; Expected: PASS — the unchallenged slash lifecycle completes without
 ;; any invariant violation.  slash and escrow settlement are independent.
@@ -1383,11 +1383,11 @@
     {:seq 3 :time 1130 :agent "governance" :action "propose_fraud_slash"
      :params {:workflow-id "wf0" :resolver-addr "0xresolver" :amount 500}}
     ;; [Resolver does not appeal — forfeits.]
-    ;; Governance executes after appeal-deadline → slash :executed
-    {:seq 4 :time 1255 :agent "governance" :action "execute_fraud_slash"
+    ;; Settle escrow first (deadline 1240 has passed)
+    {:seq 4 :time 1241 :agent "keeper" :action "execute_pending_settlement"
      :params {:workflow-id "wf0"}}
-    ;; Keeper settles the escrow (deadline 1240 has passed)
-    {:seq 5 :time 1260 :agent "keeper" :action "execute_pending_settlement"
+    ;; Governance executes after appeal-deadline → slash :executed
+    {:seq 5 :time 1255 :agent "governance" :action "execute_fraud_slash"
      :params {:workflow-id "wf0"}}]})
 
 ;; ---------------------------------------------------------------------------
@@ -1406,8 +1406,8 @@
 ;;   4. Resolver appeals within the window → slash :appealed.
 ;;   5. Governance resolves appeal with upheld?=false (appeal rejected).
 ;;      → slash status reverts to :pending (same appeal-deadline = 1250).
-;;   6. Governance executes at t=1255 (>1250) → slash :executed.
-;;   7. Keeper settles the escrow → :released.
+;;   6. Keeper settles the escrow first → :released.
+;;   7. Governance executes at t=1255 (>1250) → slash :executed.
 ;;
 ;; Expected: PASS — full appeal cycle where governance prevails; resolver
 ;; cannot replay the appeal; slash executes on the original timelock.
@@ -1448,11 +1448,11 @@
     ;; Governance rejects the appeal (upheld?=false) → slash returns to :pending
     {:seq 5 :time 1160 :agent "governance" :action "resolve_appeal"
      :params {:workflow-id "wf0" :upheld? false}}
-    ;; Governance executes after original appeal-deadline (1255 > 1250) → :executed
-    {:seq 6 :time 1255 :agent "governance" :action "execute_fraud_slash"
+    ;; Keeper settles the escrow first (pending deadline 1240 has passed)
+    {:seq 6 :time 1241 :agent "keeper" :action "execute_pending_settlement"
      :params {:workflow-id "wf0"}}
-    ;; Keeper settles the escrow → :released
-    {:seq 7 :time 1260 :agent "keeper" :action "execute_pending_settlement"
+    ;; Governance executes after original appeal-deadline (1255 > 1250) → :executed
+    {:seq 7 :time 1255 :agent "governance" :action "execute_fraud_slash"
      :params {:workflow-id "wf0"}}]})
 
 ;; ---------------------------------------------------------------------------
@@ -1471,8 +1471,8 @@
 ;;   4. Governance immediately tries to execute at t=1135 (<1250)
 ;;      → rejected (:timelock-not-expired).
 ;;   5. Slash appeal-deadline passes; no appeal is filed.
-;;   6. Governance retries execute at t=1255 → slash :executed.
-;;   7. Keeper settles the escrow → :released.
+;;   6. Keeper settles the escrow first → :released.
+;;   7. Governance retries execute at t=1255 → slash :executed.
 ;;
 ;; Expected: PASS — pre-window execution is cleanly rejected; state is
 ;; unchanged; the retry after the deadline succeeds.
@@ -1511,11 +1511,11 @@
     {:seq 4 :time 1135 :agent "governance" :action "execute_fraud_slash"
      :params {:workflow-id "wf0"}}
     ;; [Resolver does not appeal.  Appeal window passes.]
-    ;; Governance retries after deadline → slash :executed
-    {:seq 5 :time 1255 :agent "governance" :action "execute_fraud_slash"
+    ;; Keeper settles escrow first (pending deadline 1240 has passed)
+    {:seq 5 :time 1241 :agent "keeper" :action "execute_pending_settlement"
      :params {:workflow-id "wf0"}}
-    ;; Keeper settles the escrow → :released
-    {:seq 6 :time 1260 :agent "keeper" :action "execute_pending_settlement"
+    ;; Governance retries after deadline → slash :executed
+    {:seq 6 :time 1255 :agent "governance" :action "execute_fraud_slash"
      :params {:workflow-id "wf0"}}]})
 
 ;; ---------------------------------------------------------------------------
@@ -1536,10 +1536,11 @@
 ;;   4. Resolver-0 appeals → wf0 slash :appealed.
 ;;      Resolver-1 does NOT appeal (forfeits).
 ;;   5. Governance resolves wf0 appeal with upheld?=true → wf0 slash :reversed.
-;;   6. After appeal-deadline:
+;;   6. Settle both escrows after their pending deadlines.
+;;   7. After appeal-deadline:
 ;;      - Governance tries to execute wf0 slash → rejected (:slash-already-reversed).
 ;;      - Governance executes wf1 slash → :executed.
-;;   7. Keeper executes both pending settlements → wf0 :released, wf1 :released.
+;;      (slashes execute on released escrows, avoiding freeze-on-active-dispute violations).
 ;;
 ;; Expected: PASS — slash operations on wf0 and wf1 are fully isolated;
 ;; reversal on wf0 does not affect wf1; both escrows settle correctly.
@@ -1597,19 +1598,18 @@
     ;; Governance resolves wf0 appeal in resolver-0's favour → wf0 slash :reversed
     {:seq 9 :time 1160 :agent "governance" :action "resolve_appeal"
      :params {:workflow-id "wf0" :upheld? true}}
-    ;; wf0 pending deadline (1240) has passed; wf1 deadline (1245) has NOT yet.
-    ;; Settle wf0 now → no stale violation (wf1 is still within its window).
+    ;; Settle wf0 once its pending deadline has passed.
     {:seq 10 :time 1241 :agent "keeper" :action "execute_pending_settlement"
      :params {:workflow-id "wf0"}}
-    ;; After both slash and wf1 pending deadlines have passed:
+    ;; Settle wf1 after its own pending deadline has passed.
+    {:seq 11 :time 1246 :agent "keeper" :action "execute_pending_settlement"
+     :params {:workflow-id "wf1"}}
+    ;; After slash deadlines have passed:
     ;; Governance tries to execute wf0 slash → rejected (:slash-already-reversed)
-    {:seq 11 :time 1255 :agent "governance" :action "execute_fraud_slash"
+    {:seq 12 :time 1255 :agent "governance" :action "execute_fraud_slash"
      :params {:workflow-id "wf0"}}
     ;; Governance executes wf1 slash (forfeited, status :pending) → :executed
-    {:seq 12 :time 1255 :agent "governance" :action "execute_fraud_slash"
-     :params {:workflow-id "wf1"}}
-    ;; Keeper settles wf1 (the only remaining pending settlement)
-    {:seq 13 :time 1260 :agent "keeper" :action "execute_pending_settlement"
+    {:seq 13 :time 1255 :agent "governance" :action "execute_fraud_slash"
      :params {:workflow-id "wf1"}}]})
 
 ;; ---------------------------------------------------------------------------

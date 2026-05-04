@@ -15,6 +15,23 @@
             [clojure.data.json :as json]
             [clojure.string    :as str]))
 
+(def ^:private canonical-transitions
+  "Release-candidate transition catalog used to compute explicit unhit backlog.
+   Keep this aligned with supported protocol actions."
+  #{:create_escrow
+    :raise_dispute
+    :execute_resolution
+    :execute_pending_settlement
+    :automate_timed_actions
+    :release
+    :sender_cancel
+    :recipient_cancel
+    :auto_cancel_disputed
+    :advance_time
+    :escalate_dispute
+    :register_stake
+    :challenge_resolution})
+
 ;; ---------------------------------------------------------------------------
 ;; Directory scan
 ;; ---------------------------------------------------------------------------
@@ -35,16 +52,37 @@
     (with-open [r (io/reader file)]
       (let [raw (json/read r :key-fn keyword)
             purpose     (safe-keyword (:purpose raw))
-            threat-tags (mapv safe-keyword (get raw :threat-tags []))]
+            threat-tags (mapv safe-keyword (get raw :threat-tags []))
+            events      (get raw :events [])
+            transitions (->> events
+                             (map :action)
+                             (keep safe-keyword)
+                             vec)
+            guards      (->> events
+                             (keep (fn [e]
+                                     (when (true? (get e :adversarial?))
+                                       {:guard :adversarial-attempt
+                                        :transition (safe-keyword (:action e))})))
+                             vec)]
         {:file           (.getName file)
          :path           (.getPath file)
          :id             (or (:id raw) (keyword (str/replace (.getName file) #"\.trace\.json$" "")))
          :title          (or (:title raw) "")
          :schema-version (or (str (:schema-version raw)) "unknown")
          :purpose        purpose
-         :threat-tags    (filterv some? threat-tags)}))
+         :threat-tags    (filterv some? threat-tags)
+         :transitions    transitions
+         :guards         guards}))
     (catch Exception _
       nil)))
+
+(defn- scenario-outcome-label [{:keys [id]}]
+  (let [s (if (keyword? id) (name id) (str id))]
+    (cond
+      (str/includes? s "-fail") :fail
+      (str/includes? s "-inconclusive") :inconclusive
+      (str/includes? s "-not-applicable") :not-applicable
+      :else :pass)))
 
 (defn scan-traces
   "Scan a directory for .trace.json files and return a vector of metadata maps.
@@ -95,14 +133,86 @@
      :by-threat-tag     — {tag [id ...]}
      :threat-tag-freq   — {tag count} sorted by frequency desc
      :unclassified-count — count of scenarios with no :purpose
-     :scenarios         — full metadata seq"
+      :scenarios         — full metadata seq
+
+     Transition coverage additions:
+      :transition-hit-freq              — {transition count}
+      :transition-outcome-freq          — {transition {:pass n :fail n ...}}
+      :transition-by-purpose-hit-freq   — {purpose {transition count}}
+      :transition-by-threat-tag-hit-freq— {tag {transition count}}
+      :guard-hit-freq                   — {guard count}
+      :guard-by-purpose-hit-freq        — {purpose {guard count}}
+      :guard-by-threat-tag-hit-freq     — {tag {guard count}}
+      :unhit-transitions                — [transition ...]
+      :canonical-transitions            — all tracked transitions"
   [scenarios]
   (let [classified   (filter :purpose scenarios)
         unclassified (remove :purpose scenarios)
         by-purpose   (-> (group-ids-by :purpose classified)
                          (assoc :unclassified (mapv :id unclassified)))
         by-version   (->> (group-by :schema-version scenarios)
-                          (reduce-kv (fn [m k vs] (assoc m k (count vs))) {}))]
+                          (reduce-kv (fn [m k vs] (assoc m k (count vs))) {}))
+        transition-hit-freq
+        (->> scenarios (mapcat :transitions) frequencies (into (sorted-map)))
+        transition-outcome-freq
+        (reduce (fn [m s]
+                  (let [o (scenario-outcome-label s)]
+                    (reduce (fn [m2 t]
+                              (update-in m2 [t o] (fnil inc 0)))
+                            m
+                            (:transitions s))))
+                {}
+                scenarios)
+        transition-by-purpose-hit-freq
+        (->> scenarios
+             (group-by #(or (:purpose %) :unclassified))
+             (reduce-kv (fn [m p ss]
+                          (assoc m p (->> ss (mapcat :transitions) frequencies (into (sorted-map)))))
+                        {}))
+        transition-by-threat-tag-hit-freq
+        (reduce (fn [m s]
+                  (reduce (fn [m2 ttag]
+                            (reduce (fn [m3 tr]
+                                      (update-in m3 [ttag tr] (fnil inc 0)))
+                                    m2
+                                    (:transitions s)))
+                          m
+                          (if (seq (:threat-tags s))
+                            (:threat-tags s)
+                            [:untagged])))
+                {}
+                scenarios)
+        guard-hit-freq
+        (->> scenarios
+             (mapcat :guards)
+             (map :guard)
+             frequencies
+             (into (sorted-map)))
+        guard-by-purpose-hit-freq
+        (->> scenarios
+             (group-by #(or (:purpose %) :unclassified))
+             (reduce-kv (fn [m p ss]
+                          (assoc m p (->> ss (mapcat :guards) (map :guard) frequencies (into (sorted-map)))))
+                        {}))
+        guard-by-threat-tag-hit-freq
+        (reduce (fn [m s]
+                  (let [guards (map :guard (:guards s))]
+                    (reduce (fn [m2 ttag]
+                              (reduce (fn [m3 g]
+                                        (update-in m3 [ttag g] (fnil inc 0)))
+                                      m2
+                                      guards))
+                            m
+                            (if (seq (:threat-tags s))
+                              (:threat-tags s)
+                              [:untagged]))))
+                {}
+                scenarios)
+        seen-transitions (set (keys transition-hit-freq))
+        unhit-transitions (->> canonical-transitions
+                               (remove seen-transitions)
+                               sort
+                               vec)]
     {:total              (count scenarios)
      :schema-versions    by-version
      :by-purpose         by-purpose
@@ -111,6 +221,15 @@
                              (assoc s :id (:id s) :_tag t)))
      :threat-tag-freq    (threat-tag-frequency scenarios)
      :unclassified-count (count unclassified)
+      :transition-hit-freq transition-hit-freq
+      :transition-outcome-freq transition-outcome-freq
+      :transition-by-purpose-hit-freq transition-by-purpose-hit-freq
+      :transition-by-threat-tag-hit-freq transition-by-threat-tag-hit-freq
+      :guard-hit-freq guard-hit-freq
+      :guard-by-purpose-hit-freq guard-by-purpose-hit-freq
+      :guard-by-threat-tag-hit-freq guard-by-threat-tag-hit-freq
+      :canonical-transitions canonical-transitions
+      :unhit-transitions unhit-transitions
      :scenarios          scenarios}))
 
 ;; ---------------------------------------------------------------------------

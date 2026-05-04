@@ -118,7 +118,7 @@ run_contracts() {
   grep -q 'make-method "DestroySession"' src/resolver_sim/server/grpc.clj
   grep -q 'snake_case' src/resolver_sim/server/grpc.clj
 
-  # Scenario naming convention sanity checks for Sxx traces
+  # Scenario naming convention sanity checks (supports legacy + canonical ids)
   python - <<'PY'
 import json
 import pathlib
@@ -126,10 +126,26 @@ import re
 import sys
 
 root = pathlib.Path('data/fixtures/traces')
-pat = re.compile(r'^s\d{2}[a-z]?-[a-z0-9\-]+\.trace\.json$')
+pat_s = re.compile(r'^s\d{2}[a-z]?-[a-z0-9\-]+\.trace\.json$')
+pat_other = re.compile(r'^(eq-v\d+|spe-v\d+)-[a-z0-9\-]+\.trace\.json$')
 bad = []
-for p in sorted(root.glob('s*.trace.json')):
-    if not pat.match(p.name):
+for p in sorted(root.glob('*.trace.json')):
+    name = p.name
+    is_eq_spe = name.startswith('eq-v') or name.startswith('spe-v')
+    is_sxx = bool(re.match(r'^s\d{2}[a-z]?-', name))
+
+    # Validate known canonical families only; allow legacy/non-canonical
+    # traces (e.g. same-block-ordering.trace.json) to coexist.
+    if is_eq_spe:
+        if not pat_other.match(name):
+            bad.append(f"bad-filename:{p}")
+            continue
+    elif is_sxx:
+        if not pat_s.match(name):
+            bad.append(f"bad-filename:{p}")
+            continue
+
+    if is_eq_spe and not pat_other.match(name):
         bad.append(f"bad-filename:{p}")
         continue
     try:
@@ -140,9 +156,10 @@ for p in sorted(root.glob('s*.trace.json')):
     sid = obj.get('id')
     if sid:
         sid_s = str(sid)
-        expected = p.name.replace('.trace.json', '')
-        if sid_s != expected:
-            bad.append(f"id-mismatch:{p}:id={sid_s}:expected={expected}")
+        stem = p.name.replace('.trace.json', '')
+        valid_ids = {stem, f"scenarios/{stem}"}
+        if sid_s not in valid_ids:
+            bad.append(f"id-mismatch:{p}:id={sid_s}:expected-one-of={sorted(valid_ids)}")
 
 if bad:
     print("Scenario naming/ID convention checks failed:")

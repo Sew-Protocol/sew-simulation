@@ -27,6 +27,12 @@
   test:triage {:doc "Run failure triage grouped by purpose/threat-tag"
                :task (shell "./scripts/test.sh triage")}
 
+  adv:sweep {:doc "Run adversarial profitability sweeps and generate safe/unsafe regions"
+             :task (shell "python3 python/adversarial_profitability_sweep.py")}
+
+  adv:sweep:promote {:doc "Run sweep and emit top risky promotion backlog"
+                     :task (shell "python3 python/adversarial_profitability_sweep.py --top-n 20")}
+
   lint {:doc "Lint code with clj-kondo"
         :task (clojure {:dir "." :extra-deps {clj-kondo/clj-kondo {:mvn/version "2024.01.11"}}}
                        "-m" "clj-kondo.main" "--lint" "src:test")}
@@ -43,6 +49,11 @@
           :task (clojure {:dir "."}
                          "-M" "-e"
                          "(require '[resolver-sim.scenario.coverage :as cov] '[resolver-sim.sim.reporter :as r]) (r/print-coverage (cov/coverage-report))")}
+
+  report:release-gate {:doc "Print transition/guard coverage + unhit transition backlog"
+                       :task (clojure {:dir "."}
+                                      "-M" "-e"
+                                      "(require '[resolver-sim.scenario.coverage :as cov] '[resolver-sim.sim.reporter :as r]) (r/print-coverage (cov/coverage-report))")}
 
   report:dir {:doc "Print scenario coverage report for a directory. Usage: bb report:dir data/fixtures/traces"
               :task (clojure {:dir "."}

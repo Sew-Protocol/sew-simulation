@@ -41,6 +41,36 @@ results/test-artifacts/test-summary.json
 
 It includes per-target status, exit codes, durations, and log file paths.
 
+### Transition/guard coverage release gate
+
+```bash
+bb report:release-gate
+```
+
+Prints:
+- transition hit frequencies
+- guard hit frequencies
+- purpose-grouped hit maps
+- explicit **unhit transition backlog** for release-candidate closure
+
+### Adversarial profitability surfaces (rational-agent coverage)
+
+```bash
+bb adv:sweep
+```
+
+Outputs:
+- `results/profitability-surfaces/<timestamp>/surface.csv`
+- `results/profitability-surfaces/<timestamp>/surface.json`
+- `results/profitability-surfaces/<timestamp>/regions.json`
+- `results/profitability-surfaces/<timestamp>/promotions.json`
+
+For expanded promotion backlog:
+
+```bash
+bb adv:sweep:promote
+```
+
 ### Run specific phase
 ```bash
 ./run.sh phase-i      # Phase I only (1D + 2D sweeps)

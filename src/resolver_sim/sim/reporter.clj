@@ -98,6 +98,11 @@
         versions  (:schema-versions report {})
         by-purpose (:by-purpose report {})
         tag-freq  (:threat-tag-freq report {})
+        transition-freq (:transition-hit-freq report {})
+        transition-by-purpose (:transition-by-purpose-hit-freq report {})
+        guard-freq (:guard-hit-freq report {})
+        guard-by-purpose (:guard-by-purpose-hit-freq report {})
+        unhit-transitions (:unhit-transitions report [])
         uncl      (:unclassified-count report 0)
         v11-count (get versions "1.1" 0)]
     (println "\n╔══════════════════════════════════════════════════════════════════╗")
@@ -133,6 +138,51 @@
         (doseq [[tag cnt] (sort-by (comp - val) tag-freq)]
           (println (str "    " (format "%-32s" (name tag)) cnt " scenario(s)"))))
       (println "  Threat tags: none tagged"))
+    (println)
+
+    ;; Transition coverage
+    (if (seq transition-freq)
+      (do
+        (println "  Transition hits (all scenarios):")
+        (doseq [[tr cnt] (sort-by (comp - val) transition-freq)]
+          (println (str "    " (format "%-32s" (name tr)) cnt " hit(s)"))))
+      (println "  Transition hits: none"))
+    (println)
+
+    ;; Transition coverage by purpose
+    (when (seq transition-by-purpose)
+      (println "  Transition hits by purpose:")
+      (doseq [[p tf] (sort-by (comp str key) transition-by-purpose)
+              :when (seq tf)]
+        (println (str "    " (format "%-28s" (purpose-label p))))
+        (doseq [[tr cnt] (sort-by (comp - val) tf)]
+          (println (str "      · " (format "%-28s" (name tr)) cnt)))))
+    (println)
+
+    ;; Guard coverage
+    (if (seq guard-freq)
+      (do
+        (println "  Guard hits (all scenarios):")
+        (doseq [[g cnt] (sort-by (comp - val) guard-freq)]
+          (println (str "    " (format "%-32s" (name g)) cnt " hit(s)"))))
+      (println "  Guard hits: none"))
+    (println)
+
+    (when (seq guard-by-purpose)
+      (println "  Guard hits by purpose:")
+      (doseq [[p gf] (sort-by (comp str key) guard-by-purpose)
+              :when (seq gf)]
+        (println (str "    " (format "%-28s" (purpose-label p))))
+        (doseq [[g cnt] (sort-by (comp - val) gf)]
+          (println (str "      · " (format "%-28s" (name g)) cnt)))))
+    (println)
+
+    ;; Explicit release backlog
+    (println "  Unhit transitions backlog (release gate):")
+    (if (seq unhit-transitions)
+      (doseq [tr unhit-transitions]
+        (println (str "    · " (name tr))))
+      (println "    none (all canonical transitions covered)"))
     (println)
 
     ;; Summary
