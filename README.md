@@ -106,6 +106,18 @@ These metrics are intentionally concrete and repository-verifiable.
 
 ## Quick Start
 
+### Canonical validation command (recommended)
+```bash
+./scripts/test.sh all
+```
+
+This is the authoritative test entrypoint for this repository. It runs:
+- Clojure unit tests
+- generator/property regression tests
+- cross-layer contract checks (`proto/simulation.proto` ↔ `server/grpc.clj` ↔ `python/sew_sim/grpc_client.py`)
+- deterministic invariant scenarios (`--invariants`)
+- fixture suites (`all-invariants`, `equilibrium-validation`, `spe-validation`)
+
 ### Run invariant validation suite (fast, in-process)
 ```bash
 clojure -M:run -- --invariants

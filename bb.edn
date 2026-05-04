@@ -6,20 +6,26 @@
   sweep {:doc "Run a parameter sweep"
          :task (println "Sweep task - run with bb sweep data/params/baseline.edn")}
 
-  test {:doc "Run canonical test script (all)"
+  test {:doc "Run canonical validation gate (all targets via scripts/test.sh)"
         :task (shell "./scripts/test.sh all")}
 
-  test:unit {:doc "Run unit-only tests"
+  test:unit {:doc "Run canonical unit target"
              :task (shell "./scripts/test.sh unit")}
 
-  test:generators {:doc "Run generator regression tests"
+  test:generators {:doc "Run canonical generator/property regression target"
                    :task (shell "./scripts/test.sh generators")}
 
-  test:invariants {:doc "Run deterministic invariant scenarios"
+  test:contracts {:doc "Run canonical cross-layer contract target (proto/service/wire compatibility)"
+                  :task (shell "./scripts/test.sh contracts")}
+
+  test:invariants {:doc "Run canonical deterministic invariant target (S01–S41)"
                    :task (shell "./scripts/test.sh invariants")}
 
-  test:suites {:doc "Run fixture suites"
+  test:suites {:doc "Run canonical fixture suites target"
                :task (shell "./scripts/test.sh suites")}
+
+  test:triage {:doc "Run failure triage grouped by purpose/threat-tag"
+               :task (shell "./scripts/test.sh triage")}
 
   lint {:doc "Lint code with clj-kondo"
         :task (clojure {:dir "." :extra-deps {clj-kondo/clj-kondo {:mvn/version "2024.01.11"}}}
