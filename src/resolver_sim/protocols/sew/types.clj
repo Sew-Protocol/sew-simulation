@@ -272,9 +272,10 @@
   (contains? #{:released :refunded :resolved} (escrow-state world workflow-id)))
 
 (defn valid-workflow-id?
-  "True if workflow-id exists in escrow-transfers. Normalizes string IDs."
+  "True if workflow-id exists in escrow-transfers. Normalizes to string IDs."
   [world workflow-id]
-  (let [wf-id (if (string? workflow-id) workflow-id (str workflow-id))]
+  (let [wf-id (str workflow-id)  ; Convert anything to string
+        wf-id (clojure.string/replace wf-id ":" "")]  ; Remove colon if keyword
     (contains? (:escrow-transfers world) wf-id)))
 
 (defn dispute-level
