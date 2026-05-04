@@ -124,6 +124,46 @@
      :ok         (boolean (:ok result))
      :error      (some-> (:error result) name)}))
 
+(defn- handle-get-session-state
+  "GetSessionState: return the full internal world map.
+   req: {:session-id}"
+  [req]
+  (let [sid    (:session-id req)
+        result (session/get-session-state sid)]
+    (if (:ok result)
+      {:session-id sid
+       :ok         true
+       :world      (:world result)}
+      {:session-id sid
+       :ok         false
+       :error      (some-> (:error result) name)})))
+
+(defn- handle-suggest-actions
+  "SuggestActions: return advisory valid-ish actions from Clojure-owned state.
+   req: {:session-id :actor-id}"
+  [req]
+  (session/suggest-actions (:session-id req) (:actor-id req)))
+
+(defn- handle-session-signals
+  "SessionSignals: return read-only risk/economic signals.
+   req: {:session-id}"
+  [req]
+  (session/session-signals (:session-id req)))
+
+(defn- handle-evaluate-payoff
+  "EvaluatePayoff: return Clojure-side payoff projection for an actor.
+   req: {:session-id :actor-id}"
+  [req]
+  (session/evaluate-payoff (:session-id req) (:actor-id req)))
+
+(defn- handle-evaluate-attack-objective
+  "EvaluateAttackObjective: objective score/decomposition from canonical world.
+   req: {:session-id :actor-id :objective}"
+  [req]
+  (session/evaluate-attack-objective (:session-id req)
+                                     (:actor-id req)
+                                     (:objective req)))
+
 ;; ---------------------------------------------------------------------------
 ;; Unary call handler wrapper
 ;; ---------------------------------------------------------------------------
@@ -153,15 +193,30 @@
   (let [start-m   (make-method "StartSession")
         step-m    (make-method "Step")
         destroy-m (make-method "DestroySession")
+        state-m   (make-method "GetSessionState")
+        suggest-m (make-method "SuggestActions")
+        signals-m (make-method "SessionSignals")
+        payoff-m  (make-method "EvaluatePayoff")
+        objective-m (make-method "EvaluateAttackObjective")
         svc-desc  (-> (ServiceDescriptor/newBuilder "sew.simulation.SimulationEngine")
                       (.addMethod start-m)
                       (.addMethod step-m)
                       (.addMethod destroy-m)
+                      (.addMethod state-m)
+                      (.addMethod suggest-m)
+                      (.addMethod signals-m)
+                      (.addMethod payoff-m)
+                      (.addMethod objective-m)
                       (.build))]
     (-> (ServerServiceDefinition/builder svc-desc)
         (.addMethod start-m   (unary-handler handle-start))
         (.addMethod step-m    (unary-handler handle-step))
         (.addMethod destroy-m (unary-handler handle-destroy))
+        (.addMethod state-m   (unary-handler handle-get-session-state))
+        (.addMethod suggest-m (unary-handler handle-suggest-actions))
+        (.addMethod signals-m (unary-handler handle-session-signals))
+        (.addMethod payoff-m  (unary-handler handle-evaluate-payoff))
+        (.addMethod objective-m (unary-handler handle-evaluate-attack-objective))
         (.build))))
 
 ;; ---------------------------------------------------------------------------
@@ -188,21 +243,20 @@
      (println (str "[grpc] SimulationEngine listening on port " port))
      srv)))
 
-  (defn stop!
-  "Gracefully shut down the running gRPC server.
-  No-op if no server is running."
-  []
-  (when-let [srv @server]
-   (.shutdown srv)
-   (reset! server nil)
-   (println "[grpc] SimulationEngine stopped")))
-
-  (defn port
-  "Return the port the running server is bound to, or nil."
+(defn port
+  "Return bound port for the running server, or nil if not running."
   []
   (some-> @server .getPort))
 
-  (defn await-termination
+(defn stop!
+  "Stop the running gRPC server."
+  []
+  (when-let [srv @server]
+    (.shutdown srv)
+    (reset! server nil)
+    (println "[grpc] Server stopped.")))
+
+(defn await-termination
   "Block until the server shuts down. Useful for CLI entry points."
   []
   (some-> @server .awaitTermination))

@@ -232,26 +232,27 @@
           result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
                      :subgame-perfect-equilibrium)]
       (is (= :inconclusive (:status result)))
-      (is (= :no-decisions (:basis result)))))
+      (is (= :absent-evidence (:basis result)))))
 
   (testing "SPE inconclusive when trace is not terminal"
     (let [proj {:raw-trace [{:world {}}]
-                :decisions [{:seq 1 :agent "buyer" :action "escalate_dispute"}]
+                :decisions [{:index 0 :seq 1 :agent "buyer" :action "escalate_dispute"}]
                 :terminal-world {:terminal? false}}
           result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
                      :subgame-perfect-equilibrium)]
       (is (= :inconclusive (:status result)))
-      (is (= :insufficient-information (:basis result)))))
+      (is (= :multi-trace-required (:basis result)))))
 
   (testing "SPE PASS: rational escalation (won after appeal)"
     (let [proj {:raw-trace [{:world {:claimable {"e1" {"buyer" 0}}}}    ; t=0
                             {:world {:bond-balances {"e1" {"buyer" 50}}}}  ; t=1 (escalate)
                             {:world {:claimable {"e1" {"buyer" 150}}}}] ; t=2 (won: escrow 100 + bond 50)
-                :decisions [{:seq 1 :agent "buyer" :action "escalate_dispute"}]
+                :decisions [{:index 1 :seq 1 :agent "buyer" :action "escalate_dispute"}]
                 :terminal-world {:terminal? true}}
           result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
                      :subgame-perfect-equilibrium)]
       (is (= :pass (:status result)))
+      (is (= :single-trace-node-proxy (:basis result)))
       (is (= 1 (get-in result [:observed :decisions-checked])))
       (is (= :pass (get-in result [:observed :spe-status])))))
 
@@ -259,11 +260,12 @@
     (let [proj {:raw-trace [{:world {:claimable {"e1" {"buyer" 0}}}}    ; t=0
                             {:world {:bond-balances {"e1" {"buyer" 50}}}}  ; t=1 (escalate)
                             {:world {:claimable {"e1" {"buyer" 0}}}}] ; t=2 (lost: bond slashed)
-                :decisions [{:seq 1 :agent "buyer" :action "escalate_dispute"}]
+                :decisions [{:index 1 :seq 1 :agent "buyer" :action "escalate_dispute"}]
                 :terminal-world {:terminal? true}}
           result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
                      :subgame-perfect-equilibrium)]
       (is (= :fail (:status result)))
+      (is (= :single-trace-node-proxy (:basis result)))
       (is (= 1 (count (get-in result [:observed :spe-violations]))))
       (is (= 50 (get-in result [:offending 0 :loss])))
       (is (= :ex-post-regret (get-in result [:offending 0 :class])))))
@@ -272,7 +274,7 @@
     (let [proj {:raw-trace [{:world {:claimable {"e1" {"seller" 0}}}}
                             {:world {:claimable {"e1" {"seller" 0}}}}
                             {:world {:claimable {"e1" {"seller" 100}}}}]
-                :decisions [{:seq 1 :agent "seller" :action "raise_dispute"}]
+                :decisions [{:index 1 :seq 1 :agent "seller" :action "raise_dispute"}]
                 :terminal-world {:terminal? true}}
           result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
                      :subgame-perfect-equilibrium)]
@@ -283,8 +285,8 @@
                             {:world {:bond-balances {"e1" {"a" 10}}}} ; a escalate
                             {:world {:bond-balances {"e1" {"a" 10 "b" 10}}}} ; b escalate
                             {:world {:claimable {"e1" {"a" 0 "b" 0}}}}] ; both lost
-                :decisions [{:seq 1 :agent "a" :action "escalate_dispute"}
-                            {:seq 2 :agent "b" :action "escalate_dispute"}]
+                :decisions [{:index 1 :seq 1 :agent "a" :action "escalate_dispute"}
+                            {:index 2 :seq 2 :agent "b" :action "escalate_dispute"}]
                 :terminal-world {:terminal? true}}
           result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
                      :subgame-perfect-equilibrium)]

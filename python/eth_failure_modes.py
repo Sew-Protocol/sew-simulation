@@ -176,9 +176,9 @@ def s24_f1_liveness_extraction() -> tuple[RunResult, bool]:
     result = run_scenario(
         "S24",
         agents_meta=[
-            {"id": "attacker", "address": "0xattacker", "type": "honest"},
-            {"id": "seller",   "address": "0xseller",   "type": "honest"},
-            {"id": "resolver", "address": "0xresolver", "type": "resolver"},
+            {"id": "attacker", "address": "0xattacker", "strategy": "honest"},
+            {"id": "seller",   "address": "0xseller",   "strategy": "honest"},
+            {"id": "resolver", "address": "0xresolver", "role": "resolver"},
         ],
         live_agents=[
             attacker,
@@ -225,10 +225,10 @@ def s25_f2_appeal_window_race() -> tuple[RunResult, bool]:
     result = run_scenario(
         "S25",
         agents_meta=[
-            {"id": "buyer",    "address": "0xbuyer",  "type": "honest"},
-            {"id": "seller",   "address": "0xseller", "type": "honest"},
-            {"id": "l0",       "address": "0xl0",     "type": "resolver"},
-            {"id": "attacker", "address": "0xracer",  "type": "honest"},
+            {"id": "buyer",    "address": "0xbuyer",  "strategy": "honest"},
+            {"id": "seller",   "address": "0xseller", "strategy": "honest"},
+            {"id": "l0",       "address": "0xl0",     "role": "resolver"},
+            {"id": "attacker", "address": "0xracer",  "strategy": "honest"},
         ],
         live_agents=[
             GriefingBuyerLive("buyer", "0xseller"),
@@ -279,12 +279,12 @@ def s27_f4_escalation_loop_amplification() -> tuple[RunResult, bool]:
     result = run_scenario(
         "S27",
         agents_meta=[
-            {"id": "buyer",    "address": "0xbuyer",  "type": "honest"},
-            {"id": "seller",   "address": "0xseller", "type": "honest"},
-            {"id": "l0",       "address": "0xl0",     "type": "resolver"},
-            {"id": "l1",       "address": "0xl1",     "type": "resolver"},
-            {"id": "l2",       "address": "0xl2",     "type": "resolver"},
-            {"id": "attacker", "address": "0xloopattacker", "type": "honest"},
+            {"id": "buyer",    "address": "0xbuyer",  "strategy": "honest"},
+            {"id": "seller",   "address": "0xseller", "strategy": "honest"},
+            {"id": "l0",       "address": "0xl0",     "role": "resolver"},
+            {"id": "l1",       "address": "0xl1",     "role": "resolver"},
+            {"id": "l2",       "address": "0xl2",     "role": "resolver"},
+            {"id": "attacker", "address": "0xloopattacker", "strategy": "honest"},
         ],
         live_agents=[
             GriefingBuyerLive("buyer", "0xseller"),
@@ -431,8 +431,8 @@ def s28_f5_concurrent_status_desync() -> tuple[RunResult, bool]:
     result_a = run_scenario(
         "S28a",
         agents_meta=[
-            {"id": "buyer",  "address": "0xbuyer",  "type": "honest"},
-            {"id": "seller", "address": "0xseller", "type": "honest"},
+            {"id": "buyer",  "address": "0xbuyer",  "strategy": "honest"},
+            {"id": "seller", "address": "0xseller", "strategy": "honest"},
         ],
         live_agents=[CancelThenDisputeBuyerLive("buyer", "0xseller")],
         max_steps=20, max_ticks=10,
@@ -442,8 +442,8 @@ def s28_f5_concurrent_status_desync() -> tuple[RunResult, bool]:
     result_b = run_scenario(
         "S28b",
         agents_meta=[
-            {"id": "buyer",  "address": "0xbuyer",  "type": "honest"},
-            {"id": "seller", "address": "0xseller", "type": "honest"},
+            {"id": "buyer",  "address": "0xbuyer",  "strategy": "honest"},
+            {"id": "seller", "address": "0xseller", "strategy": "honest"},
         ],
         live_agents=[DisputeThenCancelBuyerLive("buyer", "0xseller")],
         max_steps=20, max_ticks=10,

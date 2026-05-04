@@ -284,10 +284,11 @@
 
 (defn classify-actor-type
   "Infer the structural :actor/type keyword from an agent map.
-   Agent maps have :type 'honest' | 'resolver' | 'governance' | 'keeper' | ...
-   Structural type is derived from the declared role, defaulting to :observer."
+   Agent maps have :role 'resolver' | 'governance' | 'keeper' | ...
+   Structural type is derived from the declared role, defaulting to :observer.
+   Falls back to :type for backward compatibility."
   [agent-map]
-  (case (or (:type agent-map) (:role agent-map) "observer")
+  (case (or (:role agent-map) (:type agent-map) "observer")
     "resolver"   :resolver
     "governance" :governance
     "keeper"     :keeper
@@ -297,9 +298,10 @@
 
 (defn classify-actor-role
   "Derive the behavioural :actor/role keyword from an agent map.
-   Declared :role or :type field on the agent is the primary signal."
+   Declared :strategy or :behavior field is the primary signal.
+   Falls back to :role or :type for backward compatibility."
   [agent-map]
-  (case (or (:role agent-map) (:type agent-map) "honest")
+  (case (or (:strategy agent-map) (:behavior agent-map) (:role agent-map) (:type agent-map) "honest")
     "honest"      :honest
     "rational"    :rational
     "malicious"   :malicious

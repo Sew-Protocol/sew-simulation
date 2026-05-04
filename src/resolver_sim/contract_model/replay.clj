@@ -1,17 +1,21 @@
 (ns resolver-sim.contract-model.replay
-  "Open-world scenario replay engine. (Protocol-Agnostic Kernel)
+  "Open-world scenario replay engine. (Protocol Simulation Kernel)
+  
+    Provides the deterministic harness for executing scenarios. This engine 
+    is designed as a protocol-agnostic template and is currently instantiated 
+    for the SEW Protocol. Implementation details (actions, invariants, 
+    snapshots) are protocol-specific.
 
-   Provides the deterministic harness for executing scenarios.
-   Implementation details (actions, invariants, snapshots) are delegated to a
-   DisputeProtocol implementation.
+    DisputeProtocol implementation.
 
-   ## Replay Invariants
-   After every successful transition:
-     1. protocol/check-invariants-single
-     2. protocol/check-invariants-transition"
-  (:require [clojure.data.json              :as json]
-            [clojure.string                :as str]
-            [resolver-sim.protocols.protocol :as engine]))
+    ## Replay Invariants
+    After every successful transition:
+      1. protocol/check-invariants-single
+      2. protocol/check-invariants-transition"
+   (:require [clojure.data.json              :as json]
+             [clojure.stacktrace             :as st]
+             [clojure.string                :as str]
+             [resolver-sim.protocols.protocol :as engine]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -34,7 +38,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn validate-agents
-  "Validate a list of agent maps {:id :address :type ...} for structural correctness.
+  "Validate a list of agent maps {:id :address :role :strategy ...} for structural correctness.
    Returns {:ok true} or {:ok false :error kw :detail {...}}.
 
    Checks: non-empty, unique :id values, unique :address values."
@@ -263,7 +267,8 @@
         ;; agent type as "attacker" (which would inflate attack-successes for
         ;; legitimate accepted actions by the same agent).
         attack?   (or (:adversarial? event)
-                      (= "attacker" (:type agent)))
+                      (= "malicious" (:strategy agent))
+                      (= "attacker" (:role agent)))
         tags      (:event-tags trace-entry)
         ;; double-settlements: a second accepted lifecycle-ending action on what
         ;; is (for single-escrow scenarios) already a resolved/settled workflow.
@@ -364,10 +369,13 @@
             result     (try
                          (engine/dispatch-action protocol context world-t event)
                          (catch Exception e
+                           (println "[CRITICAL] Dispatch Exception:" (.getMessage e))
+                           (.printStackTrace e)
                            {:ok false :error :dispatch-exception
-                            :detail {:message (.getMessage e)}}))
+                            :detail {:message (.getMessage e)
+                                     :stack   (with-out-str (st/print-stack-trace e))}}))
             ok?        (:ok result)
-            world-next (if ok? (:world result) world-t)
+            world-next (if (and ok? (:world result)) (:world result) world-t)
 
             inv-single (when ok? (engine/check-invariants-single protocol world-next))
             inv-trans  (when ok? (engine/check-invariants-transition protocol world-t world-next))
@@ -391,8 +399,8 @@
             :result          result-kw
             :error           error-kw
             :extra           (:extra result)
-            :event-tags      event-tags
-            :invariants-ok?  (if ok? (and (:ok? inv-single) (:ok? inv-trans)) true)
+            :detail          (:detail result)
+            :event-tags      event-tags            :invariants-ok?  (if ok? (and (:ok? inv-single) (:ok? inv-trans)) true)
             :violations      all-violations
             :trace-metadata  (engine/classify-transition protocol (:action event) result-kw)
             :world           (engine/world-snapshot protocol final-world)
@@ -403,6 +411,8 @@
 ;; ---------------------------------------------------------------------------
 ;; Public API (Generic)
 ;; ---------------------------------------------------------------------------
+
+(require '[clojure.tools.logging :as log])
 
 (defn replay-with-protocol
   "Replay a scenario map using a specific DisputeProtocol implementation."
@@ -415,18 +425,22 @@
             context  (engine/build-execution-context protocol agents p-params)
             agent-index (:agent-index context)
             world0  (engine/init-world protocol scenario)
-            events  (sort-by :seq (:events scenario))]
+            events  (sort-by :seq (:events scenario))
+            scenario-id (:scenario-id scenario)]
+        (log/info :scenario/start {:id scenario-id})
         (loop [world world0 events events trace [] metrics (zero-metrics) id-alias-map {}]
           (if (empty? events)
             (let [open (when-not (:allow-open-disputes? scenario)
                          (seq (engine/open-disputes protocol world)))]
               (if open
-                {:outcome :fail :scenario-id (:scenario-id scenario) :events-processed (count trace) :halt-reason :open-disputes-at-end :detail {:open-disputes (vec open)} :trace trace :metrics metrics}
-                {:outcome :pass :scenario-id (:scenario-id scenario) :events-processed (count trace) :trace trace :metrics metrics}))
+                {:outcome :fail :scenario-id scenario-id :events-processed (count trace) :halt-reason :open-disputes-at-end :detail {:open-disputes (vec open)} :trace trace :metrics metrics}
+                (do
+                  (log/info :scenario/end {:id scenario-id :outcome :pass})
+                  {:outcome :pass :scenario-id scenario-id :events-processed (count trace) :trace trace :metrics metrics})))
             (let [raw-event  (first events)
                   alias-res  (engine/resolve-id-alias protocol raw-event id-alias-map)]
               (if-not (:ok alias-res)
-                {:outcome :invalid :scenario-id (:scenario-id scenario) :events-processed (count trace) :halted-at-seq (:seq raw-event) :halt-reason :unresolved-alias :detail (dissoc alias-res :ok) :trace trace :metrics metrics}
+                {:outcome :invalid :scenario-id scenario-id :events-processed (count trace) :halted-at-seq (:seq raw-event) :halt-reason :unresolved-alias :detail (dissoc alias-res :ok) :trace trace :metrics metrics}
                 (let [event    (:event alias-res)
                       step     (process-step protocol context world event)
                       entry    (:trace-entry step)
@@ -437,8 +451,15 @@
                       new-alias-map (if created
                                       (assoc id-alias-map (:save-id-as raw-event) created)
                                       id-alias-map)]
+                  
+                  ;; Telemetry hook
+                  (tap> {:scenario-id scenario-id :seq (:seq event) :world world :entry entry})
+                  (log/debug :scenario/step {:id scenario-id :seq (:seq event) :action (:action event)})
+
                   (if (:halted? step)
-                    {:outcome :fail :scenario-id (:scenario-id scenario) :events-processed (count new-trace) :halted-at-seq (:seq event) :halt-reason :invariant-violation :trace new-trace :metrics new-metrics}
+                    (do
+                      (log/error :scenario/halt {:id scenario-id :seq (:seq event) :reason :invariant-violation})
+                      {:outcome :fail :scenario-id scenario-id :events-processed (count new-trace) :halted-at-seq (:seq event) :halt-reason :invariant-violation :trace new-trace :metrics new-metrics})
                     (recur (:world step) (rest events) new-trace new-metrics new-alias-map)))))))))))
 
 (defn replay-scenario

@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "google/protobuf/struct.proto";
+
 // Service contract documentation for the SEW Simulation Engine.
 //
 // This file is DOCUMENTATION ONLY. The Clojure server uses io.grpc with a
@@ -23,23 +25,43 @@ package sew.simulation;
 service SimulationEngine {
   // Allocate a new session: build world0, index agents, set block-time.
   rpc StartSession (StartRequest)   returns (StartResponse);
+// Execute one event against the session's canonical world state.
+// Returns the updated world_view, a full trace entry, and halted flag.
+rpc Step         (StepRequest)    returns (StepResponse);
 
-  // Execute one event against the session's canonical world state.
-  // Returns the updated world_view, a full trace entry, and halted flag.
-  rpc Step         (StepRequest)    returns (StepResponse);
+// Query the full internal world state of a session.
+rpc GetSessionState (GetStateRequest) returns (GetStateResponse);
 
-  // Destroy a session and free its resources.
-  rpc DestroySession (DestroyRequest) returns (DestroyResponse);
+// Destroy a session and free its resources.
+rpc DestroySession (DestroyRequest) returns (DestroyResponse);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // StartSession
 // ─────────────────────────────────────────────────────────────────────────────
+...
+message DestroyResponse {
+string session_id = 1;
+bool   ok         = 2;
+string error      = 3;
+}
 
-message StartRequest {
-  string session_id         = 1;
-  repeated Agent agents     = 2;
-  ProtocolParams protocol_params = 3;
+// ─────────────────────────────────────────────────────────────────────────────
+// GetSessionState
+// ─────────────────────────────────────────────────────────────────────────────
+
+message GetStateRequest {
+string session_id = 1;
+}
+
+message GetStateResponse {
+string session_id = 1;
+bool   ok         = 2;
+string error      = 3;
+// The full internal world map (pure Clojure state) as a JSON object.
+google.protobuf.Struct world = 4;
+}
+
   int64 initial_block_time  = 4;  // block timestamp for world0
 }
 

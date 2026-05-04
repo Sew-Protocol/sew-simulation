@@ -53,8 +53,8 @@ def run_scenario(name: str, agents_meta: list, live_agents: list, **runner_kwarg
 run_scenario(
     "Scenario 1 — Happy path: buyer creates + releases",
     agents_meta=[
-        {"id": "buyer",  "address": "0xbuyer",  "type": "honest"},
-        {"id": "seller", "address": "0xseller", "type": "honest"},
+        {"id": "buyer",  "address": "0xbuyer",  "strategy": "honest"},
+        {"id": "seller", "address": "0xseller", "strategy": "honest"},
     ],
     live_agents=[
         HonestBuyerLive("buyer", recipient_address="0xseller", amount=5000),
@@ -67,9 +67,9 @@ run_scenario(
 run_scenario(
     "Scenario 2 — Griefing: buyer disputes; resolver resolves",
     agents_meta=[
-        {"id": "griefer",  "address": "0xgriefer",  "type": "attacker"},
-        {"id": "seller",   "address": "0xseller",   "type": "honest"},
-        {"id": "resolver", "address": "0xresolver", "type": "resolver"},
+        {"id": "griefer",  "address": "0xgriefer",  "strategy": "malicious", "role": "resolver"},
+        {"id": "seller",   "address": "0xseller",   "strategy": "honest"},
+        {"id": "resolver", "address": "0xresolver", "role": "resolver"},
     ],
     live_agents=[
         GriefingBuyerLive("griefer", recipient_address="0xseller", amount=2000),
@@ -83,8 +83,8 @@ run_scenario(
 run_scenario(
     "Scenario 3 — Attack: double-release replay (all rejected)",
     agents_meta=[
-        {"id": "attacker", "address": "0xattacker", "type": "attacker"},
-        {"id": "seller",   "address": "0xseller",   "type": "honest"},
+        {"id": "attacker", "address": "0xattacker", "strategy": "malicious", "role": "resolver"},
+        {"id": "seller",   "address": "0xseller",   "strategy": "honest"},
     ],
     live_agents=[
         AttackingBuyerLive("attacker", recipient_address="0xseller", amount=100),

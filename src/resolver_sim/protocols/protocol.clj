@@ -1,28 +1,27 @@
 (ns resolver-sim.protocols.protocol
   "DisputeProtocol — the interface that protocol plugins must implement.
 
-   The generic replay engine calls these methods during scenario execution.
+   The replay engine calls these methods during scenario execution.
    Implementations must be pure (no I/O, no DB) and deterministic.
 
    Usage:
      Implement DisputeProtocol via deftype or defrecord, then pass an instance
-     to replay/replay-with-protocol alongside a scenario map.  The SEW
-     implementation lives in resolver-sim.protocols.sew; the Dummy proof-of-
-     concept lives in resolver-sim.protocols.dummy.
+     to replay/replay-with-protocol alongside a scenario map. The SEW
+     implementation lives in resolver-sim.protocols.sew.
 
    Layering: this namespace has no dependencies on contract_model/*, model/*,
-   sim/*, db/*, or io/*.  It is a pure interface definition.")
+   sim/*, db/*, or io/*. It serves as the harness interface.")
 
 (defprotocol DisputeProtocol
   "Plugin interface for dispute-resolution protocol implementations.
 
-   Implement this to plug a new protocol (SEW, Dummy, UMA-style, etc.) into
-   the generic replay engine without modifying replay.clj or any existing
-   contract_model/* code."
+   This interface provides a harness structure for replay-driven simulation. 
+   It is currently instantiated for the SEW Protocol but is designed as a 
+   template for future integration of other protocols."
 
   (build-execution-context [protocol agents protocol-params]
     "Build an execution context from agent list and protocol parameters.
-     agents          — [{:id str :address str :type str ...}]
+     agents          — [{:id str :address str :role str :strategy str ...}]
      protocol-params — map of protocol-specific config (same shape as
                        :protocol-params in a scenario map)
      Returns a context map passed opaquely to every dispatch-action call.
@@ -31,7 +30,7 @@
   (dispatch-action [protocol context world event]
     "Apply one event to the world state.
      context — opaque map returned by build-execution-context
-     world   — current canonical world state
+     world   — current world state
      event   — {:seq n :time t :agent str :action str :params {...}}
      Returns {:ok bool :world world' :error kw :extra {...}}.
      Must never throw — all error paths must return {:ok false :error kw}.")
@@ -66,7 +65,7 @@
     "Return a :trace-metadata map for a completed transition, or nil.
      action     — the action string that was dispatched
      result-kw  — :ok, :rejected, or :invariant-violated
-     Canonical fields produced by SEWProtocol:
+     Specific fields produced by SEWProtocol:
        :transition/type  — semantic action category (see trace-metadata/transition-types)
        :resolution/path  — resolution route, or :resolution/none
      Note: :effect/type is intentionally absent — accounting effects depend on
@@ -102,12 +101,12 @@
      Return empty seq (or nil) when all entities have reached a terminal state.")
 
   (classify-event [protocol event result-kw error-kw]
-    "Return a set of canonical metric tags for the completed event.
+    "Return a set of metric tags for the completed event.
      event      — the full event map {:action :params ...} that was dispatched
      result-kw  — :ok, :rejected, or :invariant-violated
      error-kw   — error keyword when result-kw is :rejected, else nil
 
-     Canonical tags recognised by the replay engine's accum-metrics:
+     Metric tags recognised by the replay engine's accum-metrics for SEW:
        :entity-created           accepted create action → :total-escrows, :total-volume
        :dispute-raised           accepted raise action  → :disputes-triggered
        :dispute-resolved         accepted resolve action → :resolutions-executed

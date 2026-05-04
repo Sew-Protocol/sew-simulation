@@ -1,13 +1,13 @@
 (ns resolver-sim.generators.scenario
-  "Scenario composition for deterministic generator output."
+  "SEW Protocol scenario composition for deterministic generator output.")
   (:require [resolver-sim.generators.stateful :as stateful]
             [resolver-sim.protocols.protocol :as engine]
             [resolver-sim.protocols.sew :as sew]))
 
 (def default-agents
-  [{:id "buyer" :type "honest" :address "0xBuyer"}
-   {:id "seller" :type "honest" :address "0xSeller"}
-   {:id "resolver" :type "resolver" :address "0xResolver"}])
+  [{:id "buyer" :strategy "honest" :address "0xBuyer"}
+   {:id "seller" :strategy "honest" :address "0xSeller"}
+   {:id "resolver" :role "resolver" :address "0xResolver"}])
 
 (def default-protocol-params
   {:resolver-fee-bps 50

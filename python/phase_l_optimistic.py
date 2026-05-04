@@ -37,10 +37,10 @@ def s35_phase_l_watchtower_robustness() -> tuple[RunResult, bool]:
       - Watchtower (wt) receives a bounty from the slashed stake.
     """
     agents_meta = [
-        {"id": "buyer",    "address": "0xbuyer",    "type": "honest"},
-        {"id": "wt",       "address": "0xwatch",    "type": "honest"},
+        {"id": "buyer",    "address": "0xbuyer",    "strategy": "honest"},
+        {"id": "wt",       "address": "0xwatch",    "strategy": "honest"},
         {"id": "r0",       "address": "0xres0",     "type": "malicious"},
-        {"id": "r1",       "address": "0xres1",     "type": "resolver"},
+        {"id": "r1",       "address": "0xres1",     "role": "resolver"},
     ]
     
     # Protocol params:

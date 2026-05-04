@@ -93,19 +93,22 @@
    Guard: escrow must be in terminal state (:released/:refunded/:resolved).
    Guard: claimable balance must be > 0."
   [world workflow-id addr]
-  (cond
-    (not (t/valid-workflow-id? world workflow-id))
+  (if (nil? workflow-id)
     (t/fail :invalid-workflow-id)
+    (let [wf-id (if (string? workflow-id) workflow-id (str workflow-id))]
+      (cond
+        (not (t/valid-workflow-id? world wf-id))
+        (t/fail :invalid-workflow-id)
 
-    (not (t/terminal-state? world workflow-id))
-    (t/fail :transfer-not-finalized)
+        (not (t/terminal-state? world wf-id))
+        (t/fail :transfer-not-finalized)
 
-    :else
-    (let [amount (get-in world [:claimable workflow-id addr] 0)]
-      (if (zero? amount)
-        (t/fail :no-claimable-balance)
-        (let [world' (assoc-in world [:claimable workflow-id addr] 0)]
-          (assoc (t/ok world') :amount amount))))))
+        :else
+        (let [amount (get-in world [:claimable wf-id addr] 0)]
+          (if (zero? amount)
+            (t/fail :no-claimable-balance)
+            (let [world' (assoc-in world [:claimable wf-id addr] 0)]
+              (assoc (t/ok world') :amount amount))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; BondCollector appeal bond accounting

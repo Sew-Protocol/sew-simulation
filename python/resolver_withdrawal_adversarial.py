@@ -25,10 +25,10 @@ from sew_sim.grpc_client import SimulationClient, managed_session
 
 
 AGENTS = [
-    {"id": "buyer", "address": "0xbuyer", "type": "honest"},
-    {"id": "seller", "address": "0xseller", "type": "honest"},
-    {"id": "resolver", "address": "0xresolver", "type": "resolver"},
-    {"id": "governance", "address": "0xgov", "type": "governance"},
+    {"id": "buyer", "address": "0xbuyer", "strategy": "honest"},
+    {"id": "seller", "address": "0xseller", "strategy": "honest"},
+    {"id": "resolver", "address": "0xresolver", "role": "resolver"},
+    {"id": "governance", "address": "0xgov", "role": "governance"},
 ]
 
 
