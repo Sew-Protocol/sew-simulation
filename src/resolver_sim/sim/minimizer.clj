@@ -5,8 +5,45 @@
   (:require [resolver-sim.contract-model.replay :as replay]
             [resolver-sim.protocols.sew :as sew]
             [clojure.data.json :as json]
+            [clojure.walk :as walk]
             [clojure.java.io :as io]
             [clojure.tools.cli :refer [parse-opts]]))
+
+;; ---------------------------------------------------------------------------
+;; JSON Normalization (avoid cyclic dependency with fixtures.clj)
+;; ---------------------------------------------------------------------------
+
+(defn- normalize-keyword-strings [v]
+  (cond
+    (string? v)
+    (if (and (.startsWith v ":") (> (count v) 1))
+      (keyword (subs v 1))
+      v)
+    :else v))
+
+(defn- normalize-map-keys [m]
+  (if (map? m)
+    (reduce-kv (fn [acc k v]
+                  (let [normalized-k (if (string? k)
+                                       (try (Integer/parseInt k)
+                                            (catch Exception _ k))
+                                       k)]
+                    (assoc acc normalized-k v)))
+               {} m)
+    m))
+
+(defn- normalize-json-scenario [x]
+  (walk/postwalk
+    (fn [v]
+      (cond
+        (map? v)
+        (let [key-normalized (normalize-map-keys v)]
+          (reduce-kv (fn [m k kv]
+                       (assoc m k (normalize-keyword-strings kv)))
+                     key-normalized key-normalized))
+        (string? v) (normalize-keyword-strings v)
+        :else v))
+    x))
 
 (defn- re-index-events
   "Ensure event sequence numbers are contiguous from 0."
@@ -85,8 +122,9 @@
       (not (:input options)) (println "Error: --input is required")
       :else
       (let [input-path (:input options)
-            scenario (with-open [r (io/reader input-path)]
-                       (json/read r :key-fn keyword))
+            raw-scenario (with-open [r (io/reader input-path)]
+                           (json/read r :key-fn keyword))
+            scenario (normalize-json-scenario raw-scenario)
             target (:violation options)
             minimized (minimize scenario target)]
         (if-let [output-path (:output options)]

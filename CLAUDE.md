@@ -104,6 +104,7 @@ These must not be violated as the project grows:
 | `contract_model/*` | `protocols/protocol` | anything else |
 | `protocols/sew/*` | `protocols/protocol`, `contract_model/*` | `sim/*`, `db/*`, `io/*` |
 | `protocols/dummy` | `protocols/protocol` | everything else |
+| `scenario/*` | `protocols/protocol` | anything else |
 | `stochastic/*` | nothing outside `stochastic/` | everything else |
 | `sim/*` | `contract_model/*`, `protocols/*`, `stochastic/*`, `governance/*`, `adversaries/*`, `oracle/*` | `db/*`, `io/*` |
 | `governance/*`, `adversaries/*`, `oracle/*` | `stochastic/*` only | `db/*`, `io/*` |
@@ -130,6 +131,7 @@ src/resolver_sim/         ← Clojure namespace root (resolver-sim.*)
   contract_model/         Protocol-agnostic kernel
   protocols/              DisputeProtocol interface + implementations
     sew/                  SEW Protocol logic
+  scenario/               CDRS v1.1 theory and expectation evaluators
   stochastic/             pure statistical/economic models (~17 files)
   sim/                    simulation phases + phase infrastructure (~38 files)
   governance/             pure governance rule models
@@ -214,6 +216,8 @@ When eval-engine moves `xtdb.clj` → `evaluation/db/xtdb.clj`, update:
 | `contract_model/replay.clj` | Open-world scenario replay; agnostic harness |
 | `protocols/protocol.clj` | `DisputeProtocol` defprotocol — the plugin interface |
 | `protocols/sew.clj` | `SEWProtocol` adapter — wires sew/* logic |
+| `scenario/theory.clj` | Game-theoretic claim falsification (v1.1) |
+| `scenario/expectations.clj` | Execution-level outcome validation (v1.1) |
 | `protocols/sew/invariant_runner.clj` | SEW-specific deterministic test runner |
 | `db/store.clj` | XTDB table ops + `summarise-batch` (pure) |
 | `sim/phase_*.clj` | One file per simulation phase; entry point `run-phase-*-sweep` |

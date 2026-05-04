@@ -58,7 +58,7 @@ class SimulationClient:
             assert r["result"] == "ok"
     """
 
-    def __init__(self, host: str = "localhost", port: int = 7071):
+    def __init__(self, host: str = "localhost", port: int = 7070):
         self._channel = grpc.insecure_channel(f"{host}:{port}")
         self._start = self._channel.unary_unary(
             f"/{_SERVICE}/StartSession",
@@ -67,6 +67,11 @@ class SimulationClient:
         )
         self._step = self._channel.unary_unary(
             f"/{_SERVICE}/Step",
+            request_serializer=_encode,
+            response_deserializer=_decode,
+        )
+        self._get_state = self._channel.unary_unary(
+            f"/{_SERVICE}/GetSessionState",
             request_serializer=_encode,
             response_deserializer=_decode,
         )
@@ -90,7 +95,7 @@ class SimulationClient:
         """
         Allocate a new simulation session on the Clojure server.
 
-        agents — list of dicts: [{"id": "buyer1", "address": "0x...", "type": "honest"}]
+        agents — list of dicts: [{"id": "buyer1", "address": "0x...", "strategy": "honest"}]
         Returns {"session_id": str, "ok": bool, "error": str|None}
         """
         return self._start({
@@ -119,6 +124,13 @@ class SimulationClient:
           response["trace_entry"]["extra"]["workflow_id"]
         """
         return self._step({"session_id": session_id, "event": event})
+
+    def get_session_state(self, session_id: str) -> dict:
+        """
+        Query the full internal world state of a session.
+        Returns {"session_id": str, "ok": bool, "world": dict, "error": str|None}.
+        """
+        return self._get_state({"session_id": session_id})
 
     def destroy_session(self, session_id: str) -> dict:
         """Free session resources. Returns {"session_id": str, "ok": bool}."""

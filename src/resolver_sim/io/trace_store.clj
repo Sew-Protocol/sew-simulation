@@ -137,7 +137,7 @@
     (when notable?
       (let [id       (trace-id scenario scored-result)
             fixture  (try (let [f (te/export-trace-fixture scored-result scenario)]
-                            (assoc f :metadata
+                            (update f :metadata merge
                                    {"trace_kind"   (if (pos? (:invariant-violations (:metrics scored-result) 0))
                                                      "known_failure"
                                                      "fixed_regression")

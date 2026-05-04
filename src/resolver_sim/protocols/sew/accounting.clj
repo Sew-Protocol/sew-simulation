@@ -93,19 +93,22 @@
    Guard: escrow must be in terminal state (:released/:refunded/:resolved).
    Guard: claimable balance must be > 0."
   [world workflow-id addr]
-  (cond
-    (not (t/valid-workflow-id? world workflow-id))
+  (if (nil? workflow-id)
     (t/fail :invalid-workflow-id)
+    (let [wf-id (if (string? workflow-id) workflow-id (str workflow-id))]
+      (cond
+        (not (t/valid-workflow-id? world wf-id))
+        (t/fail :invalid-workflow-id)
 
-    (not (t/terminal-state? world workflow-id))
-    (t/fail :transfer-not-finalized)
+        (not (t/terminal-state? world wf-id))
+        (t/fail :transfer-not-finalized)
 
-    :else
-    (let [amount (get-in world [:claimable workflow-id addr] 0)]
-      (if (zero? amount)
-        (t/fail :no-claimable-balance)
-        (let [world' (assoc-in world [:claimable workflow-id addr] 0)]
-          (assoc (t/ok world') :amount amount))))))
+        :else
+        (let [amount (get-in world [:claimable wf-id addr] 0)]
+          (if (zero? amount)
+            (t/fail :no-claimable-balance)
+            (let [world' (assoc-in world [:claimable wf-id addr] 0)]
+              (assoc (t/ok world') :amount amount))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; BondCollector appeal bond accounting
@@ -122,16 +125,15 @@
 (defn post-appeal-bond
   "Record an appeal bond posted by appellant for workflow-id.
    Deducts protocol fee into :bond-fees; records net in :bond-balances.
-
-   snap — ModuleSnapshot map for this workflow (for appeal-bond-protocol-fee-bps)
-   token — bond token address
-   amount — gross bond amount"
+   Also updates :total-held and :total-bonds-posted (cumulative)."
   [world workflow-id appellant snap token amount]
   (let [fee-bps (or (:appeal-bond-protocol-fee-bps snap) 0)
         {:keys [fee net]} (payoffs/calculate-appeal-bond-fee amount fee-bps)]
     (-> world
         (update-in [:bond-balances workflow-id appellant] (fnil + 0) net)
-        (update-in [:bond-fees token] (fnil + 0) fee))))
+        (update-in [:bond-fees token] (fnil + 0) fee)
+        (update-in [:total-bonds-posted token] (fnil + 0) amount)
+        (add-held token amount))))
 
 (defn distribute-slashed-funds
   "Internal: distribute slashed funds according to 50/30/20 split.
@@ -168,12 +170,15 @@
 
 (defn return-bond
   "Return the posted bond to a winning appellant.
-   Clears :bond-balances entry.
+   Clears :bond-balances entry and credits :claimable.
 
    Guard: bond balance must be > 0."
   [world workflow-id appellant]
   (let [amount (get-in world [:bond-balances workflow-id appellant] 0)]
     (if (zero? amount)
       (t/fail :no-bond-to-return)
-      (let [world' (assoc-in world [:bond-balances workflow-id appellant] 0)]
+      (let [world' (-> world
+                       (assoc-in [:bond-balances workflow-id appellant] 0)
+                       (record-claimable workflow-id appellant amount))]
         (assoc (t/ok world') :returned amount)))))
+

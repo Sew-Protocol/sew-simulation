@@ -22,6 +22,33 @@
             [resolver-sim.stochastic.rng :as rng]
             [clojure.set]))
 
+
+;; ---------------------------------------------------------------------------
+;; Multi-Epoch Known Metrics Registry
+;; ---------------------------------------------------------------------------
+;;
+;; Metrics in this registry are computed from stochastic population models,
+;; NOT from deterministic replay. They describe emergent properties of
+;; multi-epoch simulations: reputation trajectories, coordination effects,
+;; and strategy dominance ratios.
+;;
+;; These metrics **must NOT** be referenced in deterministic scenario
+;; expectations or theory.falsifies-if clauses; they only exist in Phase J
+;; output and population-level aggregates.
+;;
+;; For metrics from deterministic replay, see
+;; resolver-sim.contract-model.replay/known-metrics.
+
+(def known-metrics
+  "Stochastic population metrics computed by Phase J (multi-epoch simulation).
+   These describe reputation trajectories and strategy dynamics.
+   Not available in deterministic replay; must not be used in :theory.falsifies-if."
+  #{:coalition/net-profit        ;; aggregate profit of all resolvers of a strategy
+    :malice-mean-profit         ;; mean profit per malicious resolver
+    :dominance-ratio            ;; ratio of dominant strategy profit to mean
+    :mean-profit                ;; mean profit across all resolvers in epoch
+    :reputation-concentration}) ;; Herfindahl index of profit concentration
+
 (defn apply-detection-decay
   "Apply detection decay for governance failure scenarios.
    If :detection-decay-rate is set, multiply detection by (1 - decay-rate) each epoch.

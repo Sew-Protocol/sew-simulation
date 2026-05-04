@@ -18,6 +18,15 @@ Takes ~5 minutes. Tests:
 ```
 Takes ~15 minutes. Generates detailed HTML/markdown reports.
 
+### Run generator regression target (pinned seeds)
+```bash
+./scripts/test.sh generators
+```
+Runs deterministic generator + replay/equilibrium-focused checks:
+- `resolver-sim.generators.equilibrium-test`
+- `resolver-sim.generators.fixtures-test`
+- `resolver-sim.properties.invariants-test`
+
 ### Run specific phase
 ```bash
 ./run.sh phase-i      # Phase I only (1D + 2D sweeps)

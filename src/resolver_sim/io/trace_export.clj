@@ -4,8 +4,9 @@
    Converts the output of replay-scenario into the canonical trace format
    that TraceEquivalence.t.sol replays and verifies.
 
-   Supports CDRS v0.1: standardized event schema, state buckets, and
-   atomic reconciliation invariants."
+   Supports CDRS v0.2: standardized event schema, state buckets, atomic
+   reconciliation invariants, and dispute-resolution semantics (resolution
+   outcome, escalation level, participation, and timing window booleans)."
   (:require [clojure.data.json                 :as json]
             [clojure.java.io                   :as io]
             [clojure.string                    :as str]
@@ -76,12 +77,182 @@
      :dispute_level             disp-level}))
 
 ;; ---------------------------------------------------------------------------
+;; CDRS v0.2 semantic helpers
+;; ---------------------------------------------------------------------------
+
+(defn- find-entry-by-tag
+  "Return the first trace entry that carries the given event-tag keyword."
+  [trace tag]
+  (first (filter #(contains? (:event-tags %) tag) trace)))
+
+(defn- find-last-entry-by-tag
+  "Return the last trace entry that carries the given event-tag keyword."
+  [trace tag]
+  (last (filter #(contains? (:event-tags %) tag) trace)))
+
+(defn- normalize-resolution-field
+  "Lowercase and hyphenate a CDRS v0.1 uppercase string (e.g. 'FULLY_RECONCILED').
+   Maps 'NO_OP' → 'unresolved' since v0.2 uses explicit outcome names."
+  [s]
+  (when s
+    (let [lower (-> s str/lower-case (str/replace "_" "-"))]
+      (if (= lower "no-op") "unresolved" lower))))
+
+(defn- primary-dispute-wf-id
+  "Return the integer wf-id of the primary disputed escrow.
+   Prefers the first escrow in a non-terminal (disputed) state; falls back
+   to the first id in alias-map when all escrows have already settled."
+  [id-alias-map last-world]
+  (let [ids (vals id-alias-map)]
+    (when (seq ids)
+      (or (first (filter #(= :disputed (get-in last-world [:escrow-transfers % :escrow-state])) ids))
+          (first ids)))))
+
+;; ---------------------------------------------------------------------------
+;; CDRS v0.2 compute functions
+;; ---------------------------------------------------------------------------
+
+(defn- compute-trace-kind
+  "Return a vector of trace-kind strings from the scenario and trace content.
+   Values: lifecycle / dispute-resolution / escalation / pending-settlement /
+           timing / authorization / adversarial."
+  [scenario trace]
+  (let [tags    (into #{} (mapcat :event-tags trace))
+        actions (into #{} (map :action trace))
+        adv?    (contains? #{:adversarial :stress} (meta/classify-scenario scenario))]
+    (cond-> []
+      (not (contains? tags :dispute-raised))     (conj "lifecycle")
+      (contains? tags :dispute-raised)           (conj "dispute-resolution")
+      (contains? actions "escalate_dispute")     (conj "escalation")
+      (contains? tags :settlement-executed)      (conj "pending-settlement")
+      (contains? actions "auto_cancel_disputed") (conj "timing")
+      (contains? tags :invalid-state-transition) (conj "authorization")
+      adv?                                       (conj "adversarial"))))
+
+(defn- compute-resolution-section
+  "Derive the expected_semantics.resolution block from trace + world state.
+   Returns nil when no dispute was raised in the trace."
+  [trace last-world primary-wf-id]
+  (when primary-wf-id
+    (let [res-map          (meta/resolution-semantics last-world primary-wf-id)
+          outcome          (normalize-resolution-field (:outcome res-map))
+          finality         (normalize-resolution-field (:finality res-map))
+          integrity        (normalize-resolution-field (:integrity res-map))
+
+          exec-res-entries (filter #(= "execute_resolution" (:action %)) trace)
+          exec-res-ok?     (boolean (some #(= :ok (:result %)) exec-res-entries))
+
+          settlement-entry (find-last-entry-by-tag trace :settlement-executed)
+          settle-ok?       (boolean settlement-entry)
+
+          pending-in-world (get-in last-world [:pending-settlements primary-wf-id :exists] false)
+          ;; pending_settlement_created is true only when a pending-settlement object
+          ;; actually exists or was executed — not merely because execute_resolution ran.
+          pending-created? (or settle-ok? pending-in-world)
+
+          resolved-entry   (find-last-entry-by-tag trace :dispute-resolved)
+          resolver-agent   (:agent resolved-entry)
+
+          state            (get-in last-world [:escrow-transfers primary-wf-id :escrow-state])
+          beneficiary      (case state
+                             :released "seller"
+                             :refunded "buyer"
+                             :resolved "settled"
+                             nil)]
+      (cond-> {:outcome   outcome
+               :finality  finality
+               :integrity integrity}
+        beneficiary            (assoc :beneficiary beneficiary)
+        resolver-agent         (assoc :resolver resolver-agent)
+        (seq exec-res-entries) (assoc :authorized_resolver       exec-res-ok?
+                                      :pending_settlement_created pending-created?
+                                      :settlement_executed        settle-ok?)))))
+
+(defn- compute-escalation-section
+  "Derive the expected_semantics.escalation block.
+   Returns nil when no escalation was attempted in the trace."
+  [trace last-world primary-wf-id]
+  (when primary-wf-id
+    (let [esc-entries (filter #(= "escalate_dispute" (:action %)) trace)]
+      (when (seq esc-entries)
+        (let [level     (get-in last-world [:dispute-levels primary-wf-id] 0)
+              max-level (apply max 0 (keep #(get-in % [:world :dispute-levels primary-wf-id]) trace))
+              accepted? (boolean (some #(= :ok       (:result %)) esc-entries))
+              rejected? (boolean (some #(= :rejected (:result %)) esc-entries))]
+          {:level             level
+           :max_level_reached max-level
+           :tier              (case level 0 "l0" 1 "l1" 2 "l2" "arbitration")
+           :attempted         true
+           :accepted          accepted?
+           :rejected          rejected?})))))
+
+(defn- compute-participation-section
+  "Derive the expected_semantics.participation block.
+   Returns nil when no dispute was raised in the trace."
+  [trace]
+  (let [dispute-entry  (find-entry-by-tag      trace :dispute-raised)
+        resolved-entry (find-last-entry-by-tag trace :dispute-resolved)
+        settle-entry   (find-last-entry-by-tag trace :settlement-executed)]
+    (when dispute-entry
+      (cond-> {:dispute_initiator (:agent dispute-entry)}
+        resolved-entry (assoc :resolution_actor       (:agent resolved-entry)
+                              :authorized_participant (= :ok (:result resolved-entry)))
+        settle-entry   (assoc :settlement_actor (:agent settle-entry))))))
+
+(defn- compute-timing-section
+  "Derive the expected_semantics.timing block.
+   Only includes window-boolean fields when the relevant params are non-zero
+   and both boundary timestamps are present in the trace."
+  [trace scenario]
+  (let [params       (get scenario :protocol-params {})
+        max-disp-dur (get params :max-dispute-duration 0)
+        appeal-win   (get params :appeal-window-duration 0)
+
+        disp-entry   (find-entry-by-tag      trace :dispute-raised)
+        res-entry    (find-last-entry-by-tag trace :dispute-resolved)
+        settle-entry (find-last-entry-by-tag trace :settlement-executed)
+
+        disp-time    (:time disp-entry)
+        res-time     (:time res-entry)
+        settle-time  (:time settle-entry)
+
+        auto-cancel? (boolean (some #(and (= "auto_cancel_disputed" (:action %))
+                                          (= :ok (:result %)))
+                                    trace))
+        pending-delay (when (and res-time settle-time) (- settle-time res-time))
+
+        within-res   (when (and disp-time res-time (pos? max-disp-dur))
+                       (<= (- res-time disp-time) max-disp-dur))
+        within-set   (when (and res-time settle-time (pos? appeal-win))
+                       (<= (- settle-time res-time) appeal-win))]
+    (cond-> {:auto_cancel_triggered auto-cancel?}
+      (some? within-res) (assoc :within_resolution_window within-res)
+      (some? within-set) (assoc :within_settlement_window within-set)
+      pending-delay      (assoc :pending_delay_seconds pending-delay))))
+
+(defn- compute-expected-semantics
+  "Combine all v0.2 semantic sections into the expected_semantics top-level block.
+   Returns an empty map for lifecycle traces (no dispute raised)."
+  [trace scenario last-world id-alias-map]
+  (let [primary-wf-id (primary-dispute-wf-id id-alias-map last-world)
+        has-dispute?  (some #(contains? (:event-tags %) :dispute-raised) trace)
+        resolution    (when has-dispute? (compute-resolution-section  trace last-world primary-wf-id))
+        escalation    (when has-dispute? (compute-escalation-section  trace last-world primary-wf-id))
+        participation (when has-dispute? (compute-participation-section trace))
+        timing        (when has-dispute? (compute-timing-section       trace scenario))]
+    (cond-> {}
+      resolution    (assoc :resolution    resolution)
+      escalation    (assoc :escalation    escalation)
+      participation (assoc :participation participation)
+      timing        (assoc :timing        timing))))
+
+;; ---------------------------------------------------------------------------
 ;; Trace entry → Forge step
 ;; ---------------------------------------------------------------------------
 
 (defn- step->forge-step
   "Convert one replay trace entry into a CDRS-compliant Forge trace step."
-  [entry prev-proj scenario-events wf-alias-map token-sym]
+  [entry prev-proj scenario-events id-alias-map token-sym addr->agent-id]
   (let [seq-n    (:seq entry)
         action   (:action entry)
         result   (:result entry)
@@ -94,18 +265,19 @@
 
         params   (case action
                    "create_escrow"
-                   {:to_role  (get-in raw-evt [:params :to] "seller")
-                    :amount   (get-in raw-evt [:params :amount] 0)}
+                   (let [raw-to (get-in raw-evt [:params :to] "seller")]
+                     {:to_role  (get addr->agent-id raw-to raw-to)
+                      :amount   (get-in raw-evt [:params :amount] 0)})
                    {})
 
         wf-id    (cond
                    (= action "create_escrow") (get-in entry [:extra :workflow-id])
                    :else (let [raw-wf-id (or (get-in raw-evt [:params :workflow-id])
                                             (get-in raw-evt [:params :workflow_id]))]
-                           (if (string? raw-wf-id) (get wf-alias-map raw-wf-id) raw-wf-id)))
+                           (if (string? raw-wf-id) (get id-alias-map raw-wf-id) raw-wf-id)))
 
-        save-wf-as (:save-wf-as raw-evt)
-        wf-alias   (or (some (fn [[k v]] (when (= v wf-id) k)) wf-alias-map)
+        _save-id-as (:save-id-as raw-evt)
+        wf-alias   (or (some (fn [[k v]] (when (= v wf-id) k)) id-alias-map)
                        (when wf-id (str "wf" wf-id)))
 
         expected-raw (projection->expected proj (or wf-id 0) token-sym)
@@ -122,12 +294,27 @@
            :error    (name (:error entry :unknown))
            :escrow_state (get-in expected-state [:escrow_state] 0)
            :pending_settlement_exists (get-in expected-state [:pending_settlement_exists] false)}
-          expected-state)]
+          expected-state)
+
+        accepted?     (= result :ok)
+        expected-v2   (cond-> (assoc expected
+                                     :accepted      accepted?
+                                     :state_changed accepted?)
+                        (not accepted?) (assoc :rejection_reason
+                                               (name (:error entry :unknown))))]
 
     (cond-> {:seq           seq-n
-             :cdrs_version  "0.1"
+             :cdrs_version  "0.2"
              :event_type    (str/upper-case (str/replace forge-action #"_" " "))
-             :step_type     (if (= result :ok) "protocol-transition" "economic-effect")
+             :step_type     (cond
+                         (not= result :ok)
+                         "protocol-transition"
+                         (= :transition/economic (:transition/type metadata))
+                         "economic-effect"
+                         (#{:transition/timeout :transition/maintenance} (:transition/type metadata))
+                         "environmental-change"
+                         :else
+                         "protocol-transition")
              :context_id    (or wf-alias "global")
              :actor         caller-role
              :timestamp     (:time entry 0)
@@ -136,7 +323,7 @@
                               wf-alias (assoc :wf_alias wf-alias)
                               params   (merge params)
                               metadata (merge (into {} (map (fn [[k v]] [(kw-val->str-flat k) (kw-val->str-flat v)]) metadata))))}
-      expected (assoc :expected expected))))
+      expected-v2 (assoc :expected expected-v2))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public: export-trace-fixture
@@ -148,14 +335,17 @@
   (let [trace       (:trace result)
         events      (:events scenario)
         last-world  (:world (last trace))
-        ;; Build a wf-alias-map by scanning trace for create_escrow :ok entries
-        wf-alias-map
+        ;; Reverse map from simulation address → agent ID (for to_role resolution)
+        addr->agent-id
+        (into {} (map (fn [a] [(:address a) (:id a)]) (:agents scenario [])))
+        ;; Build an id-alias-map by scanning trace for entity-create :ok entries.
+        ;; Uses :event-tags rather than hardcoding "create_escrow".
+        id-alias-map
         (reduce (fn [m entry]
                   (let [raw (->> events (filter #(= (:seq %) (:seq entry))) first)]
-                    (if (and (= (:action entry) "create_escrow")
-                             (= (:result entry) :ok)
-                             (:save-wf-as raw))
-                      (assoc m (:save-wf-as raw) (get-in entry [:extra :workflow-id]))
+                    (if (and (contains? (:event-tags entry) :entity-created)
+                             (:save-id-as raw))
+                      (assoc m (:save-id-as raw) (get-in entry [:extra :workflow-id]))
                       m)))
                 {}
                 trace)
@@ -166,18 +356,24 @@
                 (if (empty? entries)
                   acc
                   (let [entry (first entries)
-                        step  (step->forge-step entry prev-proj events wf-alias-map token-sym)]
+                        step  (step->forge-step entry prev-proj events id-alias-map token-sym addr->agent-id)]
                     (recur (rest entries) (:projection entry) (conj acc step)))))]
-    {:cdrs_version   "0.1"
-     :schema_version "1"
-     :scenario_id    (:scenario-id result)
-     :description    (str "Generated trace: " (:scenario-id result))
-     :fee_bps        (get-in scenario [:protocol-params :escrow-fee-bps] 100)
-     :step_count     (count steps)
-     :steps          steps
-     ;; Resolution summary for all escrows in the trace
-     :resolutions    (into {} (for [[alias id] wf-alias-map]
-                                [alias (meta/resolution-semantics last-world id)]))}))
+    (let [trace-kind         (compute-trace-kind scenario trace)
+          expected-semantics (compute-expected-semantics trace scenario last-world id-alias-map)]
+      {:cdrs_version      "0.2"
+       :schema_version    "2"
+       :scenario_id       (:scenario-id result)
+       :description       (str "Generated trace: " (:scenario-id result))
+       :trace_kind        trace-kind
+       :fee_bps           (get-in scenario [:protocol-params :resolver-fee-bps] 100)
+       :metadata          {"scenario_class" (kw-val->str-flat (meta/classify-scenario scenario))
+                           "outcome_type"   (kw-val->str-flat (meta/classify-outcome result scenario))}
+       :expected_semantics expected-semantics
+       :step_count        (count steps)
+       :steps             steps
+       ;; Resolution summary for all escrows in the trace
+       :resolutions       (into {} (for [[alias id] id-alias-map]
+                                     [alias (meta/resolution-semantics last-world id)]))})))
 
 ;; ---------------------------------------------------------------------------
 ;; JSON serialisation

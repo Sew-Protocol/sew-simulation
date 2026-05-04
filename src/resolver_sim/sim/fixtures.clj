@@ -15,6 +15,8 @@
             [resolver-sim.protocols.sew.diff :as diff]
             [resolver-sim.canonical.actions :as canon]
             [resolver-sim.sim.minimizer :as minimizer]
+            [resolver-sim.scenario.theory :as theory]
+            [resolver-sim.scenario.expectations :as expectations]
             [clojure.pprint :as pp]))
 
 ;; ---------------------------------------------------------------------------
@@ -49,6 +51,59 @@
           (edn/read (java.io.PushbackReader. r))))
       (throw (ex-info "Fixture not found" {:key k :path path})))))
 
+;; ---------------------------------------------------------------------------
+;; JSON Normalization: Handle EDN/JSON type mismatches
+;; ---------------------------------------------------------------------------
+
+(defn- normalize-keyword-strings
+  "Convert string values starting with ':' to proper Clojure keywords.
+   This fixes keyword corruption from JSON deserialization."
+  [v]
+  (cond
+    (string? v)
+    (if (and (.startsWith v ":") (> (count v) 1))
+      (keyword (subs v 1))  ; Remove leading colon and convert to keyword
+      v)
+    (keyword? v) v
+    :else v))
+
+(defn- normalize-map-keys
+  "Recursively convert numeric string keys in maps to Integer keys."
+  [m]
+  (if (map? m)
+    (reduce-kv (fn [acc k v]
+                  (let [normalized-k (if (string? k)
+                                       (try (Integer/parseInt k)
+                                            (catch Exception _ k))
+                                       k)]
+                    (assoc acc normalized-k v)))
+               {} m)
+    m))
+
+(defn normalize-scenario
+  "Recursively normalize a loaded scenario to fix JSON deserialization issues:
+   1. Convert string keywords (e.g. ':released') to proper keywords
+   2. Convert numeric string keys to Integer keys in all maps"
+  [x]
+  (walk/postwalk
+    (fn [v]
+      (cond
+        ;; First handle maps - normalize keys
+        (map? v)
+        (let [key-normalized (normalize-map-keys v)]
+          ;; Then normalize all values in the map
+          (reduce-kv (fn [m k kv]
+                       (assoc m k (normalize-keyword-strings kv)))
+                     key-normalized key-normalized))
+        
+        ;; Then handle keyword string values
+        (string? v)
+        (normalize-keyword-strings v)
+        
+        ;; Everything else stays as-is
+        :else v))
+    x))
+
 (defn- fixture-ref? [x]
   (and (keyword? x) (namespace x)
        (contains? #{"protocol" "states" "actors" "authority" "tokens" "thresholds" "suites" "traces"} (namespace x))))
@@ -60,7 +115,12 @@
      (fixture-ref? x)
      (if (contains? seen x)
        (throw (ex-info "Circular fixture reference" {:key x :seen seen}))
-       (compose-suite (load-fixture x) (conj seen x)))
+       ;; Normalize JSON-loaded fixtures to fix type mismatches
+       (let [loaded (load-fixture x)
+             normalized (if (.endsWith (fixture-key->path x) ".json")
+                          (normalize-scenario loaded)
+                          loaded)]
+         (compose-suite normalized (conj seen x))))
 
      (map? x)
      (reduce-kv (fn [m k v]
@@ -150,25 +210,80 @@
          actors (:actors suite)
          token (:token suite)
          results (mapv (fn [trace]
-                         (let [effective-trace (cond-> trace
-                                                 proto (assoc :protocol-params proto)
+                         (let [;; Merge protocol-params: suite provides baseline defaults,
+                               ;; trace-level params take priority so per-trace overrides
+                               ;; (e.g. resolution-module, max-dispute-duration, escalation-resolvers)
+                               ;; are preserved rather than silently discarded.
+                               merged-proto (when proto
+                                              (merge (dissoc proto :protocol/id)
+                                                     (:protocol-params trace)))
+                               effective-trace (cond-> trace
+                                                 merged-proto (assoc :protocol-params merged-proto)
                                                  state (assoc :initial-block-time (:block-time state 1000))
                                                  authority (assoc :authority-params authority)
                                                  actors (assoc :agents (vec (concat (:agents trace []) actors)))
                                                  token (assoc :token-params token))
                                res (replay/replay-scenario effective-trace)
                                report (generate-golden-report suite-key res)
-                               comparison (when (= mode :verify) (compare-golden-report suite-key {:trace-id (:scenario-id trace) :golden-report report}))]
+                               comparison (when (= mode :verify) (compare-golden-report suite-key {:trace-id (:scenario-id trace) :golden-report report}))
+                               
+                               ;; CDRS v1.1 Analysis
+                               expect-res (when (:expectations trace)
+                                            (expectations/evaluate-expectations res (:expectations trace)))
+                               theory-res (when (:theory trace)
+                                            (theory/evaluate-theory res (:theory trace)))]
+                           
+                           (when (not= :pass (:outcome res))
+                             (println (str "DEBUG: Trace " (:scenario-id trace) " failed with " (:outcome res) " reason " (:halt-reason res)))
+                             (when (= (:outcome res) :fail)
+                               (let [last-entry (last (:trace res))
+                                     violations (:violations last-entry)]
+                                 (println (str "       Halted at seq " (:seq last-entry) " action " (:action last-entry)))
+                                 (doseq [[inv-kw res-map] violations]
+                                   (when-not (:holds? res-map)
+                                     (println (str "       VIOLATION: " inv-kw " details: " (:violations res-map))))))))
+
+
                            (when (= mode :save) (save-golden-report suite-key {:trace-id (:scenario-id trace) :golden-report report}))
                            {:trace-id (:scenario-id trace)
+                            :purpose  (:purpose trace)
                             :outcome (:outcome res)
                             :metrics (:metrics res)
                             :threshold-validation (validate-thresholds res thresholds)
                             :golden-report report
-                            :golden-comparison comparison}))
+                            :golden-comparison comparison
+                            :expectations expect-res
+                            :theory theory-res}))
                        traces)
+         theory-ok? (fn [r]
+                      ;; Theory result is acceptable when:
+                      ;; - no theory block (:not-evaluated)
+                      ;; - claim was not falsified (:not-falsified)
+                      ;; - claim was falsified AND the scenario is explicitly a theory-falsification exercise
+                      ;; :inconclusive is treated as a soft warning, not a hard failure
+                      ;;
+                      ;; Mechanism-property and equilibrium-concept results (CDRS v1.1):
+                      ;; - :fail → hard failure (same severity as expectations failure)
+                      ;; - :inconclusive / :not-applicable → soft warning (suite still passes)
+                      ;; - :not-checked → no properties declared; passes
+                      (let [status       (get-in r [:theory :status])
+                            purpose      (keyword (or (:purpose r) ""))
+                            mech-status  (get-in r [:theory :mechanism-status] :not-checked)
+                            eq-status    (get-in r [:theory :equilibrium-status] :not-checked)
+                            falsify-ok?  (case status
+                                           nil            true
+                                           :not-evaluated true
+                                           :not-falsified true
+                                           :falsified     (= purpose :theory-falsification)
+                                           :inconclusive  true
+                                           true)
+                            mech-ok?     (not= mech-status :fail)
+                            eq-ok?       (not= eq-status :fail)]
+                        (and falsify-ok? mech-ok? eq-ok?)))
          all-ok? (every? (fn [r] (and (= :pass (:outcome r))
                                       (:ok? (:threshold-validation r))
+                                      (or (nil? (:expectations r)) (:ok? (:expectations r)))
+                                      (theory-ok? r)
                                       (if (= mode :verify) (:ok? (:golden-comparison r)) true)))
                          results)]
      {:suite-id suite-key
@@ -194,8 +309,11 @@
         actors (:actors suite)
         results (atom [])]
     (doseq [trace traces]
-      (let [effective-trace (cond-> trace
-                              proto (assoc :protocol-params proto)
+      (let [merged-proto (when proto
+                           (merge (dissoc proto :protocol/id)
+                                  (:protocol-params trace)))
+            effective-trace (cond-> trace
+                              merged-proto (assoc :protocol-params merged-proto)
                               state (assoc :initial-block-time (:block-time state 1000))
                               authority (assoc :authority-params authority)
                               actors (assoc :agents (vec (concat (:agents trace []) actors))))

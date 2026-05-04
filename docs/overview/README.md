@@ -11,7 +11,7 @@ Clojure-based Monte Carlo simulation for validating dispute resolver network inc
 cd ~/Code/sew-simulation
 
 # Run tests
-clojure -M:test
+./scripts/test.sh
 
 # Run DR3 (full system - default)
 ./run-dr3.sh
@@ -175,14 +175,17 @@ clojure -M:clerk
 ## Testing
 
 ```bash
-# Unit tests
-clojure -M:test
+# All tests (unit + invariants + fixture suites)
+./scripts/test.sh
 
-# Run with coverage (optional)
-clojure -M:test --reporter verbose
+# Unit tests only
+./scripts/test.sh unit
 
-# Property-based tests (included in test suite)
-# Look for property/ functions in test/
+# S01–S41 deterministic invariant scenarios only
+./scripts/test.sh invariants
+
+# Fixture suites only
+./scripts/test.sh suites
 ```
 
 ## Reproducibility

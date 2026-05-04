@@ -16,8 +16,8 @@ Usage::
     from sew_sim.live_runner import LiveRunner
 
     agents_meta = [
-        {"id": "buyer",    "address": "0xbuyer",    "type": "honest"},
-        {"id": "resolver", "address": "0xresolver", "type": "resolver"},
+        {"id": "buyer",    "address": "0xbuyer",    "strategy": "honest"},
+        {"id": "resolver", "address": "0xresolver", "role": "resolver", "strategy": "honest"},
     ]
     buyer    = HonestBuyerLive("buyer", "0xseller")
     resolver = HonestResolverLive("resolver")

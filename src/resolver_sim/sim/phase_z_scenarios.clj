@@ -50,14 +50,14 @@
    :initial-block-time 1000
    :seed            421
    :agents
-   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :type "honest"}
-    {:id "seller" :address "0x0000000000000000000000000000000000001002" :type "honest"}
-    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :type "resolver"}]
+   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :strategy "honest"}
+    {:id "seller" :address "0x0000000000000000000000000000000000001002" :strategy "honest"}
+    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :role "resolver"}]
    :protocol-params params-dr3
    :events
    [{:seq 0 :time 1001 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 100000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 2000 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver absent — no execute_resolution step.
@@ -75,14 +75,14 @@
    :initial-block-time 1000
    :seed            422
    :agents
-   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :type "honest"}
-    {:id "seller" :address "0x0000000000000000000000000000000000001002" :type "honest"}
-    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :type "attacker"}]
+   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :strategy "honest"}
+    {:id "seller" :address "0x0000000000000000000000000000000000001002" :strategy "honest"}
+    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :strategy "malicious" :role "resolver"}]
    :protocol-params params-dr3
    :events
    [{:seq 0 :time 1001 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 100000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 2000 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver cancels (false positive: should have released)
@@ -101,15 +101,15 @@
    :initial-block-time 1000
    :seed            423
    :agents
-   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :type "honest"}
-    {:id "seller" :address "0x0000000000000000000000000000000000001002" :type "honest"}
-    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :type "attacker"}]
+   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :strategy "honest"}
+    {:id "seller" :address "0x0000000000000000000000000000000000001002" :strategy "honest"}
+    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :strategy "malicious" :role "resolver"}]
    :protocol-params params-dr3
    :events
    ;; Escrow A
    [{:seq 0 :time 1001 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 100000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 2000 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver acts on escrow A (false positive cancel)
@@ -120,7 +120,7 @@
     ;; Escrow B — resolver exits; times out
     {:seq 4 :time 175900 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 80000}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 5 :time 176000 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf1"}}
     ;; Resolver absent for wf1; auto-cancel after 90 days from dispute raise
@@ -135,21 +135,21 @@
    :initial-block-time 1000
    :seed            424
    :agents
-   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :type "honest"}
-    {:id "seller" :address "0x0000000000000000000000000000000000001002" :type "honest"}
-    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :type "honest"}]
+   [{:id "buyer"  :address "0x0000000000000000000000000000000000001001" :strategy "honest"}
+    {:id "seller" :address "0x0000000000000000000000000000000000001002" :strategy "honest"}
+    {:id "resolver" :address "0x0000000000000000000000000000000000001234" :strategy "honest"}]
    :protocol-params params-dr3
    :events
    ;; All three escrows created
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 100000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1010 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 50000}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 2 :time 1020 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0x0000000000000000000000000000000000001002" :amount 75000}
-     :save-wf-as "wf2"}
+     :save-id-as "wf2"}
     ;; All three disputed
     {:seq 3 :time 2000 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}

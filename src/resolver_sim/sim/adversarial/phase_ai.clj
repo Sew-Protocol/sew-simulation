@@ -152,6 +152,35 @@
                      (if pass? "✓ PASS" "✗ FAIL")
                      (* 100 disp-rate)
                      (name pattern)))
+    
+    ; Add interpretation and recommendations
+    (if pass?
+      (do (println "")
+          (println (format "   Status: ✅ PASS (%.0f%% displacement < %.0f%% threshold)" 
+                          (* 100 disp-rate) 
+                          (* 100 displacement-threshold)))
+          (println "   Interpretation: Sybil ring attack is contained. Honest resolvers maintain market share.")
+          (println "   Confidence delta: +5% (escalation trap well-defended)"))
+      (do (println "")
+          (println (format "   Status: ❌ FAIL (%.0f%% displacement ≥ %.0f%% threshold — pattern: %s)" 
+                          (* 100 disp-rate) 
+                          (* 100 displacement-threshold)
+                          (name pattern)))
+          (println "   Interpretation: ❌ CRITICAL — Sybil ring attack is EFFECTIVE")
+          (println (format "   Impact: %s displacement pattern (reached %.0f%% honest exit)" 
+                          (name pattern)
+                          (* 100.0 (- 1.0 (/ final-honest n-resolvers)))))
+          (println "")
+          (println "   Recommendations (Priority Order):")
+          (println "   1. [CRITICAL] Implement ring detection via correlation analysis")
+          (println "      - Flag resolvers with suspiciously high coordination (escalation timing)")
+          (println "      - Reduce escalation vote weight for detected coalitions")
+          (println "   2. [HIGH] Increase escalation bond requirements")
+          (println "      - Higher cost per escalation attempt reduces sybil viability")
+          (println "      - Test with 2–5× increase to escalation bond")
+          (println "   3. [HIGH] Add escalation delays between coordinated calls")
+          (println "      - Prevent same-block escalation spam")
+          (println "      - Require 1+ epoch delay between escalations from same cohort")))
 
     {:phase/id           :phase-ai
      :trajectory/classes (:trajectory/classes phase-metadata)

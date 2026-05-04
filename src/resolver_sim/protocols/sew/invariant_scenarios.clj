@@ -4,7 +4,7 @@
    Each entry in `all-scenarios` is a scenario map accepted by
    resolver-sim.contract-model.replay/replay-scenario.
 
-   Events use :save-wf-as annotations on create_escrow steps and string
+   Events use :save-id-as annotations on create_escrow steps and string
    :workflow-id aliases (e.g. \"wf0\") on subsequent steps.  The replay
    engine resolves aliases lazily in the event loop.
 
@@ -65,13 +65,13 @@
   {:scenario-id     "s01-baseline-happy-path"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"  :address "0xbuyer"  :type "honest"}
-                     {:id "seller" :address "0xseller" :type "honest"}]
+   :agents          [{:id "buyer"  :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller" :address "0xseller" :strategy "honest"}]
    :protocol-params dr3
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "release"
      :params {:workflow-id "wf0"}}]})
 
@@ -83,15 +83,15 @@
   {:scenario-id     "s02-dr3-dispute-release"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"    :address "0xbuyer"    :type "honest"}
-                     {:id "seller"   :address "0xseller"   :type "honest"}
-                     {:id "resolver" :address "0xresolver" :type "resolver"}]
+   :agents          [{:id "buyer"    :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"   :address "0xseller"   :strategy "honest"}
+                     {:id "resolver" :address "0xresolver" :role "resolver"}]
    :protocol-params dr3
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 4000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 2 :time 1120 :agent "resolver" :action "execute_resolution"
@@ -105,15 +105,15 @@
   {:scenario-id     "s03-dr3-dispute-refund"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"    :address "0xbuyer"    :type "honest"}
-                     {:id "seller"   :address "0xseller"   :type "honest"}
-                     {:id "resolver" :address "0xresolver" :type "resolver"}]
+   :agents          [{:id "buyer"    :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"   :address "0xseller"   :strategy "honest"}
+                     {:id "resolver" :address "0xresolver" :role "resolver"}]
    :protocol-params dr3
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 4000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 2 :time 1120 :agent "resolver" :action "execute_resolution"
@@ -128,14 +128,14 @@
   {:scenario-id     "s04-dispute-timeout-autocancel"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"  :address "0xbuyer"  :type "honest"}
-                     {:id "seller" :address "0xseller" :type "honest"}
-                     {:id "keeper" :address "0xkeeper" :type "keeper"}]
+   :agents          [{:id "buyer"  :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller" :address "0xseller" :strategy "honest"}
+                     {:id "keeper" :address "0xkeeper" :role "keeper"}]
    :protocol-params timeout
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Early attempt → rejected (240 s elapsed, need 300)
@@ -154,16 +154,16 @@
   {:scenario-id     "s05-pending-settlement-execute"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"    :address "0xbuyer"    :type "honest"}
-                     {:id "seller"   :address "0xseller"   :type "honest"}
-                     {:id "resolver" :address "0xresolver" :type "resolver"}
-                     {:id "executor" :address "0xexecutor" :type "keeper"}]
+   :agents          [{:id "buyer"    :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"   :address "0xseller"   :strategy "honest"}
+                     {:id "resolver" :address "0xresolver" :role "resolver"}
+                     {:id "executor" :address "0xexecutor" :role "keeper"}]
    :protocol-params appeal
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver votes; creates pending-settlement (deadline = 1120+120 = 1240)
@@ -184,13 +184,13 @@
   {:scenario-id     "s06-mutual-cancel"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"  :address "0xbuyer"  :type "honest"}
-                     {:id "seller" :address "0xseller" :type "honest"}]
+   :agents          [{:id "buyer"  :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller" :address "0xseller" :strategy "honest"}]
    :protocol-params dr3
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 1500}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "sender_cancel"
      :params {:workflow-id "wf0"}}
     {:seq 2 :time 1120 :agent "seller" :action "recipient_cancel"
@@ -204,16 +204,16 @@
   {:scenario-id     "s07-unauthorized-resolver-rejected"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"       :address "0xbuyer"       :type "honest"}
-                     {:id "seller"      :address "0xseller"      :type "honest"}
-                     {:id "badresolver" :address "0xbadresolver" :type "attacker"}
-                     {:id "resolver"    :address "0xresolver"    :type "resolver"}]
+   :agents          [{:id "buyer"       :address "0xbuyer"       :strategy "honest"}
+                     {:id "seller"      :address "0xseller"      :strategy "honest"}
+                     {:id "badresolver" :address "0xbadresolver" :strategy "malicious" :role "resolver"}
+                     {:id "resolver"    :address "0xresolver"    :role "resolver"}]
    :protocol-params dr3
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 3000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Wrong resolver → rejected
@@ -232,15 +232,15 @@
   {:scenario-id     "s08-state-machine-attack-gauntlet"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"    :address "0xbuyer"    :type "honest"}
-                     {:id "seller"   :address "0xseller"   :type "honest"}
-                     {:id "resolver" :address "0xresolver" :type "resolver"}]
+   :agents          [{:id "buyer"    :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"   :address "0xseller"   :strategy "honest"}
+                     {:id "resolver" :address "0xresolver" :role "resolver"}]
    :protocol-params dr3
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     ;; Execute-resolution before dispute → rejected
     {:seq 1 :time 1060 :agent "buyer" :action "execute_resolution"
      :params {:workflow-id "wf0" :is-release true :resolution-hash "0xh"}}
@@ -275,24 +275,24 @@
   {:scenario-id     "s09-multi-escrow-solvency"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer0"   :address "0xbuyer0"   :type "honest"}
-                     {:id "buyer1"   :address "0xbuyer1"   :type "honest"}
-                     {:id "buyer2"   :address "0xbuyer2"   :type "honest"}
-                     {:id "seller"   :address "0xseller"   :type "honest"}
-                     {:id "resolver" :address "0xresolver" :type "resolver"}]
+   :agents          [{:id "buyer0"   :address "0xbuyer0"   :strategy "honest"}
+                     {:id "buyer1"   :address "0xbuyer1"   :strategy "honest"}
+                     {:id "buyer2"   :address "0xbuyer2"   :strategy "honest"}
+                     {:id "seller"   :address "0xseller"   :strategy "honest"}
+                     {:id "resolver" :address "0xresolver" :role "resolver"}]
    :protocol-params dr3
    :events
    [{:seq 0 :time 1000 :agent "buyer0" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 1000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1000 :agent "buyer1" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 2 :time 1000 :agent "buyer2" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 3000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf2"}
+     :save-id-as "wf2"}
     {:seq 3 :time 1060 :agent "buyer0" :action "release"
      :params {:workflow-id "wf0"}}
     {:seq 4 :time 1060 :agent "buyer1" :action "raise_dispute"
@@ -313,20 +313,20 @@
   {:scenario-id     "s10-double-finalize-rejected"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"    :address "0xbuyer"    :type "honest"}
-                     {:id "seller"   :address "0xseller"   :type "honest"}
-                     {:id "seller2"  :address "0xseller2"  :type "honest"}
-                     {:id "resolver" :address "0xresolver" :type "resolver"}]
+   :agents          [{:id "buyer"    :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"   :address "0xseller"   :strategy "honest"}
+                     {:id "seller2"  :address "0xseller2"  :strategy "honest"}
+                     {:id "resolver" :address "0xresolver" :role "resolver"}]
    :protocol-params dr3
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 500}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     ;; resolver acts as buyer for wf1 (creates to seller2, sets itself as resolver)
     {:seq 1 :time 1000 :agent "resolver" :action "create_escrow"
      :params {:token "USDC" :to "0xseller2" :amount 500
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 2 :time 1060 :agent "buyer" :action "release"
      :params {:workflow-id "wf0"}}
     {:seq 3 :time 1060 :agent "resolver" :action "raise_dispute"
@@ -350,16 +350,16 @@
   {:scenario-id     "s11-zero-fee-edge-case"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"    :address "0xbuyer"    :type "honest"}
-                     {:id "seller"   :address "0xseller"   :type "honest"}
-                     {:id "resolver" :address "0xresolver" :type "resolver"}]
+   :agents          [{:id "buyer"    :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"   :address "0xseller"   :strategy "honest"}
+                     {:id "resolver" :address "0xresolver" :role "resolver"}]
    :protocol-params {:resolver-fee-bps 0 :appeal-window-duration 0
                      :max-dispute-duration 2592000}
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 1
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 2 :time 1120 :agent "resolver" :action "execute_resolution"
@@ -375,13 +375,13 @@
   {:scenario-id     "s12a-snapshot-isolation-fee-zero"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"  :address "0xbuyer"  :type "honest"}
-                     {:id "seller" :address "0xseller" :type "honest"}]
+   :agents          [{:id "buyer"  :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller" :address "0xseller" :strategy "honest"}]
    :protocol-params {:resolver-fee-bps 0}
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 10000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "release"
      :params {:workflow-id "wf0"}}]})
 
@@ -389,13 +389,13 @@
   {:scenario-id     "s12b-snapshot-isolation-fee-500"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"  :address "0xbuyer"  :type "honest"}
-                     {:id "seller" :address "0xseller" :type "honest"}]
+   :agents          [{:id "buyer"  :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller" :address "0xseller" :strategy "honest"}]
    :protocol-params {:resolver-fee-bps 500}
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 10000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "release"
      :params {:workflow-id "wf0"}}]})
 
@@ -408,16 +408,16 @@
   {:scenario-id     "s13-pending-settlement-refund"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"    :address "0xbuyer"    :type "honest"}
-                     {:id "seller"   :address "0xseller"   :type "honest"}
-                     {:id "resolver" :address "0xresolver" :type "resolver"}
-                     {:id "executor" :address "0xexecutor" :type "keeper"}]
+   :agents          [{:id "buyer"    :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"   :address "0xseller"   :strategy "honest"}
+                     {:id "resolver" :address "0xresolver" :role "resolver"}
+                     {:id "executor" :address "0xexecutor" :role "keeper"}]
    :protocol-params appeal
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Refund vote; creates pending-settlement (deadline = 1120+120 = 1240)
@@ -439,14 +439,14 @@
   {:scenario-id     "s14-dr3-module-authorized"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"    :address "0xbuyer"    :type "honest"}
-                     {:id "seller"   :address "0xseller"   :type "honest"}
-                     {:id "resolver" :address "0xresolver" :type "resolver"}]
+   :agents          [{:id "buyer"    :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"   :address "0xseller"   :strategy "honest"}
+                     {:id "resolver" :address "0xresolver" :role "resolver"}]
    :protocol-params dr3-module
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 2 :time 1120 :agent "resolver" :action "execute_resolution"
@@ -460,15 +460,15 @@
   {:scenario-id     "s15-dr3-module-unauthorized-rejected"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"       :address "0xbuyer"       :type "honest"}
-                     {:id "seller"      :address "0xseller"      :type "honest"}
-                     {:id "badresolver" :address "0xbadresolver" :type "attacker"}
-                     {:id "resolver"    :address "0xresolver"    :type "resolver"}]
+   :agents          [{:id "buyer"       :address "0xbuyer"       :strategy "honest"}
+                     {:id "seller"      :address "0xseller"      :strategy "honest"}
+                     {:id "badresolver" :address "0xbadresolver" :strategy "malicious" :role "resolver"}
+                     {:id "resolver"    :address "0xresolver"    :role "resolver"}]
    :protocol-params dr3-module
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Module rejects 0xbadresolver → revert
@@ -486,13 +486,13 @@
   {:scenario-id     "s16-ieo-create-release"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"  :address "0xbuyer"  :type "honest"}
-                     {:id "seller" :address "0xseller" :type "honest"}]
+   :agents          [{:id "buyer"  :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller" :address "0xseller" :strategy "honest"}]
    :protocol-params ieo
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "release"
      :params {:workflow-id "wf0"}}]})
 
@@ -505,14 +505,14 @@
   {:scenario-id     "s17-ieo-dispute-no-resolver-timeout"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"  :address "0xbuyer"  :type "honest"}
-                     {:id "seller" :address "0xseller" :type "honest"}
-                     {:id "keeper" :address "0xkeeper" :type "resolver"}]
+   :agents          [{:id "buyer"  :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller" :address "0xseller" :strategy "honest"}
+                     {:id "keeper" :address "0xkeeper" :role "resolver"}]
    :protocol-params ieo-timeout
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 1000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Early → rejected
@@ -530,14 +530,14 @@
   {:scenario-id     "s18-dr3-kleros-l0-resolves"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"}
-                     {:id "seller"     :address "0xseller" :type "honest"}
-                     {:id "l0resolver" :address "0xl0"     :type "resolver"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller"     :address "0xseller" :strategy "honest"}
+                     {:id "l0resolver" :address "0xl0"     :role "resolver"}]
    :protocol-params kleros
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Kleros module authorizes 0xl0 at level 0 → finalized immediately
@@ -554,15 +554,15 @@
   {:scenario-id     "s19-dr3-kleros-escalation-rejected-l0-resolves"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"}
-                     {:id "seller"     :address "0xseller" :type "honest"}
-                     {:id "l0resolver" :address "0xl0"     :type "resolver"}
-                     {:id "l1resolver" :address "0xl1"     :type "resolver"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller"     :address "0xseller" :strategy "honest"}
+                     {:id "l0resolver" :address "0xl0"     :role "resolver"}
+                     {:id "l1resolver" :address "0xl1"     :role "resolver"}]
    :protocol-params kleros
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Escalation before any resolution → rejected (:no-resolution-to-appeal)
@@ -587,14 +587,14 @@
    :schema-version       "1.0"
    :allow-open-disputes? true ; intentionally tests guard logic; dispute is never resolved
    :initial-block-time   1000
-   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"}
-                     {:id "seller"     :address "0xseller" :type "honest"}
-                     {:id "l2resolver" :address "0xl2"     :type "resolver"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller"     :address "0xseller" :strategy "honest"}
+                     {:id "l2resolver" :address "0xl2"     :role "resolver"}]
    :protocol-params kleros
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Three escalation attempts, all rejected (:no-resolution-to-appeal)
@@ -619,16 +619,16 @@
   {:scenario-id     "s21-dr3-kleros-pending-cleared-on-escalation"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"}
-                     {:id "seller"     :address "0xseller" :type "honest"}
-                     {:id "l0resolver" :address "0xl0"     :type "resolver"}
-                     {:id "l1resolver" :address "0xl1"     :type "resolver"}
-                     {:id "keeper"     :address "0xkeeper" :type "resolver"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller"     :address "0xseller" :strategy "honest"}
+                     {:id "l0resolver" :address "0xl0"     :role "resolver"}
+                     {:id "l1resolver" :address "0xl1"     :role "resolver"}
+                     {:id "keeper"     :address "0xkeeper" :role "resolver"}]
    :protocol-params kleros-appeal
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 resolves → creates pending (deadline = 1120+60 = 1180)
@@ -656,13 +656,13 @@
    :schema-version       "1.0"
    :allow-open-disputes? true ; intentionally stops after raising the dispute (regression test for status clearing)
    :initial-block-time   1000
-   :agents          [{:id "buyer"  :address "0xbuyer"  :type "honest"}
-                     {:id "seller" :address "0xseller" :type "honest"}]
+   :agents          [{:id "buyer"  :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller" :address "0xseller" :strategy "honest"}]
    :protocol-params dr3
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     ;; Seller agrees to cancel (sets recipient :agree-to-cancel, state stays :pending)
     {:seq 1 :time 1000 :agent "seller" :action "recipient_cancel"
      :params {:workflow-id "wf0"}}
@@ -683,14 +683,14 @@
   {:scenario-id     "s23-preemptive-escalation-blocked"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"}
-                     {:id "seller"     :address "0xseller" :type "honest"}
-                     {:id "l0resolver" :address "0xl0"     :type "resolver"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller"     :address "0xseller" :strategy "honest"}
+                     {:id "l0resolver" :address "0xl0"     :role "resolver"}]
    :protocol-params kleros
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Seller attempts preemptive escalation → rejected (:no-resolution-to-appeal)
@@ -724,12 +724,12 @@
   {:scenario-id        "s24-resolver-stake-depletion-cascade"
    :schema-version     "1.0"
    :initial-block-time 1000
-   :agents             [{:id "buyer0"   :address "0xbuyer0"   :type "honest"}
-                        {:id "buyer1"   :address "0xbuyer1"   :type "honest"}
-                        {:id "buyer2"   :address "0xbuyer2"   :type "honest"}
-                        {:id "seller"   :address "0xseller"   :type "honest"}
-                        {:id "resolver" :address "0xresolver" :type "resolver"}
-                        {:id "keeper"   :address "0xkeeper"   :type "keeper"}]
+   :agents             [{:id "buyer0"   :address "0xbuyer0"   :strategy "honest"}
+                        {:id "buyer1"   :address "0xbuyer1"   :strategy "honest"}
+                        {:id "buyer2"   :address "0xbuyer2"   :strategy "honest"}
+                        {:id "seller"   :address "0xseller"   :strategy "honest"}
+                        {:id "resolver" :address "0xresolver" :role "resolver"}
+                        {:id "keeper"   :address "0xkeeper"   :role "keeper"}]
    :protocol-params    stake-cascade
    :events
    [;; Resolver registers stake before any escrow is opened
@@ -737,13 +737,13 @@
      :params {:amount 3000}}
     {:seq 1 :time 1000 :agent "buyer0" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 2 :time 1000 :agent "buyer1" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 3 :time 1000 :agent "buyer2" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 2000}
-     :save-wf-as "wf2"}
+     :save-id-as "wf2"}
     {:seq 4 :time 1060 :agent "buyer0" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 5 :time 1060 :agent "buyer1" :action "raise_dispute"
@@ -799,17 +799,17 @@
   {:scenario-id     "s25-profit-maximizer-slash-lifecycle"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"     :type "honest"}
-                     {:id "seller"     :address "0xseller"    :type "honest"}
-                     {:id "resolver"   :address "0xresolver"  :type "resolver"}
-                     {:id "governance" :address "0xgov"       :type "governance"}
-                     {:id "keeper"     :address "0xkeeper"    :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"     :strategy "honest"}
+                     {:id "seller"     :address "0xseller"    :strategy "honest"}
+                     {:id "resolver"   :address "0xresolver"  :role "resolver"}
+                     {:id "governance" :address "0xgov"       :role "governance"}
+                     {:id "keeper"     :address "0xkeeper"    :role "keeper"}]
    :protocol-params appeal ; appeal-window=120s, fee-bps=150
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 8000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver submits decision → pending (deadline = 1120+120 = 1240)
@@ -865,16 +865,16 @@
   {:scenario-id     "s26-forking-strategist-l1-reversal"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"} ; escalates strategically
-                     {:id "seller"     :address "0xseller" :type "honest"}
-                     {:id "l0resolver" :address "0xl0"     :type "resolver"}
-                     {:id "l1resolver" :address "0xl1"     :type "resolver"}
-                     {:id "keeper"     :address "0xkeeper" :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"  :strategy "honest"} ; escalates strategically
+                     {:id "seller"     :address "0xseller" :strategy "honest"}
+                     {:id "l0resolver" :address "0xl0"     :role "resolver"}
+                     {:id "l1resolver" :address "0xl1"     :role "resolver"}
+                     {:id "keeper"     :address "0xkeeper" :role "keeper"}]
    :protocol-params kleros-appeal ; fee-bps=150, appeal-window=60s, kleros escalation-resolvers
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules in favour of seller (release). Pending deadline = 1120+60 = 1180.
@@ -921,17 +921,17 @@
   {:scenario-id     "s27-forking-strategist-l2-fork"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"} ; escalates twice
-                     {:id "seller"     :address "0xseller" :type "honest"}
-                     {:id "l0resolver" :address "0xl0"     :type "resolver"}
-                     {:id "l1resolver" :address "0xl1"     :type "resolver"}
-                     {:id "l2resolver" :address "0xl2"     :type "resolver"}
-                     {:id "keeper"     :address "0xkeeper" :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"  :strategy "honest"} ; escalates twice
+                     {:id "seller"     :address "0xseller" :strategy "honest"}
+                     {:id "l0resolver" :address "0xl0"     :role "resolver"}
+                     {:id "l1resolver" :address "0xl1"     :role "resolver"}
+                     {:id "l2resolver" :address "0xl2"     :role "resolver"}
+                     {:id "keeper"     :address "0xkeeper" :role "keeper"}]
    :protocol-params kleros-appeal ; fee-bps=150, appeal-window=60 s, resolvers {0→xl0,1→xl1,2→xl2}
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules release (buyer loses). Pending deadline = 1120+60 = 1180.
@@ -982,15 +982,15 @@
   {:scenario-id     "s28-forking-strategist-late-escalation-rejected"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"} ; attempts late escalation
-                     {:id "seller"     :address "0xseller" :type "honest"}
-                     {:id "l0resolver" :address "0xl0"     :type "resolver"}
-                     {:id "keeper"     :address "0xkeeper" :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"  :strategy "honest"} ; attempts late escalation
+                     {:id "seller"     :address "0xseller" :strategy "honest"}
+                     {:id "l0resolver" :address "0xl0"     :role "resolver"}
+                     {:id "keeper"     :address "0xkeeper" :role "keeper"}]
    :protocol-params kleros-appeal ; appeal-window=60 s
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules release. Pending deadline = 1120+60 = 1180.
@@ -1034,16 +1034,16 @@
   {:scenario-id     "s29-forking-strategist-seller-escalates"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"}
-                     {:id "seller"     :address "0xseller" :type "honest"} ; escalates strategically
-                     {:id "l0resolver" :address "0xl0"     :type "resolver"}
-                     {:id "l1resolver" :address "0xl1"     :type "resolver"}
-                     {:id "keeper"     :address "0xkeeper" :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"  :strategy "honest"}
+                     {:id "seller"     :address "0xseller" :strategy "honest"} ; escalates strategically
+                     {:id "l0resolver" :address "0xl0"     :role "resolver"}
+                     {:id "l1resolver" :address "0xl1"     :role "resolver"}
+                     {:id "keeper"     :address "0xkeeper" :role "keeper"}]
    :protocol-params kleros-appeal ; fee-bps=150, appeal-window=60 s
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules refund (buyer wins). Pending deadline = 1120+60 = 1180.
@@ -1093,16 +1093,16 @@
   {:scenario-id     "s30-forking-strategist-double-loss"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"} ; escalates, but fork never comes
-                     {:id "seller"     :address "0xseller" :type "honest"}
-                     {:id "l0resolver" :address "0xl0"     :type "resolver"}
-                     {:id "l1resolver" :address "0xl1"     :type "resolver"}
-                     {:id "keeper"     :address "0xkeeper" :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"  :strategy "honest"} ; escalates, but fork never comes
+                     {:id "seller"     :address "0xseller" :strategy "honest"}
+                     {:id "l0resolver" :address "0xl0"     :role "resolver"}
+                     {:id "l1resolver" :address "0xl1"     :role "resolver"}
+                     {:id "keeper"     :address "0xkeeper" :role "keeper"}]
    :protocol-params kleros-appeal ; fee-bps=150, appeal-window=60 s
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules release (buyer loses). Pending deadline = 1120+60 = 1180.
@@ -1155,17 +1155,17 @@
   {:scenario-id     "s31-forking-strategist-all-levels-confirm"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"} ; escalates twice; no fork
-                     {:id "seller"     :address "0xseller" :type "honest"}
-                     {:id "l0resolver" :address "0xl0"     :type "resolver"}
-                     {:id "l1resolver" :address "0xl1"     :type "resolver"}
-                     {:id "l2resolver" :address "0xl2"     :type "resolver"}
-                     {:id "keeper"     :address "0xkeeper" :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"  :strategy "honest"} ; escalates twice; no fork
+                     {:id "seller"     :address "0xseller" :strategy "honest"}
+                     {:id "l0resolver" :address "0xl0"     :role "resolver"}
+                     {:id "l1resolver" :address "0xl1"     :role "resolver"}
+                     {:id "l2resolver" :address "0xl2"     :role "resolver"}
+                     {:id "keeper"     :address "0xkeeper" :role "keeper"}]
    :protocol-params kleros-appeal ; fee-bps=150, appeal-window=60 s, resolvers {0→xl0,1→xl1,2→xl2}
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules release (buyer loses). Pending deadline = 1120+60 = 1180.
@@ -1226,16 +1226,16 @@
   {:scenario-id     "s32-forking-strategist-premature-settlement-rejected"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"  :type "honest"} ; escalates; fork lands at L1
-                     {:id "seller"     :address "0xseller" :type "honest"}
-                     {:id "l0resolver" :address "0xl0"     :type "resolver"}
-                     {:id "l1resolver" :address "0xl1"     :type "resolver"}
-                     {:id "keeper"     :address "0xkeeper" :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"  :strategy "honest"} ; escalates; fork lands at L1
+                     {:id "seller"     :address "0xseller" :strategy "honest"}
+                     {:id "l0resolver" :address "0xl0"     :role "resolver"}
+                     {:id "l1resolver" :address "0xl1"     :role "resolver"}
+                     {:id "keeper"     :address "0xkeeper" :role "keeper"}]
    :protocol-params kleros-appeal ; fee-bps=150, appeal-window=60 s
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 rules release (buyer loses). Pending deadline = 1120+60 = 1180.
@@ -1294,20 +1294,20 @@
   {:scenario-id     "s33-forking-strategist-two-escrow-fork-isolation"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer0"     :address "0xbuyer0" :type "honest"} ; escalates on wf0
-                     {:id "buyer1"     :address "0xbuyer1" :type "honest"} ; accepts L0 on wf1
-                     {:id "seller"     :address "0xseller" :type "honest"}
-                     {:id "l0resolver" :address "0xl0"     :type "resolver"}
-                     {:id "l1resolver" :address "0xl1"     :type "resolver"}
-                     {:id "keeper"     :address "0xkeeper" :type "keeper"}]
+   :agents          [{:id "buyer0"     :address "0xbuyer0" :strategy "honest"} ; escalates on wf0
+                     {:id "buyer1"     :address "0xbuyer1" :strategy "honest"} ; accepts L0 on wf1
+                     {:id "seller"     :address "0xseller" :strategy "honest"}
+                     {:id "l0resolver" :address "0xl0"     :role "resolver"}
+                     {:id "l1resolver" :address "0xl1"     :role "resolver"}
+                     {:id "keeper"     :address "0xkeeper" :role "keeper"}]
    :protocol-params kleros-appeal ; fee-bps=150, appeal-window=60 s
    :events
    [{:seq 0 :time 1000 :agent "buyer0" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1000 :agent "buyer1" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 4000}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 2 :time 1060 :agent "buyer0" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 3 :time 1060 :agent "buyer1" :action "raise_dispute"
@@ -1363,17 +1363,17 @@
   {:scenario-id     "s34-profit-maximizer-unchallenged-slash"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"    :type "honest"}
-                     {:id "seller"     :address "0xseller"   :type "honest"}
-                     {:id "resolver"   :address "0xresolver" :type "resolver"}
-                     {:id "governance" :address "0xgov"      :type "governance"}
-                     {:id "keeper"     :address "0xkeeper"   :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"     :address "0xseller"   :strategy "honest"}
+                     {:id "resolver"   :address "0xresolver" :role "resolver"}
+                     {:id "governance" :address "0xgov"      :role "governance"}
+                     {:id "keeper"     :address "0xkeeper"   :role "keeper"}]
    :protocol-params appeal ; appeal-window=120 s, fee-bps=150
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 8000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver submits decision → pending (deadline = 1120+120 = 1240)
@@ -1423,17 +1423,17 @@
   {:scenario-id     "s35-profit-maximizer-governance-wins-appeal"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"    :type "honest"}
-                     {:id "seller"     :address "0xseller"   :type "honest"}
-                     {:id "resolver"   :address "0xresolver" :type "resolver"}
-                     {:id "governance" :address "0xgov"      :type "governance"}
-                     {:id "keeper"     :address "0xkeeper"   :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"     :address "0xseller"   :strategy "honest"}
+                     {:id "resolver"   :address "0xresolver" :role "resolver"}
+                     {:id "governance" :address "0xgov"      :role "governance"}
+                     {:id "keeper"     :address "0xkeeper"   :role "keeper"}]
    :protocol-params appeal ; appeal-window=120 s, fee-bps=150
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 8000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver submits decision → pending (deadline = 1120+120 = 1240)
@@ -1488,17 +1488,17 @@
   {:scenario-id     "s36-profit-maximizer-pre-window-execute-rejected"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"    :type "honest"}
-                     {:id "seller"     :address "0xseller"   :type "honest"}
-                     {:id "resolver"   :address "0xresolver" :type "resolver"}
-                     {:id "governance" :address "0xgov"      :type "governance"}
-                     {:id "keeper"     :address "0xkeeper"   :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"     :address "0xseller"   :strategy "honest"}
+                     {:id "resolver"   :address "0xresolver" :role "resolver"}
+                     {:id "governance" :address "0xgov"      :role "governance"}
+                     {:id "keeper"     :address "0xkeeper"   :role "keeper"}]
    :protocol-params appeal ; appeal-window=120 s, fee-bps=150
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 8000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; Resolver submits decision → pending (deadline = 1120+120 = 1240)
@@ -1556,23 +1556,23 @@
   {:scenario-id     "s37-profit-maximizer-two-resolver-split-outcomes"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer0"      :address "0xbuyer0"    :type "honest"}
-                     {:id "buyer1"      :address "0xbuyer1"    :type "honest"}
-                     {:id "seller"      :address "0xseller"    :type "honest"}
-                     {:id "resolver0"   :address "0xresolver0" :type "resolver"}
-                     {:id "resolver1"   :address "0xresolver1" :type "resolver"}
-                     {:id "governance"  :address "0xgov"       :type "governance"}
-                     {:id "keeper"      :address "0xkeeper"    :type "keeper"}]
+   :agents          [{:id "buyer0"      :address "0xbuyer0"    :strategy "honest"}
+                     {:id "buyer1"      :address "0xbuyer1"    :strategy "honest"}
+                     {:id "seller"      :address "0xseller"    :strategy "honest"}
+                     {:id "resolver0"   :address "0xresolver0" :role "resolver"}
+                     {:id "resolver1"   :address "0xresolver1" :role "resolver"}
+                     {:id "governance"  :address "0xgov"       :role "governance"}
+                     {:id "keeper"      :address "0xkeeper"    :role "keeper"}]
    :protocol-params appeal ; appeal-window=120 s, fee-bps=150
    :events
    [{:seq 0 :time 1000 :agent "buyer0" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 8000
               :custom-resolver "0xresolver0"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1000 :agent "buyer1" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 6000
               :custom-resolver "0xresolver1"}
-     :save-wf-as "wf1"}
+     :save-id-as "wf1"}
     {:seq 2 :time 1060 :agent "buyer0" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 3 :time 1060 :agent "buyer1" :action "raise_dispute"
@@ -1629,10 +1629,10 @@
   {:scenario-id     "s38-dr3-bond-mix-valid"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"    :address "0xbuyer"    :type "honest"}
-                     {:id "seller"   :address "0xseller"   :type "honest"}
-                     {:id "resolver" :address "0xresolver" :type "resolver"}
-                     {:id "keeper"   :address "0xkeeper"   :type "keeper"}]
+   :agents          [{:id "buyer"    :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"   :address "0xseller"   :strategy "honest"}
+                     {:id "resolver" :address "0xresolver" :role "resolver"}
+                     {:id "keeper"   :address "0xkeeper"   :role "keeper"}]
    :protocol-params appeal
    :events
    [{:seq 0 :time 1000 :agent "resolver" :action "register_stake"
@@ -1642,7 +1642,7 @@
     {:seq 2 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 3 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 4 :time 1120 :agent "resolver" :action "execute_resolution"
@@ -1666,8 +1666,8 @@
   {:scenario-id     "s39-dr3-senior-coverage-delegation"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "senior" :address "0xsenior" :type "resolver"}
-                     {:id "junior" :address "0xjunior" :type "resolver"}]
+   :agents          [{:id "senior" :address "0xsenior" :role "resolver"}
+                     {:id "junior" :address "0xjunior" :role "resolver"}]
    :protocol-params dr3
    :allow-open-disputes? true
    :events
@@ -1697,11 +1697,11 @@
   {:scenario-id     "s40-dr3-freeze-post-slash"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"    :type "honest"}
-                     {:id "seller"     :address "0xseller"   :type "honest"}
-                     {:id "resolver"   :address "0xresolver" :type "resolver"}
-                     {:id "governance" :address "0xgov"      :type "governance"}
-                     {:id "keeper"     :address "0xkeeper"   :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"    :strategy "honest"}
+                     {:id "seller"     :address "0xseller"   :strategy "honest"}
+                     {:id "resolver"   :address "0xresolver" :role "resolver"}
+                     {:id "governance" :address "0xgov"      :role "governance"}
+                     {:id "keeper"     :address "0xkeeper"   :role "keeper"}]
    :protocol-params appeal
    :events
    [{:seq 0 :time 1000 :agent "resolver" :action "register_stake"
@@ -1709,7 +1709,7 @@
     {:seq 1 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000
               :custom-resolver "0xresolver"}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 2 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     {:seq 3 :time 1120 :agent "resolver" :action "execute_resolution"
@@ -1745,17 +1745,17 @@
   {:scenario-id     "s41-dr3-reversal-slash-disabled"
    :schema-version  "1.0"
    :initial-block-time 1000
-   :agents          [{:id "buyer"      :address "0xbuyer"   :type "honest"}
-                     {:id "seller"     :address "0xseller"  :type "honest"}
-                     {:id "l0"         :address "0xl0"      :type "resolver"}
-                     {:id "l1"         :address "0xl1"      :type "resolver"}
-                     {:id "challenger" :address "0xchall"   :type "honest"}
-                     {:id "keeper"     :address "0xkeeper"  :type "keeper"}]
+   :agents          [{:id "buyer"      :address "0xbuyer"   :strategy "honest"}
+                     {:id "seller"     :address "0xseller"  :strategy "honest"}
+                     {:id "l0"         :address "0xl0"      :role "resolver"}
+                     {:id "l1"         :address "0xl1"      :role "resolver"}
+                     {:id "challenger" :address "0xchall"   :strategy "honest"}
+                     {:id "keeper"     :address "0xkeeper"  :role "keeper"}]
    :protocol-params kleros-appeal
    :events
    [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
      :params {:token "USDC" :to "0xseller" :amount 5000}
-     :save-wf-as "wf0"}
+     :save-id-as "wf0"}
     {:seq 1 :time 1060 :agent "buyer" :action "raise_dispute"
      :params {:workflow-id "wf0"}}
     ;; L0 resolves with release → pending settlement, deadline = 1120+60 = 1180

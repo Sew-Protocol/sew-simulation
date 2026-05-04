@@ -1,0 +1,348 @@
+(ns resolver-sim.core.phases
+  "Phase registry and per-mode runner helpers.
+
+   Each run-* function orchestrates one simulation mode: it calls the relevant
+   sim namespace, prints a summary, writes output files, and returns the result
+   map.  All I/O (print + file write) lives here; the phase namespaces are pure.
+
+   `phase-runners` is the dispatch table used by -main to route CLI flags to
+   the correct runner.  To add a new phase:
+     1. Add a require above.
+     2. Add an entry to phase-runners.
+     3. Add a cli-option entry in core.cli."
+  (:require [resolver-sim.io.params   :as params]
+            [resolver-sim.io.results  :as results]
+            [resolver-sim.sim.batch   :as batch]
+            [resolver-sim.sim.sweep   :as sweep]
+            [resolver-sim.sim.multi-epoch       :as multi-epoch]
+            [resolver-sim.sim.waterfall         :as waterfall]
+            [resolver-sim.sim.governance-impact :as gov-impact]
+            [resolver-sim.sim.economic.phase-o          :as phase-o]
+            [resolver-sim.sim.adversarial.phase-p-lite  :as phase-p-lite]
+            [resolver-sim.sim.adversarial.phase-y       :as phase-y]
+            [resolver-sim.sim.adversarial.phase-z       :as phase-z]
+            [resolver-sim.sim.governance.phase-aa       :as phase-aa]
+            [resolver-sim.sim.governance.phase-ab       :as phase-ab]
+            [resolver-sim.sim.adversarial.phase-ac      :as phase-ac]
+            [resolver-sim.sim.governance.phase-ad       :as phase-ad]
+            [resolver-sim.sim.adversarial.phase-ae      :as phase-ae]
+            [resolver-sim.sim.adversarial.phase-af      :as phase-af]
+            [resolver-sim.sim.adversarial.phase-ag      :as phase-ag]
+            [resolver-sim.sim.adversarial.phase-ah      :as phase-ah]
+            [resolver-sim.sim.adversarial.phase-ai      :as phase-ai]
+            [resolver-sim.sim.governance.phase-t        :as phase-t]
+            [resolver-sim.sim.adversarial.phase-p-revised :as phase-p-revised]
+            [resolver-sim.sim.adversarial.phase-q       :as phase-q]
+            [resolver-sim.sim.adversarial.phase-r       :as phase-r]
+            [resolver-sim.sim.economic.phase-u          :as phase-u]
+            [resolver-sim.sim.economic.phase-v          :as phase-v]
+            [resolver-sim.sim.economic.phase-w          :as phase-w]
+            [resolver-sim.sim.economic.phase-x          :as phase-x]
+            [resolver-sim.sim.adversarial               :as adversarial]
+            [resolver-sim.stochastic.rng                :as rng]))
+
+;; ---------------------------------------------------------------------------
+;; Runner helpers — each handles one top-level simulation mode
+;; ---------------------------------------------------------------------------
+
+(defn run-simulation [params output-dir]
+  (let [scenario-id (:scenario-id params "unnamed")
+        run-dir (results/create-run-directory output-dir scenario-id)
+        rng (rng/make-rng (:rng-seed params))
+
+        _ (println (format "\n📊 Running simulation: %s" scenario-id))
+        _ (println (format "   Seed: %d" (:rng-seed params)))
+        _ (println (format "   Trials: %d" (:n-trials params)))
+
+        batch-result (batch/run-batch rng (:n-trials params) params)
+
+        _ (println "\n✓ Simulation complete. Results:")
+        _ (println (format "   Honest avg profit: %.2f" (:honest-mean batch-result)))
+        _ (println (format "   Malice avg profit: %.2f" (:malice-mean batch-result)))
+        _ (println (format "   Dominance ratio: %.2f" (:dominance-ratio batch-result)))]
+
+    (results/write-edn (format "%s/summary.edn" run-dir) batch-result)
+    (results/write-csv (format "%s/results.csv" run-dir) [batch-result])
+    (results/write-run-metadata (format "%s/metadata.edn" run-dir)
+                                {:scenario-id scenario-id
+                                 :params params
+                                 :batch-result batch-result})
+
+    (println (format "\n💾 Results saved to: %s" run-dir))
+    batch-result))
+
+(defn run-sweep [params output-dir]
+  (let [scenario-id       (:scenario-id params "unnamed")
+        custom-sweep-params (:sweep-params params)
+        run-dir (results/create-run-directory output-dir (str scenario-id "-sweep"))
+
+        _ (if custom-sweep-params
+            (println (format "\n📊 Running parameter sweep: %s" scenario-id))
+            (println (format "\n📊 Running strategy sweep: %s" scenario-id)))
+        _ (println (format "   Seed: %d" (:rng-seed params)))
+        _ (println (format "   Trials per combo: %d" (:n-trials params)))
+
+        results-list (if custom-sweep-params
+                       (sweep/run-parameter-sweep params (:rng-seed params) custom-sweep-params)
+                       (sweep/run-strategy-sweep  params (:rng-seed params)))]
+
+    (println (format "\n✓ Sweep complete. %d results:" (count results-list)))
+    (if custom-sweep-params
+      (doseq [result results-list]
+        (let [param-str (->> custom-sweep-params
+                             keys
+                             (map #(format "%s=%s" (name %) (get result %)))
+                             (clojure.string/join " "))]
+          (println (format "   %s: honest=%.2f, malice=%.2f, ratio=%.2f"
+                           param-str (:honest-mean result) (:malice-mean result)
+                           (:dominance-ratio result)))))
+      (doseq [result results-list]
+        (println (format "   %s: honest=%.2f, malice=%.2f, ratio=%.2f"
+                         (:strategy result) (:honest-mean result) (:malice-mean result)
+                         (:dominance-ratio result)))))
+
+    (results/write-edn (format "%s/summary.edn" run-dir) results-list)
+    (results/write-csv (format "%s/results.csv" run-dir) results-list)
+    (results/write-run-metadata (format "%s/metadata.edn" run-dir)
+                                {:scenario-id scenario-id
+                                 :sweep-type (if custom-sweep-params :parameter :strategy)
+                                 :params params
+                                 :results results-list})
+
+    (println (format "\n💾 Sweep results saved to: %s" run-dir))
+    results-list))
+
+(defn run-ring-simulation [params output-dir]
+  (let [scenario-id (:scenario-id params "unnamed")
+        run-dir (results/create-run-directory output-dir (str scenario-id "-ring"))
+        rng      (rng/make-rng (:rng-seed params))
+        ring-spec (:ring-spec params)
+
+        _ (when-not ring-spec (throw (Exception. "ring-spec not found in params")))
+        _ (println (format "\n📊 Running ring simulation: %s" scenario-id))
+        _ (println (format "   Seed: %d" (:rng-seed params)))
+        _ (println (format "   Trials: %d" (:n-trials params)))
+        _ (let [{:keys [senior juniors]} ring-spec]
+            (println (format "   Ring: 1 senior ($%d bond) + %d juniors"
+                             (:bond senior) (count juniors))))
+
+        ring-result (batch/run-ring-batch rng (:n-trials params) params ring-spec)
+
+        _ (println "\n✓ Ring simulation complete. Results:")
+        _ (println (format "   Total ring profit: %.2f" (:ring-total-profit ring-result)))
+        _ (println (format "   Avg profit/dispute: %.2f" (:ring-avg-profit-per-dispute ring-result)))
+        _ (println (format "   Catch rate: %.4f" (:ring-catch-rate ring-result)))
+        _ (println (format "   Ring viable: %s" (:ring-viable? ring-result)))
+        _ (println (format "   Senior exhausted: %s" (:ring-senior-exhausted? ring-result)))]
+
+    (results/write-edn (format "%s/summary.edn" run-dir) ring-result)
+    (results/write-run-metadata (format "%s/metadata.edn" run-dir)
+                                {:scenario-id scenario-id
+                                 :type :ring
+                                 :params params
+                                 :ring-result ring-result})
+
+    (println (format "\n💾 Ring results saved to: %s" run-dir))
+    ring-result))
+
+(defn run-multi-epoch-simulation [params output-dir]
+  (let [scenario-id         (:scenario-id params "unnamed")
+        run-dir             (results/create-run-directory output-dir (str scenario-id "-multi-epoch"))
+        rng                 (rng/make-rng (:rng-seed params))
+        n-epochs            (get params :n-epochs 10)
+        n-trials-per-epoch  (get params :n-trials-per-epoch 500)
+
+        result (multi-epoch/run-multi-epoch rng n-epochs n-trials-per-epoch params)]
+
+    (results/write-edn (format "%s/summary.edn" run-dir) result)
+    (results/write-run-metadata (format "%s/metadata.edn" run-dir)
+                                {:scenario-id scenario-id
+                                 :type :multi-epoch
+                                 :n-epochs n-epochs
+                                 :n-trials-per-epoch n-trials-per-epoch
+                                 :params params
+                                 :result result})
+
+    (println (format "\n💾 Multi-epoch results saved to: %s" run-dir))
+    result))
+
+(defn run-waterfall-simulation [params output-dir]
+  (let [scenario-id   (:scenario-id params "unnamed")
+        scenario-name (:scenario-name params scenario-id)
+        run-dir       (results/create-run-directory output-dir (str scenario-name "-waterfall"))
+        pool          (waterfall/initialize-waterfall-pool params)
+
+        _ (println (format "\n🌊 Running waterfall stress test: %s" scenario-name))
+        _ (println (format "   Hypothesis: Waterfall maintains >80%% coverage under fraud rate threshold"))
+        _ (println (format "   Purpose: Verify senior/junior tier adequacy and pool solvency"))
+        _ (println (format "   Threshold: Coverage adequacy must be ≥80%% to pass"))
+        _ (println "")
+        _ (println (format "   Seniors: %d | Juniors: %d"
+                           (:n-seniors params 5)
+                           (* (:n-seniors params 5) (:n-juniors-per-senior params 10))))
+        _ (println (format "   Fraud rate: %.1f%% | Coverage multiplier: %.1f×"
+                           (* 100 (:fraud-rate params 0.10))
+                           (:coverage-multiplier params 3.0)))
+
+        n-trials       (get params :n-trials 1000)
+        n-fraud-events (int (* n-trials (:fraud-rate params 0.10)))
+
+        slash-events (mapv (fn [i]
+                             (let [n-juniors  (* (:n-seniors params 5) (:n-juniors-per-senior params 10))
+                                   junior-idx (mod i n-juniors)
+                                   senior-idx (int (/ junior-idx (:n-juniors-per-senior params 10)))]
+                               {:resolver-id  (str "j" senior-idx "_" (mod junior-idx (:n-juniors-per-senior params 10)))
+                                :senior-id    (str "s" senior-idx)
+                                :slash-amount (waterfall/calculate-slash-amount
+                                               (:junior-bond-amount params 500)
+                                               (:fraud-slash-bps params 50))
+                                :reason  :fraud
+                                :epoch   (int (/ i 10))}))
+                           (range n-fraud-events))
+
+        result  (reduce (fn [state event]
+                          (waterfall/process-slash-event event (:resolvers state) (:seniors state)))
+                        {:resolvers (:juniors pool) :seniors (:seniors pool) :events []}
+                        slash-events)
+
+        metrics (waterfall/aggregate-waterfall-metrics
+                 (:resolvers result)
+                 (:seniors result)
+                 (mapv :event-result
+                       (map (fn [e] (waterfall/process-slash-event e (:juniors pool) (:seniors pool)))
+                            slash-events)))
+
+        summary {:scenario-id scenario-id
+                 :scenario-name scenario-name
+                 :type :waterfall
+                 :params (select-keys params [:fraud-rate :coverage-multiplier :utilization-factor
+                                             :n-seniors :n-juniors-per-senior
+                                             :senior-bond-amount :junior-bond-amount])
+                 :results metrics}]
+
+    (let [adequacy (:coverage-adequacy-score metrics)
+          pass?    (>= adequacy 80.0)]
+      (println (format "   Juniors exhausted: %.1f%%" (:juniors-exhausted-pct metrics)))
+      (println (format "   Coverage used: %.1f%%" (:seniors-coverage-used-avg-pct metrics)))
+      (println (format "   Adequacy score: %.1f%% (scale: 0–100)" adequacy))
+      (println "")
+      (if pass?
+        (println (format "   Status: ✅ PASS (%.1f%% ≥ 80%% threshold)" adequacy))
+        (println (format "   Status: ❌ FAIL (%.1f%% < 80%% threshold)" adequacy)))
+      (println "")
+      (if pass?
+        (println "   Interpretation: Pool is well-provisioned for stated fraud rate.")
+        (println "   Interpretation: ❌ CRITICAL — pool inadequate. Senior coverage insufficient."))
+      (println "")
+      (when (< adequacy 80.0)
+        (println "   Recommendations:")
+        (println "   • Increase senior bond amounts (currently tied to utilization-factor)")
+        (println "   • Increase utilization-factor from current setting")
+        (println "   • Reduce fraud-slash-bps to test lower thresholds")
+        (println "   • Validate assumptions with higher fraud rates (target: 25%)")))
+
+    (results/write-edn (format "%s/summary.edn" run-dir) summary)
+    (results/write-run-metadata (format "%s/metadata.edn" run-dir)
+                                {:scenario-id scenario-id
+                                 :type :waterfall
+                                 :params params
+                                 :results metrics})
+
+    (println (format "\n💾 Waterfall results saved to: %s" run-dir))
+    summary))
+
+(defn run-governance-impact-simulation [params output-dir]
+  (let [scenario-id   (:scenario-id params "unnamed")
+        scenario-name (:scenario-name params scenario-id)
+        run-dir       (results/create-run-directory output-dir (str scenario-name "-governance-impact"))
+        rng           (rng/make-rng (:seed params 42))
+        n-epochs      (get params :n-epochs 10)
+        n-trials      (get params :n-trials-per-epoch 500)
+
+        _ (println (format "\n🏛️  Running governance impact test: %s" scenario-name))
+        _ (println (format "   Governance response: %d days" (:governance-response-days params 3)))
+
+        result (gov-impact/run-multi-epoch-governance-impact rng n-epochs n-trials params)
+
+        summary {:scenario-id scenario-id
+                 :scenario-name scenario-name
+                 :type :governance-impact
+                 :governance-response-days (:governance-response-days params 3)
+                 :params (select-keys params [:governance-response-days :n-epochs :n-trials-per-epoch
+                                             :slashing-detection-probability :strategy-mix])
+                 :results (select-keys result [:epoch-results :governance-metrics :aggregated-stats])}]
+
+    (println (format "   Final honest resolvers: %d" (get-in result [:aggregated-stats :honest-final-count])))
+    (println (format "   Slashes executed: %d" (get-in result [:governance-metrics :total-pending-slashes-resolved])))
+    (println (format "   Still pending: %d" (get-in result [:governance-metrics :pending-slashes-still-waiting])))
+    (println (format "   Frozen resolvers: %d" (get-in result [:governance-metrics :frozen-resolvers])))
+
+    (results/write-edn (format "%s/summary.edn" run-dir) summary)
+    (results/write-run-metadata (format "%s/metadata.edn" run-dir)
+                                {:scenario-id scenario-id
+                                 :type :governance-impact
+                                 :params params
+                                 :results result})
+
+    (println (format "\n💾 Governance impact results saved to: %s" run-dir))
+    summary))
+
+;; ---------------------------------------------------------------------------
+;; Phase registry
+;;
+;; Maps CLI option key → [header-string run-fn].
+;; run-fn signature: (fn [params output-dir])
+;; header-string: printed before run-fn is called; nil means run-fn prints its own header.
+;;
+;; To add a new phase: add require above + entry here + cli-option in core.cli.
+;; ---------------------------------------------------------------------------
+
+(def phase-runners
+  {:phase-p-lite    ["\n📊 Running Phase P Lite Falsification Test"
+                     (fn [p _] (phase-p-lite/run-phase-p-lite p))]
+   :market-exit     ["\n🔄 Running Phase O Market Exit Cascade"
+                     (fn [p _] (phase-o/run-phase-o-complete p))]
+   :phase-y         ["\n🔬 Running Phase Y: Evidence Fog & Attention Budgets"
+                     (fn [p _] (phase-y/run-phase-y-sweep p))]
+   :phase-z         ["\n🔄 Running Phase Z: Legitimacy & Reflexive Participation"
+                     (fn [p _] (phase-z/run-phase-z-sweep p))]
+   :phase-aa        ["\n🏛️  Running Phase AA: Governance as Adversary"
+                     (fn [p _] (phase-aa/run-phase-aa-sweep p))]
+   :phase-ab        ["\n📊 Running Phase AB: Per-Dispute Effort Rewards"
+                     (fn [p _] (phase-ab/run-phase-ab-sweep p))]
+   :phase-ac        ["\n🔄 Running Phase AC: Trust Floor & Emergency Onboarding"
+                     (fn [p _] (phase-ac/run-phase-ac-sweep p))]
+   :phase-ad        ["\n🏛️  Running Phase AD: Governance Bandwidth Floor"
+                     (fn [p _] (phase-ad/run-phase-ad-sweep p))]
+   :phase-ae        [nil (fn [p _] (phase-ae/run-phase-ae p))]
+   :phase-af        [nil (fn [p _] (phase-af/run-phase-af p))]
+   :phase-ag        [nil (fn [p _] (phase-ag/run-phase-ag p))]
+   :phase-ah        [nil (fn [p _] (phase-ah/run-phase-ah p))]
+   :phase-ai        [nil (fn [p _] (phase-ai/run-phase-ai p))]
+   :phase-ac-sweep  ["\n🔬 Running Phase AC Threshold Search"
+                     (fn [p _] (phase-ac/run-phase-ac-threshold-sweep p))]
+   :phase-ad-sweep  ["\n🔬 Running Phase AD Threshold Search"
+                     (fn [p _] (phase-ad/run-phase-ad-threshold-sweep p))]
+   :phase-ac-cap    ["\n🔬 Running Phase AC Capacity Expansion"
+                     (fn [p _] (phase-ac/run-phase-ac-capacity-expansion p))]
+   :phase-t         ["\n🏛️  Running Phase T: Governance Capture via Rule Drift"
+                     (fn [p _] (phase-t/run-phase-t-sweep p))]
+   :phase-p-revised ["\n📊 Running Phase P Revised: Sequential Appeal Falsification"
+                     (fn [_ _] (phase-p-revised/run-phase-p-revised-sweep))]
+   :phase-q         ["\n🔬 Running Phase Q: Advanced Vulnerability"
+                     (fn [_ _] (phase-q/run-phase-q-sweep))]
+   :phase-r         ["\n🔬 Running Phase R: Liveness & Participation Failure"
+                     (fn [_ _] (phase-r/run-phase-r-sweep))]
+   :phase-u         ["\n🎯 Running Phase U: Adaptive Attacker Learning"
+                     (fn [_ _] (phase-u/run-phase-u-sweep))]
+   :phase-v         ["\n🌊 Running Phase V: Correlated Belief Cascades"
+                     (fn [_ _] (phase-v/run-phase-v-sweep))]
+   :phase-w         ["\n🎯 Running Phase W: Dispute Type Clustering"
+                     (fn [_ _] (phase-w/run-phase-w-sweep))]
+   :phase-x         ["\n💥 Running Phase X: Burst Concurrency Exploit"
+                     (fn [_ _] (phase-x/run-phase-x-sweep))]
+   :governance-impact [nil run-governance-impact-simulation]
+   :waterfall         [nil run-waterfall-simulation]
+   :multi-epoch       [nil run-multi-epoch-simulation]
+   :sweep             [nil run-sweep]
+   :adversarial       [nil (fn [p _] (adversarial/run-adversarial-search p))]})

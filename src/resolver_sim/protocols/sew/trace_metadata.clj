@@ -24,6 +24,9 @@
 
 ;; ---------------------------------------------------------------------------
 ;; A1. Actor taxonomy
+;; RESERVED — no production callers. Intended for per-agent trace annotation
+;; (e.g. adding :actor/type and :actor/role to each trace-entry agent field).
+;; Wire-up point: enrich the :agent map in process-step's trace entry build.
 ;; ---------------------------------------------------------------------------
 
 (def actor-types
@@ -51,6 +54,10 @@
 
 ;; ---------------------------------------------------------------------------
 ;; A2. Adversary taxonomy
+;; RESERVED — no production callers. Intended for adversary scenario tagging
+;; (classify-adversary below infers type/traits from scenario-id or explicit
+;; annotation). Wire-up point: add :adversary/type + :adversary/traits to
+;; replay results for adversarial scenarios via classify-adversary.
 ;; ---------------------------------------------------------------------------
 
 (def adversary-types
@@ -114,6 +121,10 @@
 
 ;; ---------------------------------------------------------------------------
 ;; A5. Invariant taxonomy
+;; RESERVED — no production callers. Intended for test coverage analysis:
+;; group invariant failures by category (e.g. how many :accounting vs
+;; :safety invariants failed in a sweep). Wire-up point: enrich
+;; :invariant-results in accum-metrics output or the fixture runner report.
 ;; ---------------------------------------------------------------------------
 
 (def invariant-categories
@@ -151,6 +162,9 @@
 
 ;; ---------------------------------------------------------------------------
 ;; A6. Scenario taxonomy
+;; RESERVED — no production callers. Domain for classify-scenario (below).
+;; Wire-up point: add :scenario/type to the fixture runner report or replay
+;; result once classify-scenario is called in sim/fixtures.clj.
 ;; ---------------------------------------------------------------------------
 
 (def scenario-types
@@ -165,6 +179,9 @@
 
 ;; ---------------------------------------------------------------------------
 ;; A7. Outcome taxonomy
+;; RESERVED — no production callers. Domain for classify-outcome (below).
+;; Wire-up point: add :outcome/type to the replay result map once
+;; classify-outcome is called in replay-with-protocol or the fixture runner.
 ;; ---------------------------------------------------------------------------
 
 (def outcome-types
@@ -180,6 +197,10 @@
 
 ;; ---------------------------------------------------------------------------
 ;; A8. Resolution taxonomy
+;; RESERVED — no production callers. Domain for classify-resolution (Section
+;; C3 below). Wire-up point: replace resolution-semantics in trace_export.clj
+;; once the Forge trace schema is updated to accept namespaced keyword values
+;; instead of the legacy CDRS string maps.
 ;; ---------------------------------------------------------------------------
 
 (def resolution-quality-values
@@ -256,14 +277,18 @@
 
 ;; ---------------------------------------------------------------------------
 ;; B1. Actor classifiers
+;; RESERVED — no production callers. Intended for per-agent trace annotation.
+;; Wire-up point: enrich :agent map in process-step trace entry to include
+;; :actor/type and :actor/role derived from these classifiers.
 ;; ---------------------------------------------------------------------------
 
 (defn classify-actor-type
   "Infer the structural :actor/type keyword from an agent map.
-   Agent maps have :type 'honest' | 'resolver' | 'governance' | 'keeper' | ...
-   Structural type is derived from the declared role, defaulting to :observer."
+   Agent maps have :role 'resolver' | 'governance' | 'keeper' | ...
+   Structural type is derived from the declared role, defaulting to :observer.
+   Falls back to :type for backward compatibility."
   [agent-map]
-  (case (or (:type agent-map) (:role agent-map) "observer")
+  (case (or (:role agent-map) (:type agent-map) "observer")
     "resolver"   :resolver
     "governance" :governance
     "keeper"     :keeper
@@ -273,9 +298,10 @@
 
 (defn classify-actor-role
   "Derive the behavioural :actor/role keyword from an agent map.
-   Declared :role or :type field on the agent is the primary signal."
+   Declared :strategy or :behavior field is the primary signal.
+   Falls back to :role or :type for backward compatibility."
   [agent-map]
-  (case (or (:role agent-map) (:type agent-map) "honest")
+  (case (or (:strategy agent-map) (:behavior agent-map) (:role agent-map) (:type agent-map) "honest")
     "honest"      :honest
     "rational"    :rational
     "malicious"   :malicious
@@ -286,6 +312,9 @@
 
 ;; ---------------------------------------------------------------------------
 ;; B2. Adversary classifier
+;; RESERVED — no production callers. Intended for adversary scenario tagging.
+;; Wire-up point: add :adversary map to replay result in replay-with-protocol,
+;; or call in sim/fixtures.clj fixture runner to annotate adversarial suites.
 ;; ---------------------------------------------------------------------------
 
 (defn classify-adversary
@@ -349,7 +378,11 @@
 ;; ---------------------------------------------------------------------------
 
 (defn effect-type
-  "Map a step result keyword to its :effect/type keyword."
+  "DEPRECATED — no longer called by classify-transition.
+   :effect/type was removed from trace-metadata because accounting effects
+   cannot be correctly derived from action name alone (e.g. execute_resolution
+   can release, refund, or create a pending settlement depending on world state).
+   Retained here as vocabulary reference; do not call from new code."
   [result-kw]
   (case result-kw
     :ok                 :effect/state-change
@@ -359,6 +392,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; B5. Scenario classifier
+;; Active — called from io/trace_export.clj to populate fixture :metadata block.
 ;; ---------------------------------------------------------------------------
 
 (defn classify-scenario
@@ -385,6 +419,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; B6. Outcome classifier
+;; Active — called from io/trace_export.clj to populate fixture :metadata block.
 ;; ---------------------------------------------------------------------------
 
 (defn classify-outcome
@@ -398,7 +433,6 @@
     (cond
       (and expected (= :fail outcome))   :expected-violation
       (and (= :pass outcome) (zero? violations)) :normal-completion
-      (= :halt :invariant-violation)     :invariant-failure
       (= halt :invariant-violation)      :invariant-failure
       (= halt :open-disputes-at-end)     :liveness-failure
       (= outcome :fail)                  :invariant-failure
@@ -419,6 +453,8 @@
     "auto_cancel_disputed"       :resolution/timeout
     :resolution/none))
 
+;; RESERVED — no production callers. Superseded by classify-resolution (C3)
+;; which returns the full resolution taxonomy. Retained as vocabulary reference.
 (defn resolution-outcome [world workflow-id]
   (let [state (t/escrow-state world workflow-id)]
     (case state
@@ -475,6 +511,12 @@
 
 ;; ---------------------------------------------------------------------------
 ;; C3. Full resolution taxonomy classifier
+;; RESERVED — no production callers. Supersedes resolution-semantics (C2,
+;; called from io/trace_export.clj) but returns keyword-namespaced values
+;; (e.g. :resolution/outcome :released) where resolution-semantics returns
+;; CDRS string maps (e.g. {:outcome "RELEASE" ...}).
+;; Wire-up point: replace resolution-semantics in trace_export.clj:180 once
+;; the Forge trace schema is updated to accept namespaced keyword values.
 ;; ---------------------------------------------------------------------------
 
 (defn classify-resolution
@@ -535,7 +577,8 @@
        :else                                              :leakage)}))
 
 ;; ---------------------------------------------------------------------------
-;; C4. Issue / failure classifier (legacy retained)
+;; C4. Issue / failure classifier
+;; Active — called from io/trace_score.clj:81 to set :issue/type on scored results.
 ;; ---------------------------------------------------------------------------
 
 (defn classify-issue [result]

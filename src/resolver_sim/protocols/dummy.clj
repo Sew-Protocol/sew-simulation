@@ -1,18 +1,21 @@
 (ns resolver-sim.protocols.dummy
   "DummyProtocol — minimal always-pass DisputeProtocol implementation.
 
-   Proves that the replay engine can run non-SEW protocols without any
-   modification to existing contract_model/* code.
+   A SEW test double used to verify that the DisputeProtocol adapter layer
+   compiles, type-checks, and that the generic replay engine machinery (alias
+   resolution, metrics, trace shape) does not crash when every protocol method
+   is a no-op.
 
    Behaviour:
-   - create_escrow: assigns a sequential workflow-id so :save-wf-as aliases
-     resolve correctly in subsequent events.
-   - All other actions: succeed without modifying world state.
+   - All actions: succeed without modifying world state.
+   - resolve-id-alias: always passes — no alias resolution needed since
+     dispatch-action ignores all params.
+   - created-id: always nil — no alias tracking.
+   - open-disputes: always [] — no open-dispute end-check enforcement.
+   - classify-event: always #{} — no lifecycle metrics incremented.
    - Invariant checks: always pass (no invariants enforced).
 
-   This is a proof-of-concept, not a useful protocol.  It demonstrates that
-   replay-with-protocol's generic machinery (alias resolution, metrics, trace
-   shape) works independently of SEW semantics.
+   This is a test double, not a useful protocol.  Use SEWProtocol for real runs.
 
    Layering: may import protocols/protocol only.
    Must NOT import contract_model/*, model/*, db/*, io/*."
@@ -28,21 +31,8 @@
   (build-execution-context [_ agents _protocol-params]
     {:agent-index (into {} (map (juxt :id identity) agents))})
 
-  (dispatch-action [_ _context world event]
-    (if (= "create_escrow" (:action event))
-      ;; Assign the next sequential workflow-id so :save-wf-as aliases resolve.
-      ;; Include :token and :amount-after-fee so the projection-hash accounting
-      ;; invariant (called unconditionally by the replay engine) does not NPE.
-      (let [wf-id  (count (:escrow-transfers world))
-            token  (get-in event [:params :token] "DUMMY")
-            amount (get-in event [:params :amount] 0)]
-        {:ok    true
-         :world (assoc-in world [:escrow-transfers wf-id]
-                          {:escrow-state    :pending
-                           :token           token
-                           :amount-after-fee amount})
-         :extra {:workflow-id wf-id}})
-      {:ok true :world world}))
+  (dispatch-action [_ _context world _event]
+    {:ok true :world world})
 
   (check-invariants-single [_ _world]
     {:ok? true :violations nil})
@@ -54,14 +44,25 @@
     {:block-time (:block-time world)})
 
   (init-world [_ scenario]
-    {:escrow-transfers {}
-     :block-time (get scenario :initial-block-time 1000)})
+    {:block-time (get scenario :initial-block-time 1000)})
 
   (compute-projection [_ _world]
     [nil nil])
 
   (classify-transition [_ _action _result-kw]
-    nil))
+    nil)
+
+  (resolve-id-alias [_ event _id-alias-map]
+    {:ok true :event event})
+
+  (created-id [_ _action _extra]
+    nil)
+
+  (open-disputes [_ _world]
+    [])
+
+  (classify-event [_ _event _result-kw _error-kw]
+    #{}))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared singleton

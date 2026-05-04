@@ -126,11 +126,11 @@ def s29_f6_resolver_cartel() -> tuple[RunResult, Any]:
     keeper = AutomateTimedActionsLive("keeper")
 
     agents_meta = [
-        {"id": "buyer",  "address": "0xbuyer",  "type": "honest"},
-        {"id": "seller", "address": "0xseller", "type": "honest"},
-        {"id": "cl0",    "address": "0xcl0",    "type": "resolver"},
-        {"id": "cl1",    "address": "0xcl1",    "type": "resolver"},
-        {"id": "keeper", "address": "0xkeeper", "type": "keeper"},
+        {"id": "buyer",  "address": "0xbuyer",  "strategy": "honest"},
+        {"id": "seller", "address": "0xseller", "strategy": "honest"},
+        {"id": "cl0",    "address": "0xcl0",    "role": "resolver"},
+        {"id": "cl1",    "address": "0xcl1",    "role": "resolver"},
+        {"id": "keeper", "address": "0xkeeper", "role": "keeper"},
     ]
     live_agents = [buyer, cl0, cl1, keeper]
 
@@ -183,9 +183,9 @@ def s30_f7_profit_threshold_strike() -> tuple[RunResult, Any]:
     )
 
     agents_meta = [
-        {"id": "buyer",    "address": "0xbuyer",    "type": "honest"},
-        {"id": "seller",   "address": "0xseller",   "type": "honest"},
-        {"id": "resolver", "address": "0xresolver", "type": "resolver"},
+        {"id": "buyer",    "address": "0xbuyer",    "strategy": "honest"},
+        {"id": "seller",   "address": "0xseller",   "strategy": "honest"},
+        {"id": "resolver", "address": "0xresolver", "role": "resolver"},
     ]
     live_agents = [buyer, resolver]
 
@@ -238,11 +238,11 @@ def s31_f8_appeal_fee_amplification() -> tuple[RunResult, Any]:
     keeper = AutomateTimedActionsLive("keeper")
 
     agents_meta = [
-        {"id": "buyer",  "address": "0xbuyer",  "type": "honest"},
-        {"id": "seller", "address": "0xseller", "type": "honest"},
-        {"id": "l0",     "address": "0xl0",     "type": "resolver"},
-        {"id": "l1",     "address": "0xl1",     "type": "resolver"},
-        {"id": "keeper", "address": "0xkeeper", "type": "keeper"},
+        {"id": "buyer",  "address": "0xbuyer",  "strategy": "honest"},
+        {"id": "seller", "address": "0xseller", "strategy": "honest"},
+        {"id": "l0",     "address": "0xl0",     "role": "resolver"},
+        {"id": "l1",     "address": "0xl1",     "role": "resolver"},
+        {"id": "keeper", "address": "0xkeeper", "role": "keeper"},
     ]
     live_agents = [buyer, l0, l1, keeper]
 
@@ -294,11 +294,11 @@ def s32_f9_subthreshold_misresolution() -> tuple[RunResult, Any]:
     keeper = AutomateTimedActionsLive("keeper")
 
     agents_meta = [
-        {"id": "buyer",  "address": "0xbuyer",  "type": "honest"},
-        {"id": "seller", "address": "0xseller", "type": "honest"},
-        {"id": "cl0",    "address": "0xcl0",    "type": "resolver"},
-        {"id": "cl1",    "address": "0xcl1",    "type": "resolver"},
-        {"id": "keeper", "address": "0xkeeper", "type": "keeper"},
+        {"id": "buyer",  "address": "0xbuyer",  "strategy": "honest"},
+        {"id": "seller", "address": "0xseller", "strategy": "honest"},
+        {"id": "cl0",    "address": "0xcl0",    "role": "resolver"},
+        {"id": "cl1",    "address": "0xcl1",    "role": "resolver"},
+        {"id": "keeper", "address": "0xkeeper", "role": "keeper"},
     ]
     live_agents = [buyer, cl0, cl1, keeper]
 
@@ -356,9 +356,9 @@ def s33_f10_cascade_escalation_drain() -> tuple[RunResult, Any]:
     arbitrator = CapacityLimitedArbitrator("arbitrator", capacity=2)
 
     agents_meta = (
-        [{"id": f"buyer{i}", "address": f"0xbuyer{i}", "type": "honest"} for i in range(1, 5)]
-        + [{"id": "seller",     "address": "0xseller",      "type": "honest"}]
-        + [{"id": "arbitrator", "address": "0xcaplimited",  "type": "resolver"}]
+        [{"id": f"buyer{i}", "address": f"0xbuyer{i}", "strategy": "honest"} for i in range(1, 5)]
+        + [{"id": "seller",     "address": "0xseller",      "strategy": "honest"}]
+        + [{"id": "arbitrator", "address": "0xcaplimited",  "role": "resolver"}]
     )
     live_agents = [*buyers, arbitrator]
 
@@ -399,8 +399,8 @@ def s34_f11_reorg_race_condition() -> tuple[RunResult, bool]:
     seller = HonestBuyerLive("seller", recipient_address="0xattacker", amount=1000)
 
     agents_meta = [
-        {"id": "attacker", "address": "0xattacker", "type": "honest"},
-        {"id": "seller",   "address": "0xseller",   "type": "honest"},
+        {"id": "attacker", "address": "0xattacker", "strategy": "honest"},
+        {"id": "seller",   "address": "0xseller",   "strategy": "honest"},
     ]
     live_agents = [attacker, seller]
 

@@ -1,14 +1,18 @@
-# Roadmap: Architecture Generalization
+# Archived Roadmap: Architecture Generalization (Historical)
 
-The SEW Simulator is transitioning from a protocol-specific tool to a generalized **Protocol Simulation Framework (PSF)**. 
+> Status: Archived planning document.
+>
+> This document captures a historical architecture direction that is **not** the
+> current repo claim. The current positioning is: SEW validation implementation
+> built on a protocol-adapter replay harness and deterministic fixture tooling.
 
-## Objectives
+## Historical Objectives
 1.  **Decoupling**: Separate the core simulation engine (the substrate) from protocol-specific rules (the plugins).
 2.  **Standardization**: Adopt the **Common Dispute Resolution Standard (CDRS)** draft schema as the native trace and event format.
 3.  **Extensibility**: Enable third-party protocols to leverage **CDRS-shaped** testing for adversarial stress-testing.
 
-## Future Architecture
-The codebase will be restructured into three distinct layers:
+## Historical Future Architecture
+This section records a proposed structure that may inform future refactors:
 
 ### 1. The Kernel Layer (`src/engine/`)
 A neutral substrate for state transitions, world-state hashing, and atomic reconciliation. It remains agnostic to "disputes" or "resolvers," focusing only on state machines and economic invariants.
@@ -19,5 +23,7 @@ Standardizes the language of decentralized dispute resolution. It defines the CD
 ### 3. The Implementation Layer (`src/protocols/`)
 Concrete implementation modules (like `sew/` and `uma/`) that map their internal state graphs to the domain layer's standards.
 
-## Timeline
-This refactor is planned for the post-launch phase to ensure maximum stability for the initial SEW evidence release. Current engineering remains focused on SEW-specific robustness and trace verification.
+## Timeline (Historical)
+This refactor concept was scoped as post-launch. Current engineering emphasis in
+this repository remains SEW-specific robustness, deterministic replay, and trace
+verification.

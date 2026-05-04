@@ -41,19 +41,28 @@
   (let [live-states   #{:pending :disputed}
         ;; Compute total-held from scratch across all tokens
         all-tokens    (-> (set (keys (:total-held world)))
-                          (into (map :token (vals (:escrow-transfers world)))))
+                          (into (map :token (vals (:escrow-transfers world))))
+                          (into (keys (:total-bonds-posted world))))
         violations
         (for [token all-tokens
               :let  [held     (get (:total-held world) token 0)
-                     live-sum (reduce (fn [acc [_ et]]
-                                        (if (and (= (:token et) token)
-                                                 (contains? live-states (:escrow-state et)))
-                                          (+ acc (:amount-after-fee et))
-                                          acc))
-                                      0
-                                      (:escrow-transfers world))
+                     escrow-sum (reduce (fn [acc [_ et]]
+                                          (if (and (= (:token et) token)
+                                                   (contains? live-states (:escrow-state et)))
+                                            (+ acc (:amount-after-fee et))
+                                            acc))
+                                        0
+                                        (:escrow-transfers world))
+                     ;; Sum of all active appeal bonds for this token.
+                     ;; These are part of :total-held.
+                     bond-sum (reduce + 0 (for [[wf agents] (:bond-balances world)
+                                                [agent amt] agents
+                                                :let [et (get-in world [:escrow-transfers wf])]
+                                                :when (= (:token et) token)]
+                                            amt))
+                     live-sum (+ escrow-sum bond-sum)
                      ext-bal  (when token-balances (get token-balances token 0))
-                     ;; Internal: total-held must EXACTLY match live escrow sum
+                     ;; Internal: total-held must EXACTLY match live (escrow + bond) sum
                      internal-ok? (= live-sum held)
                      ;; External: actual contract balance >= total-held
                      external-ok? (or (nil? ext-bal) (<= held ext-bal))]
@@ -447,20 +456,26 @@
 
 (defn bond-liquidity-holds?
   "True when a resolver's total locked bonds (across all active disputes)
-   is less than or equal to their recorded stake."
+   is less than or equal to their recorded stake.
+   Does not apply to non-resolver participants (buyers/sellers) who may
+   post bonds without being registered as resolvers."
   [world]
-  (let [resolver-bonds (reduce (fn [acc [wf bonds]]
+  (let [stakes         (:resolver-stakes world {})
+        resolver-bonds (reduce (fn [acc [wf bonds]]
                                  ;; Only count disputes that are currently active
                                  (if (= :disputed (t/escrow-state world wf))
                                    (reduce (fn [inner-acc [addr amount]]
-                                             (update inner-acc addr (fnil + 0) amount))
+                                             ;; Only track if they are a registered resolver
+                                             (if (contains? stakes addr)
+                                               (update inner-acc addr (fnil + 0) amount)
+                                               inner-acc))
                                            acc
                                            bonds)
                                    acc))
                                {}
                                (:bond-balances world))
         violations (for [[addr locked] resolver-bonds
-                         :let [stake (get (:resolver-stakes world) addr 0)]
+                         :let [stake (get stakes addr 0)]
                          :when (> locked stake)]
                      {:resolver addr :locked locked :stake stake})]
     {:holds?     (empty? violations)
@@ -575,10 +590,10 @@
 
 (defn conservation-of-funds?
   "True when, for every token, total-held + total-released + total-refunded equals
-   the sum of amount-after-fee across all escrows for that token.
+   the sum of amount-after-fee across all escrows plus all posted appeal bonds.
 
-   This is an exact equality: every AFA ever deposited must be accounted for as
-   either still held, released to the recipient, or refunded to the sender."
+   This is an exact equality: every AFA and bond ever deposited must be accounted
+   for as either still held (in escrow or as a bond), released, or refunded."
   [world]
   (let [all-tokens (-> #{}
                        (into (keys (:total-held world)))
@@ -587,19 +602,23 @@
                        (into (map :token (vals (:escrow-transfers world)))))
         violations
         (for [token all-tokens
-              :let [deposited (reduce (fn [acc [_ et]]
-                                        (if (= (:token et) token)
-                                          (+ acc (:amount-after-fee et))
-                                          acc))
-                                      0
-                                      (:escrow-transfers world))
+              :let [escrow-deposited (reduce (fn [acc [_ et]]
+                                               (if (= (:token et) token)
+                                                 (+ acc (:amount-after-fee et))
+                                                 acc))
+                                             0
+                                             (:escrow-transfers world))
+                    ;; Bond inflow = total-bonds-posted (all time)
+                    bond-deposited   (get-in world [:total-bonds-posted token] 0)
+                    total-deposited (+ escrow-deposited bond-deposited)
+
                     held      (get (:total-held world) token 0)
                     released  (get (:total-released world) token 0)
                     refunded  (get (:total-refunded world) token 0)
                     accounted (+ held released refunded)]
-              :when (not= accounted deposited)]
+              :when (not= accounted total-deposited)]
           {:token token :held held :released released :refunded refunded
-           :accounted accounted :deposited deposited})]
+           :accounted accounted :deposited total-deposited})]
     {:holds?     (empty? violations)
      :violations (vec violations)}))
 

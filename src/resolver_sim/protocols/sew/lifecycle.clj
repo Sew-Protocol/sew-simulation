@@ -58,6 +58,7 @@
     (-> world
         (acct/sub-held token amt)
         (acct/record-released token net-amt)
+        (acct/record-claimable workflow-id (:to et) net-amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :released))))
 
@@ -74,6 +75,7 @@
     (-> world
         (acct/sub-held token amt)
         (acct/record-refunded token net-amt)
+        (acct/record-claimable workflow-id (:from et) net-amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :refunded))))
 

@@ -15,8 +15,9 @@
      - Clojure is the sole authority: no state lives outside this store.
 
    Layering: server/* may import contract_model/*.  Must NOT import db/* or io/*."
-  (:require [resolver-sim.protocols.sew.types  :as t]
-            [resolver-sim.contract-model.replay :as replay])
+  (:require [resolver-sim.protocols.protocol        :as engine]
+            [resolver-sim.protocols.sew             :as sew]
+            [resolver-sim.contract-model.replay     :as replay])
   (:import [java.util.concurrent.locks ReentrantLock]))
 
 ;; ---------------------------------------------------------------------------
@@ -45,20 +46,22 @@
   "Recursively convert string keys in a nested map to keywords."
   (cond
     (map? m)    (into {} (map (fn [[k v]] [(if (string? k) (keyword k) k) (keywordize v)]) m))
-    (vector? m) (mapv keywordize m)
-    (seq? m)    (map keywordize m)
+    (sequential? m) (mapv keywordize m)
     :else       m))
 
 (defn- normalise-agents
   "Accept agents as seq of maps (string or keyword keys) and return keyword-keyed maps.
-   Converts :id :address :type to ensure downstream agent-index works correctly."
+   Converts :id :address :role :strategy to ensure downstream agent-index works correctly.
+   :role = structural role (resolver/governance/keeper), 
+   :strategy = behavioral strategy (honest/rational/malicious)."
   [agents]
   (mapv (fn [a]
-          (let [m (keywordize a)]
-            (cond-> m
-              (string? (:id m))      (update :id str)
-              (string? (:address m)) (update :address str)
-              (string? (:type m))    (update :type str))))
+        (let [m (keywordize a)]
+          (cond-> m
+            (string? (:id m))       (update :id str)
+            (string? (:address m))  (update :address str)
+            (string? (:role m))     (update :role str)
+            (string? (:strategy m)) (update :strategy str))))
         agents))
 
 (defn- normalise-params
@@ -79,7 +82,7 @@
   "Create a new session with the given agents and protocol-params.
 
    session-id       — caller-supplied string (typically a UUID)
-   agents           — seq of agent maps {:id :address :type ...} (string keys OK)
+   agents           — seq of agent maps {:id :address :role :strategy ...} (string keys OK)
    protocol-params  — map of protocol params (string keys OK)
    initial-block-time — initial block timestamp for world0
 
@@ -94,8 +97,8 @@
         validation (replay/validate-agents agent-list)]
     (if-not (:ok validation)
       validation
-      (let [context (replay/build-context agent-list params)
-            world0  (t/empty-world initial-block-time)
+      (let [context (engine/build-execution-context sew/protocol agent-list params)
+            world0  (engine/init-world sew/protocol {:initial-block-time initial-block-time})
             session {:world      world0
                      :context    context
                      :lock       (ReentrantLock.)
@@ -135,18 +138,15 @@
       {:ok false :error :session-not-found :detail {:session-id session-id}}
       (with-lock (:lock session)
         (fn []
-          ;; Re-read inside the lock — destroy-session! may have removed the
-          ;; session while this thread was blocked waiting for the lock.
           (let [current (get @sessions session-id)]
             (if-not current
               {:ok false :error :session-not-found :detail {:session-id session-id}}
               (let [world   (:world current)
                     context (:context session)
                     evt     (keywordize event)
-                    step    (replay/process-step context world evt)]
-                ;; Guard: only write back if the session still exists.
-                ;; Prevents resurrection of a partially-structured map when
-                ;; a destroy races with the tail of a step.
+                    _ (println "[DEBUG] dispatching step. event=" evt)
+                    step    (replay/process-step sew/protocol context world evt)
+                    _ (println "[DEBUG] step processed.")]
                 (swap! sessions
                        (fn [s]
                          (if (contains? s session-id)
@@ -182,11 +182,227 @@
   []
   (keys @sessions))
 
+(defn get-session-state
+  "Return the full internal world map of a session."
+  [session-id]
+  (if-let [s (get @sessions session-id)]
+    {:ok true :world (:world s)}
+    {:ok false :error :session-not-found :detail {:session-id session-id}}))
+
 (defn session-info
   "Return a lean info map for a session: {:step-count :block-time :escrow-count}.
    Returns nil if session not found."
   [session-id]
   (when-let [s (get @sessions session-id)]
+    ;; :escrow-transfers is SEW-specific world state; intentional here since
+    ;; session.clj is SEW-wired via sew/protocol.
     {:step-count   (:step-count s)
      :block-time   (get-in s [:world :block-time])
      :escrow-count (count (get-in s [:world :escrow-transfers]))}))
+
+(defn suggest-actions
+  "Return lightweight action suggestions for an actor without executing anything.
+   This is intentionally advisory to avoid duplicating full protocol transition logic."
+  [session-id actor-id]
+  (if-let [s (get @sessions session-id)]
+    (let [world       (:world s)
+          transfers   (get world :escrow-transfers {})
+          ids         (vec (keys transfers))
+          pending-settlements (get world :pending-settlements {})
+          pending-slashes (get world :pending-fraud-slashes {})
+          agent-index (get-in s [:context :agent-index] {})
+          actor       (get agent-index actor-id)
+          actor-addr  (:address actor)
+          actor-type  (some-> (or (:role actor) (:type actor)) name)
+          governance? (or (= actor-id "governance") (= actor-type "governance"))
+          keeper?     (or (= actor-id "keeper") (= actor-type "keeper"))
+          resolver?   (or (= actor-id "resolver") (= actor-type "resolver"))
+          templates
+          (vec
+           (concat
+            ;; Always legal: can attempt to create a new escrow.
+            (when actor
+              (let [counterparty (->> agent-index
+                                      vals
+                                      (remove #(= (:id %) actor-id))
+                                      first)]
+                [{:actor-id actor-id
+                  :action "create_escrow"
+                  :params {:token "USDC"
+                           :to (or (:address counterparty) "0xseller")
+                           :amount 5000}}]))
+
+            ;; State-aware, actor-specific suggestions per workflow.
+            (mapcat
+             (fn [[wf et]]
+               (let [st (:escrow-state et)
+                     from (:from et)
+                     to   (:to et)
+                     disputed? (= st :disputed)
+                     resolver-addr (:dispute-resolver et)]
+                 (cond
+                   ;; Pending: participants may cancel (role-specific) or raise dispute.
+                   (= st :pending)
+                   (concat
+                    (when (= actor-addr from)
+                      [{:actor-id actor-id :action "sender_cancel" :params {:id wf}}
+                       {:actor-id actor-id :action "release" :params {:id wf}}
+                       {:actor-id actor-id :action "raise_dispute" :params {:id wf}}])
+                    (when (= actor-addr to)
+                      [{:actor-id actor-id :action "recipient_cancel" :params {:id wf}}
+                       {:actor-id actor-id :action "raise_dispute" :params {:id wf}}]))
+
+                   ;; Disputed lifecycle candidates.
+                   disputed?
+                   (concat
+                    (when (or (= actor-addr resolver-addr) resolver?)
+                      [{:actor-id actor-id
+                        :action "execute_resolution"
+                        :params {:workflow-id wf :is-release true :resolution-hash "0xadv"}}
+                       {:actor-id actor-id
+                        :action "execute_resolution"
+                        :params {:workflow-id wf :is-release false :resolution-hash "0xadv"}}])
+                    (when governance?
+                      [{:actor-id actor-id
+                        :action "propose_fraud_slash"
+                        :params {:workflow-id wf
+                                 :resolver-addr (or resolver-addr "0xresolver")
+                                 :amount (max 1 (quot (long (or (:amount-after-fee et) 0)) 10))}}])
+                    (when keeper?
+                      [{:actor-id actor-id
+                        :action "execute_pending_settlement"
+                        :params {:workflow-id wf}}]))
+
+                   :else
+                   [])))
+             transfers)
+
+            ;; Governance slash lifecycle suggestions.
+            (when governance?
+              (mapcat
+               (fn [[slash-id slash]]
+                 (let [status (:status slash)]
+                   (cond
+                     (= status :pending)
+                     [{:actor-id actor-id :action "execute_fraud_slash" :params {:workflow-id slash-id}}
+                      {:actor-id actor-id :action "resolve_appeal" :params {:workflow-id slash-id :upheld? true}}
+                      {:actor-id actor-id :action "resolve_appeal" :params {:workflow-id slash-id :upheld? false}}]
+
+                     (= status :appealed)
+                     [{:actor-id actor-id :action "resolve_appeal" :params {:workflow-id slash-id :upheld? true}}
+                      {:actor-id actor-id :action "resolve_appeal" :params {:workflow-id slash-id :upheld? false}}]
+
+                     :else
+                     [])))
+               pending-slashes))
+
+            ;; Resolver appeal suggestions for slash lifecycle.
+            (when resolver?
+              (mapcat
+               (fn [[slash-id slash]]
+                 (if (= (:status slash) :pending)
+                   [{:actor-id actor-id :action "appeal_slash" :params {:workflow-id slash-id}}]
+                   []))
+               pending-slashes))
+
+            ;; Keeper execution suggestions for existing pending settlements.
+            (when keeper?
+              (for [[wf pending] pending-settlements
+                    :when (:exists pending)]
+                {:actor-id actor-id
+                 :action "execute_pending_settlement"
+                 :params {:workflow-id wf}}))))]
+      {:ok true
+       :session-id session-id
+       :actor-id actor-id
+       :active-workflow-ids ids
+       :suggested-actions templates})
+    {:ok false :error :session-not-found :detail {:session-id session-id}}))
+
+(defn session-signals
+  "Return read-only risk/economic signals for adversarial strategy search."
+  [session-id]
+  (if-let [s (get @sessions session-id)]
+    (let [world     (:world s)
+          transfers (get world :escrow-transfers {})
+          pending-slashes (get world :pending-fraud-slashes {})]
+      {:ok true
+       :session-id session-id
+       :block-time (get world :block-time 0)
+       :active-workflow-ids (vec (keys transfers))
+       :pending-count (get world :pending-count 0)
+       :pending-fraud-slashes
+       (into {}
+             (map (fn [[slash-id v]]
+                    [slash-id {:resolver (:resolver v)
+                               :amount (get v :amount 0)
+                               :status (some-> (:status v) name)
+                               :appeal-deadline (get v :appeal-deadline 0)
+                               :proposed-at (get v :proposed-at 0)}])
+                  pending-slashes))
+       :resolver-slash-total (get world :resolver-slash-total {})
+       :resolver-frozen-until (get world :resolver-frozen-until {})
+       :total-fees (get world :total-fees {})
+       :total-held (get world :total-held {})
+       :resolver-stakes (get world :resolver-stakes {})})
+    {:ok false :error :session-not-found :detail {:session-id session-id}}))
+
+(defn evaluate-payoff
+  "Return a simple realised payoff projection for actor-id from canonical world.
+   Keeps payoff logic in Clojure so Python does not duplicate it."
+  [session-id actor-id]
+  (if-let [s (get @sessions session-id)]
+    (let [world     (:world s)
+          stakes    (get world :resolver-stakes {})
+          claimable (get world :claimable {})
+          bonds     (get world :bond-balances {})
+          staked    (get stakes actor-id 0)
+          claim     (reduce + 0 (for [[_ wc] claimable] (get wc actor-id 0)))
+          bonded    (reduce + 0 (for [[_ wb] bonds] (get wb actor-id 0)))
+          net       (+ staked claim bonded)]
+      {:ok true
+       :session-id session-id
+       :actor-id actor-id
+       :stake-locked staked
+       :slash-loss-realized (get (get world :resolver-slash-total {}) actor-id 0)
+       :claimable claim
+       :bond-locked bonded
+       :net-pnl net})
+    {:ok false :error :session-not-found :detail {:session-id session-id}}))
+
+(defn evaluate-attack-objective
+  "Evaluate objective-oriented score from canonical world for adversarial search.
+   objective: resolver_fraud_profit (default)."
+  [session-id actor-id objective]
+  (if-let [s (get @sessions session-id)]
+    (let [world      (:world s)
+          objective' (or objective "resolver_fraud_profit")
+          stakes     (get world :resolver-stakes {})
+          slashed    (get world :resolver-slash-total {})
+          claimable  (get world :claimable {})
+          bonds      (get world :bond-balances {})
+          staked     (get stakes actor-id 0)
+          slash-loss (get slashed actor-id 0)
+          claim      (reduce + 0 (for [[_ wc] claimable] (get wc actor-id 0)))
+          bonded     (reduce + 0 (for [[_ wb] bonds] (get wb actor-id 0)))
+          net-resolver-profit (- (+ staked claim bonded) slash-loss)
+          fraud-slash-pending
+          (reduce + 0
+                  (for [[_ p] (get world :pending-fraud-slashes {})
+                        :when (= actor-id (:resolver p))]
+                    (get p :amount 0)))
+          score (case objective'
+                  "resolver_fraud_profit" net-resolver-profit
+                  net-resolver-profit)]
+      {:ok true
+       :session-id session-id
+       :actor-id actor-id
+       :objective objective'
+       :score score
+       :decomposition {:stake-locked staked
+                       :claimable claim
+                       :bond-locked bonded
+                       :slash-loss-realized slash-loss
+                       :slash-loss-pending fraud-slash-pending
+                       :net-resolver-profit net-resolver-profit}})
+    {:ok false :error :session-not-found :detail {:session-id session-id}}))

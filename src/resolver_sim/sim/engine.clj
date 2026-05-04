@@ -20,7 +20,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn make-result
-  "Construct a canonical benchmark result map.
+  "Construct a project-standardized benchmark result map.
 
    Every phase entry point should return exactly this shape so that consumers
    can treat results from different phases uniformly.

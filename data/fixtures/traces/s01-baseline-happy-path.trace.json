@@ -1,1 +1,40 @@
-{"scenario-id":"s01-baseline-happy-path","schema-version":"1.0","initial-block-time":1000,"agents":[{"id":"buyer","address":"0xbuyer","type":"honest"},{"id":"seller","address":"0xseller","type":"honest"}],"protocol-params":{"resolver-fee-bps":150,"appeal-window-duration":0,"max-dispute-duration":2592000},"events":[{"seq":0,"time":1000,"agent":"buyer","action":"create_escrow","params":{"token":"USDC","to":"0xseller","amount":5000},"save-wf-as":"wf0"},{"seq":1,"time":1060,"agent":"buyer","action":"release","params":{"workflow-id":"wf0"}}]}
+{
+  "id": "scenarios/s01-baseline-happy-path",
+  "scenario-id": "s01-baseline-happy-path",
+  "title": "Baseline Successful Release",
+  "description": "Standard escrow creation followed by buyer release. Regression check only — no game-theoretic claim.",
+  "purpose": "regression",
+  "schema-version": "1.1",
+  "initial-block-time": 1000,
+  "threat-tags": [],
+  "agents": [
+    { "id": "buyer", "address": "0xbuyer", "role": "buyer", "strategy": "honest" },
+    { "id": "seller", "address": "0xseller", "role": "seller", "strategy": "honest" }
+  ],
+  "expectations": {
+    "terminal": [
+      { "path": ["live-states", 0], "equals": "released" }
+    ],
+    "metrics": [
+      { "name": "total-escrows", "op": ":=", "value": 1 },
+      { "name": "reverts", "op": ":=", "value": 0 }
+    ]
+  },
+  "events": [
+    {
+      "seq": 0,
+      "time": 1000,
+      "agent": "buyer",
+      "action": "create_escrow",
+      "params": { "token": "USDC", "to": "0xseller", "amount": 5000 },
+      "save-id-as": "wf0"
+    },
+    {
+      "seq": 1,
+      "time": 1060,
+      "agent": "buyer",
+      "action": "release",
+      "params": { "workflow-id": "wf0" }
+    }
+  ]
+}

@@ -1,5 +1,11 @@
 {
-  "schema-version": "1.0",
+  "schema-version": "1.1",
+  "id": "scenarios/fee-on-transfer-leak",
+  "title": "Fee-on-Transfer Token Accounting",
+  "purpose": "adversarial-robustness",
+  "threat-tags": [
+    "token-accounting"
+  ],
   "scenario-id": "fee-on-transfer-leak",
   "initial-block-time": 1000,
   "agents": [
@@ -25,7 +31,7 @@
         "to": "0xseller",
         "amount": 10000
       },
-      "save-wf-as": "wf0"
+      "save-id-as": "wf0"
     },
     {
       "seq": 1,

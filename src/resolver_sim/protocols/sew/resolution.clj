@@ -28,6 +28,7 @@
     (-> world
         (acct/sub-held token amt)
         (acct/record-released token net-amt)
+        (acct/record-claimable workflow-id (:to et) net-amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :released))))
 
@@ -40,6 +41,7 @@
     (-> world
         (acct/sub-held token amt)
         (acct/record-refunded token net-amt)
+        (acct/record-claimable workflow-id (:from et) net-amt)
         (update :pending-settlements dissoc workflow-id)
         (sm/apply-transition! workflow-id :refunded))))
 
@@ -351,27 +353,13 @@
 
       ;; Priority 2: auto-release
       (sm/auto-release-due? world workflow-id)
-      (let [et    (t/get-transfer world workflow-id)
-            token (:token et)
-            amt   (:amount-after-fee et)
-            w'    (-> world
-                      (acct/sub-held token amt)
-                      (acct/record-released token amt)
-                      (update :pending-settlements dissoc workflow-id)
-                      (sm/apply-transition! workflow-id :released))]
-        (assoc (t/ok w') :action :auto-release))
+      (let [r (t/ok (finalize-release world workflow-id))]
+        (assoc r :action :auto-release))
 
       ;; Priority 3: auto-cancel
       (sm/auto-cancel-due? world workflow-id)
-      (let [et    (t/get-transfer world workflow-id)
-            token (:token et)
-            amt   (:amount-after-fee et)
-            w'    (-> world
-                      (acct/sub-held token amt)
-                      (acct/record-refunded token amt)
-                      (update :pending-settlements dissoc workflow-id)
-                      (sm/apply-transition! workflow-id :refunded))]
-        (assoc (t/ok w') :action :auto-cancel))
+      (let [r (t/ok (finalize-refund world workflow-id))]
+        (assoc r :action :auto-cancel))
 
       :else
       (assoc (t/ok world) :action :none))))
@@ -454,7 +442,13 @@
               et           (t/get-transfer world workflow-id)
               bond-amt     (payoffs/calculate-appeal-bond-amount (:amount-after-fee et) snap)
               
-              world'       (-> world
+              ;; Ensure workflow exists in bond-balances before updating
+              world-prepared (if (get-in world [:bond-balances workflow-id])
+                               world
+                               (assoc-in world [:bond-balances workflow-id] {}))
+              
+              ;; post-appeal-bond adds to :total-held internally.
+              world'       (-> world-prepared
                                (acct/post-appeal-bond workflow-id caller snap (:token et) bond-amt)
                                (cancel-pending-on-escalation workflow-id)
                                (assoc-in [:dispute-levels workflow-id] new-level)

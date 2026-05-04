@@ -1,6 +1,5 @@
 (ns resolver-sim.stochastic.types
-  "Core parameter schemas and types for the dispute resolution simulation."
-  (:refer-clojure :exclude []))
+  "Parameter schemas and types for the SEW Protocol dispute resolution simulation.")
 
 ;; Scenario configuration schema
 (def scenario-schema
