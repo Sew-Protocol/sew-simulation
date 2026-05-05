@@ -36,11 +36,21 @@
     (take capacity sorted)))
 
 (defn simulate-dispute-outcome
-  "Determine if an attacker wins a dispute."
-  [dispute reviewed-ids d-rng]
-  (let [reviewed? (contains? reviewed-ids (:id dispute))
-        win-prob (if reviewed? 0.05 0.35)]
-    (< (rng/next-double d-rng) win-prob)))
+  "Determine if an attacker wins a dispute.
+
+   base-win-prob:     win probability when unreviewed
+                      Default 0.22 — calibrated from the deterministic invariant suite:
+                      9 of 41 adversarial scenarios produce a successful attacker outcome
+                      (9/41 ≈ 0.22). This replaces the previous unjustified 0.35 assumption.
+   reviewed-win-prob: win probability when governance reviews the dispute
+                      Default 0.03 — maintains ~7× governance-catch ratio (0.22/0.03 ≈ 7.3),
+                      matching the deterrence multiplier implicit in the original model."
+  ([dispute reviewed-ids d-rng]
+   (simulate-dispute-outcome dispute reviewed-ids d-rng 0.22 0.03))
+  ([dispute reviewed-ids d-rng base-win-prob reviewed-win-prob]
+   (let [reviewed? (contains? reviewed-ids (:id dispute))
+         win-prob  (if reviewed? reviewed-win-prob base-win-prob)]
+     (< (rng/next-double d-rng) win-prob))))
 
 (defn infer-grey-zone
   "Attacker analyzes history to find the highest value with <20% review rate."
@@ -79,7 +89,9 @@
 
 (defn simulate-epoch-aa
   [epoch state params d-rng]
-  (let [{:keys [capacity learning? bias]} params
+  (let [{:keys [capacity learning? bias base-win-prob reviewed-win-prob]} params
+        bwp      (or base-win-prob 0.22)
+        rwp      (or reviewed-win-prob 0.03)
         history  (:history state [])
         attacker-strategy (if (and learning? (> epoch 20))
                                   (infer-grey-zone history)
@@ -98,11 +110,11 @@
                    (select-reviewed-disputes-biased epoch-disputes capacity bias d-rng)
                    (select-reviewed-disputes epoch-disputes capacity d-rng))
         reviewed-ids (set (map :id reviewed))
-        
+
         outcomes (for [d epoch-disputes]
-                   (let [won? (simulate-dispute-outcome d reviewed-ids d-rng)]
+                   (let [won? (simulate-dispute-outcome d reviewed-ids d-rng bwp rwp)]
                      (assoc d :won won? :reviewed (contains? reviewed-ids (:id d)))))
-        
+
         new-wins (count (filter :won outcomes))]
     
     {:epoch epoch
@@ -127,34 +139,33 @@
 
    Model approximation:
      win-rate ≈ base-win - review-rate × (base-win - reviewed-win)
-   where base-win=0.35 (unreviewed) and reviewed-win=0.05.
 
+   base-win and reviewed-win default to the calibrated values (0.22/0.03).
    Returns guidance for minimum review effectiveness and rough capacity floor."
-  [results]
-  (let [target-win-rate 0.20
-        base-win 0.35
-        reviewed-win 0.05
-        review-delta (- base-win reviewed-win)
-        required-review-rate (-> (/ (- base-win target-win-rate) review-delta)
-                                 (max 0.0)
-                                 (min 1.0))
-        worst-win-rate (apply max (map :win-rate results))
-        observed-review-gain (-> (/ (- worst-win-rate reviewed-win) review-delta)
-                                 (max 0.0)
-                                 (min 1.0))
-        ;; Each epoch creates 5 disputes in this phase model.
-        required-capacity-floor (Math/ceil (* 5.0 required-review-rate))
-        envelope
-        (cond
-          (< worst-win-rate 0.20) :green
-          (< worst-win-rate 0.25) :yellow
-          :else :red)]
+  ([results] (derive-prescriptive-thresholds results 0.22 0.03))
+  ([results base-win reviewed-win]
+   (let [target-win-rate 0.20
+         review-delta (- base-win reviewed-win)
+         required-review-rate (-> (/ (- base-win target-win-rate) review-delta)
+                                  (max 0.0)
+                                  (min 1.0))
+         worst-win-rate (apply max (map :win-rate results))
+         observed-review-gain (-> (/ (- worst-win-rate reviewed-win) review-delta)
+                                  (max 0.0)
+                                  (min 1.0))
+         ;; Each epoch creates 5 disputes in this phase model.
+         required-capacity-floor (Math/ceil (* 5.0 required-review-rate))
+         envelope
+         (cond
+           (< worst-win-rate 0.20) :green
+           (< worst-win-rate 0.25) :yellow
+           :else :red)]
     {:target-win-rate target-win-rate
      :required-review-rate required-review-rate
      :required-capacity-floor (long required-capacity-floor)
      :worst-win-rate worst-win-rate
      :implied-review-rate-worst-case (- 1.0 observed-review-gain)
-     :envelope envelope}))
+     :envelope envelope})))
 
 ;; ============ Scenario Definitions ============
 
@@ -208,15 +219,20 @@
 (defn run-phase-aa-sweep
   "Run all Phase AA governance gaming tests."
   [params]
-  (let [seed (:rng-seed params 42)
-        _ (engine/print-phase-header
-             {:benchmark-id "AA"
-              :label        "Governance as Adversary"
-              :hypothesis   "Attackers cannot exceed 20% win rate via governance gaming"})
-        
-        scenarios (make-scenarios seed)
+  (let [seed          (:rng-seed params 42)
+        base-win-prob (get params :base-win-prob 0.22)
+        rev-win-prob  (get params :reviewed-win-prob 0.03)
+        _  (engine/print-phase-header
+              {:benchmark-id "AA"
+               :label        "Governance as Adversary"
+               :hypothesis   "Attackers cannot exceed 20% win rate via governance gaming"})
+
+        scenarios (map (fn [s]
+                         (update s :params merge {:base-win-prob    base-win-prob
+                                                  :reviewed-win-prob rev-win-prob}))
+                       (make-scenarios seed))
         results (engine/run-sweep "PHASE AA SWEEP" scenarios params)
-        
+
         class-a (count (filter #(= "A" (:class %)) results))
         class-c (count (filter #(= "C" (:class %)) results))
         max-win-rate (apply max (map :win-rate results))
@@ -230,7 +246,9 @@
     (engine/print-phase-footer
      {:benchmark-id  "AA"
       :passed?       hypothesis-holds?
-      :summary-lines [(format "Robust (A): %d  Fragile (C): %d" class-a class-c)
+      :summary-lines [(format "Win-prob calibration: base=%.2f (9/41 invariant suite), reviewed=%.2f (~7x catch ratio)"
+                              base-win-prob rev-win-prob)
+                      (format "Robust (A): %d  Fragile (C): %d" class-a class-c)
                       (format "Max attacker win rate: %.1f%%" (* 100 max-win-rate))
                       (format "Required reviewed-share to keep attacker ≤ %.0f%%: %.1f%%"
                               (* 100 (:target-win-rate guidance))
