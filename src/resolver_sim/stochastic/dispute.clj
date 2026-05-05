@@ -46,7 +46,9 @@
              unstaking-delay-days freeze-on-detection? freeze-duration-days appeal-window-days
              detection-type timeout-detection-probability reversal-detection-probability
              fraud-detection-probability fraud-slash-bps reversal-slash-bps timeout-slash-bps
-             fraud-success-rate model-appeal-costs? appeal-bond-recovery-rate]
+              fraud-success-rate fraud-model escalation-assumptions escalation-assumption-band
+              p-appeal-wrong p-l1-reversal has-kleros? p-l2-escalation p-l2-reversal
+              model-appeal-costs? appeal-bond-recovery-rate]
       :or {senior-resolver-skill 0.95
            resolver-bond-bps 1000
            l2-detection-prob 0
@@ -66,6 +68,14 @@
            ;; MC-1: escrow-diversion upside for malicious resolvers.
            ;; 0.0 = original model (no upside); 0.22 = calibrated to adversarial suite.
            fraud-success-rate 0.0
+            ;; Fraud payoff model:
+            ;; :single-stage-ev       -> legacy scalar fraud-success-rate shortcut
+            ;; :sequential-escalation -> appeal/escalation-aware survival probability
+            ;; :strict-all-tiers      -> escrow loss only if L1 and L2 both fail
+            ;;                          (assumes appeal/escalation always pursued)
+            fraud-model :single-stage-ev
+            escalation-assumptions econ/default-escalation-assumptions
+            escalation-assumption-band :base
            ;; MC-4: model appeal-bond recovery for honest resolvers.
            ;; false = original model; true = resolver earns fraction of failed challenge bond.
            model-appeal-costs? false
@@ -203,15 +213,34 @@
           bond-loss
           (if slashing-pending? 0 bond-loss))
 
-        ;; MC-1: Escrow-diversion upside.
+        ;; MC-1/MC-SEQ: Escrow-diversion upside.
         ;; A malicious resolver who is NOT caught may redirect the escrow to a colluding
         ;; party. The gain is the escrow minus the fee already counted in profit-honest.
-        ;; fraud-success-rate=0.0 (default) reproduces the original model exactly.
+        ;; Legacy mode (fraud-model :single-stage-ev) uses scalar fraud-success-rate.
+        ;; Sequential mode models survival through multi-tier appeal/escalation.
+        ;; :strict-all-tiers assumes appeals are always pursued — models worst case for protocol.
+        selected-assumptions (get escalation-assumptions escalation-assumption-band
+                                  (get econ/default-escalation-assumptions :base))
+        effective-has-kleros? (if (some? has-kleros?) has-kleros?
+                                  (:has-kleros? selected-assumptions true))
+        sequential-survival-prob
+        (econ/fraud-survival-probability
+         {:p-appeal-wrong  (or p-appeal-wrong appeal-prob-wrong (:p-appeal-wrong selected-assumptions))
+          :p-l1-reversal   (or p-l1-reversal (:p-l1-reversal selected-assumptions))
+          :has-kleros?     effective-has-kleros?
+          :p-l2-escalation (or p-l2-escalation (:p-l2-escalation selected-assumptions))
+          :p-l2-reversal   (or p-l2-reversal (:p-l2-reversal selected-assumptions))})
+        fraud-success-prob
+        (case fraud-model
+          :sequential-escalation sequential-survival-prob
+          :strict-all-tiers (* (- 1.0 (double (or p-l1-reversal (:p-l1-reversal selected-assumptions))))
+                               (- 1.0 (double (or p-l2-reversal (:p-l2-reversal selected-assumptions)))))
+          fraud-success-rate)
         fraud-upside
         (if (and (= strategy :malicious)
                  (not slashed-detected?)
-                 (pos? fraud-success-rate))
-          (long (* (- escrow-wei fee) fraud-success-rate))
+                 (pos? fraud-success-prob))
+          (long (* (- escrow-wei fee) fraud-success-prob))
           0)
 
         ;; MC-4: Appeal-bond recovery for honest resolvers.
@@ -245,6 +274,7 @@
      :profit-honest         profit-honest
      :profit-malice         profit-malice
      :fraud-upside          fraud-upside
+     :fraud-survival-prob   fraud-success-prob  ; probability that fraud outcome survives escalation
      :slash-distributed     slash-distributed
      :strategy              strategy}))
 

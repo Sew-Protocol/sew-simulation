@@ -115,6 +115,95 @@
   [detection-prob]
   (max 0.0 (- 1.0 detection-prob)))
 
+(def default-escalation-assumptions
+  "Named parameter bands for escalation model sensitivity analysis.
+
+   :base        — realistic mid-range estimates
+   :optimistic  — strong deterrence (escalation reliably corrects fraud)
+   :pessimistic — weak deterrence (escalation often fails to correct fraud)
+   :two-layer   — no Kleros backstop (has-kleros? false); represents 2-layer only protocol
+
+   Use :pessimistic for conservative (worst-case) economic security analysis.
+   Use :two-layer to compare outcomes without Kleros fallback."
+  {:base        {:p-appeal-wrong 0.40  :p-l1-reversal 0.85  :has-kleros? true  :p-l2-escalation 0.70  :p-l2-reversal 0.95}
+   :optimistic  {:p-appeal-wrong 0.60  :p-l1-reversal 0.95  :has-kleros? true  :p-l2-escalation 0.90  :p-l2-reversal 0.99}
+   :pessimistic {:p-appeal-wrong 0.20  :p-l1-reversal 0.60  :has-kleros? true  :p-l2-escalation 0.40  :p-l2-reversal 0.80}
+   :two-layer   {:p-appeal-wrong 0.40  :p-l1-reversal 0.85  :has-kleros? false :p-l2-escalation 0.0   :p-l2-reversal 0.0}})
+
+(defn fraud-survival-probability
+  "Probability that a malicious L0 verdict survives all active escalation tiers.
+
+   Three-layer path (has-kleros? true):
+     P = P(no appeal)
+       + P(appeal) × P(L1 fails to reverse)
+         × [P(no L2 escalation) + P(L2 escalation) × P(L2 fails to reverse)]
+
+   Two-layer path (has-kleros? false, no Kleros backstop):
+     P = P(no appeal) + P(appeal) × P(L1 fails to reverse)
+
+   Parameters (map):
+     :p-appeal-wrong    P(aggrieved party appeals) — default 0.40
+     :p-l1-reversal     P(L1 overturns corrupt verdict | appealed) — default 0.85
+     :has-kleros?       whether L2/Kleros backstop is active — default true
+     :p-l2-escalation   P(party escalates to L2 | L1 upholds corrupt) — default 0.70
+     :p-l2-reversal     P(L2 overturns | escalated) — default 0.95
+
+   Inputs are clamped to [0,1]."
+  [{:keys [p-appeal-wrong p-l1-reversal has-kleros? p-l2-escalation p-l2-reversal]
+    :or   {p-appeal-wrong  0.40
+           p-l1-reversal   0.85
+           has-kleros?     true
+           p-l2-escalation 0.70
+           p-l2-reversal   0.95}}]
+  (let [clamp         (fn [x] (-> x double (max 0.0) (min 1.0)))
+        p-appeal      (clamp p-appeal-wrong)
+        p-l1-fail     (- 1.0 (clamp p-l1-reversal))
+        p-l2-escalate (clamp p-l2-escalation)
+        p-l2-fail     (- 1.0 (clamp p-l2-reversal))
+        after-appeal  (* p-appeal p-l1-fail)]
+    (if has-kleros?
+      (+ (- 1.0 p-appeal)
+         (* after-appeal (+ (- 1.0 p-l2-escalate) (* p-l2-escalate p-l2-fail))))
+      (+ (- 1.0 p-appeal) after-appeal))))
+
+(defn sequential-fraud-success-prob
+  "Analytical probability that a corrupt outcome survives all escalation tiers.
+
+   Use this to understand parameter sensitivity without running MC trials.
+   The simulation uses stochastic draws (in resolve-dispute); this function
+   computes the closed-form expectation for comparison and documentation.
+
+   Three-layer path (with Kleros):
+     P = P(no appeal)
+       + P(appeal) × P(L1 upholds)
+         × [P(no L2 escalation) + P(L2 escalation) × P(L2 upholds)]
+
+   Two-layer path (no Kleros, has-kleros?=false):
+     P = P(no appeal) + P(appeal) × P(L1 upholds)
+
+   Parameters (map):
+     :appeal-prob-wrong    P(aggrieved party appeals at all) — default 0.40
+     :p-l1-reversal        P(senior resolver overturns corrupt verdict | appealed) — default 0.85
+     :has-kleros?          whether L2/Kleros backstop exists — default true
+     :p-l2-escalation      P(party escalates to L2 | L1 upheld corrupt) — default 0.70
+     :p-l2-reversal        P(Kleros overturns | escalated to L2) — default 0.95
+
+   Returns the probability [0,1] that fraud reaches final settlement as-is."
+  [{:keys [appeal-prob-wrong p-l1-reversal has-kleros? p-l2-escalation p-l2-reversal]
+    :or   {appeal-prob-wrong 0.40
+           p-l1-reversal     0.85
+           has-kleros?       true
+           p-l2-escalation   0.70
+           p-l2-reversal     0.95}}]
+  (let [p-no-appeal  (- 1.0 appeal-prob-wrong)
+        p-l1-upholds (- 1.0 p-l1-reversal)
+        p-after-l1   (* appeal-prob-wrong p-l1-upholds)]
+    (if has-kleros?
+      (let [p-no-l2     (- 1.0 p-l2-escalation)
+            p-l2-upholds (- 1.0 p-l2-reversal)]
+        (+ p-no-appeal (* p-after-l1 (+ p-no-l2 (* p-l2-escalation p-l2-upholds)))))
+      (+ p-no-appeal p-after-l1))))
+
 (defn breakeven-detection
   "Minimum detection probability for honest EV to exceed full malicious EV.
 

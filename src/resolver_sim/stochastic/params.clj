@@ -19,6 +19,12 @@
    :l2-detection-prob         → :l2-detection-prob
    :slashing-detection-prob   → :detection-prob
    :fraud-success-rate        → :fraud-success-rate
+   :fraud-model               → :fraud-model
+   :escalation-assumption-band → :escalation-assumption-band
+   :p-appeal-wrong            → :p-appeal-wrong
+   :p-l1-reversal             → :p-l1-reversal
+   :p-l2-escalation           → :p-l2-escalation
+   :p-l2-reversal             → :p-l2-reversal
    :fraud-detection-prob      → :fraud-detection-probability
    :reversal-detection-prob   → :reversal-detection-probability
    :timeout-detection-prob    → :timeout-detection-probability")
@@ -43,6 +49,13 @@
     (:l2-detection-prob snap)       (assoc :l2-detection-prob (:l2-detection-prob snap))
     (:slashing-detection-prob snap) (assoc :detection-prob (:slashing-detection-prob snap))
     (:fraud-success-rate snap)      (assoc :fraud-success-rate (:fraud-success-rate snap))
+    (:fraud-model snap)             (assoc :fraud-model (:fraud-model snap))
+    (:escalation-assumption-band snap) (assoc :escalation-assumption-band (:escalation-assumption-band snap))
+    (:p-appeal-wrong snap)          (assoc :p-appeal-wrong (:p-appeal-wrong snap))
+    (:p-l1-reversal snap)           (assoc :p-l1-reversal (:p-l1-reversal snap))
+    (some? (:has-kleros? snap))      (assoc :has-kleros? (:has-kleros? snap))
+    (:p-l2-escalation snap)         (assoc :p-l2-escalation (:p-l2-escalation snap))
+    (:p-l2-reversal snap)           (assoc :p-l2-reversal (:p-l2-reversal snap))
     (:fraud-detection-prob snap)    (assoc :fraud-detection-probability (:fraud-detection-prob snap))
     (:reversal-detection-prob snap) (assoc :reversal-detection-probability (:reversal-detection-prob snap))
     (:timeout-detection-prob snap)  (assoc :timeout-detection-probability (:timeout-detection-prob snap))))

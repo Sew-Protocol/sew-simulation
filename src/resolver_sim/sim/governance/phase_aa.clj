@@ -99,6 +99,40 @@
      :class (if passed? "A" "C")
      :passed? passed?}))
 
+(defn- derive-prescriptive-thresholds
+  "Compute actionable thresholds from observed AA outcomes.
+
+   Model approximation:
+     win-rate ≈ base-win - review-rate × (base-win - reviewed-win)
+   where base-win=0.35 (unreviewed) and reviewed-win=0.05.
+
+   Returns guidance for minimum review effectiveness and rough capacity floor."
+  [results]
+  (let [target-win-rate 0.20
+        base-win 0.35
+        reviewed-win 0.05
+        review-delta (- base-win reviewed-win)
+        required-review-rate (-> (/ (- base-win target-win-rate) review-delta)
+                                 (max 0.0)
+                                 (min 1.0))
+        worst-win-rate (apply max (map :win-rate results))
+        observed-review-gain (-> (/ (- worst-win-rate reviewed-win) review-delta)
+                                 (max 0.0)
+                                 (min 1.0))
+        ;; Each epoch creates 5 disputes in this phase model.
+        required-capacity-floor (Math/ceil (* 5.0 required-review-rate))
+        envelope
+        (cond
+          (< worst-win-rate 0.20) :green
+          (< worst-win-rate 0.25) :yellow
+          :else :red)]
+    {:target-win-rate target-win-rate
+     :required-review-rate required-review-rate
+     :required-capacity-floor (long required-capacity-floor)
+     :worst-win-rate worst-win-rate
+     :implied-review-rate-worst-case (- 1.0 observed-review-gain)
+     :envelope envelope}))
+
 ;; ============ Scenario Definitions ============
 
 (defn make-scenarios [seed]
@@ -159,13 +193,24 @@
         class-a (count (filter #(= "A" (:class %)) results))
         class-c (count (filter #(= "C" (:class %)) results))
         max-win-rate (apply max (map :win-rate results))
-        hypothesis-holds? (< max-win-rate 0.20)]
+        hypothesis-holds? (< max-win-rate 0.20)
+        guidance (derive-prescriptive-thresholds results)
+        envelope-msg (case (:envelope guidance)
+                       :green "SAFE ENVELOPE: current governance profile meets target"
+                       :yellow "WARNING ENVELOPE: near threshold; harden governance capacity"
+                       :red "RED ENVELOPE: redesign/strong safeguards required before mainnet")]
 
     (engine/print-phase-footer
      {:benchmark-id  "AA"
       :passed?       hypothesis-holds?
       :summary-lines [(format "Robust (A): %d  Fragile (C): %d" class-a class-c)
-                      (format "Max attacker win rate: %.1f%%" (* 100 max-win-rate))]})
+                      (format "Max attacker win rate: %.1f%%" (* 100 max-win-rate))
+                      (format "Required reviewed-share to keep attacker ≤ %.0f%%: %.1f%%"
+                              (* 100 (:target-win-rate guidance))
+                              (* 100 (:required-review-rate guidance)))
+                      (format "Approx capacity floor (5 disputes/epoch model): %d reviews/epoch"
+                              (:required-capacity-floor guidance))
+                      (str "Policy envelope: " envelope-msg)]})
 
     (engine/make-result
      {:benchmark-id "AA"
@@ -173,4 +218,7 @@
       :hypothesis   "Attackers cannot exceed 20% win rate via governance gaming"
       :passed?      hypothesis-holds?
       :results      results
-      :summary      {:class-a class-a :class-c class-c :max-win-rate max-win-rate}})))
+      :summary      {:class-a class-a
+                     :class-c class-c
+                     :max-win-rate max-win-rate
+                     :policy-guidance guidance}})))

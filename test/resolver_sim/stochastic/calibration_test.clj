@@ -296,6 +296,85 @@
     (is (= 0.0  (econ/worst-case-fraud-success-rate 1.0)))
     (is (= 0.0  (econ/worst-case-fraud-success-rate 1.5)))))
 
+(deftest fraud-survival-probability-formula
+  (testing "fraud-survival-probability matches staged escalation formula (base band values)"
+    ;; Base band: a=0.40, r1=0.85, e2=0.70, r2=0.95
+    ;; P = (1-a) + a*(1-r1)*((1-e2) + e2*(1-r2))
+    ;;   = 0.60 + 0.40*0.15*(0.30 + 0.70*0.05)
+    ;;   = 0.60 + 0.06 * 0.335
+    ;;   = 0.6201
+    (let [p (econ/fraud-survival-probability {:p-appeal-wrong  0.40
+                                              :p-l1-reversal   0.85
+                                              :has-kleros?     true
+                                              :p-l2-escalation 0.70
+                                              :p-l2-reversal   0.95})]
+      (is (< (Math/abs (- p 0.6201)) 1.0e-9)
+          (str "expected 0.6201, got " p)))))
+
+(deftest sequential-fraud-success-prob-formula
+  (testing "sequential-fraud-success-prob (public API, appeal-prob-wrong key) ≈ 0.6201 at base params"
+    ;; Same math as fraud-survival-probability but uses :appeal-prob-wrong key
+    (let [p (econ/sequential-fraud-success-prob {:appeal-prob-wrong 0.40
+                                                 :p-l1-reversal     0.85
+                                                 :has-kleros?       true
+                                                 :p-l2-escalation   0.70
+                                                 :p-l2-reversal     0.95})]
+      (is (< (Math/abs (- p 0.6201)) 1.0e-9)
+          (str "expected 0.6201, got " p)))))
+
+(deftest fraud-survival-probability-two-layer
+  (testing "two-layer (no Kleros) gives higher fraud survival than three-layer"
+    ;; Two-layer: P = (1-a) + a*(1-r1) = 0.60 + 0.40*0.15 = 0.66
+    (let [three (econ/fraud-survival-probability {:p-appeal-wrong 0.40 :p-l1-reversal 0.85
+                                                  :has-kleros? true :p-l2-escalation 0.70
+                                                  :p-l2-reversal 0.95})
+          two   (econ/fraud-survival-probability {:p-appeal-wrong 0.40 :p-l1-reversal 0.85
+                                                  :has-kleros? false})]
+      (is (< (Math/abs (- two 0.66)) 1.0e-9)
+          (str "expected two-layer P=0.66, got " two))
+      (is (> two three)
+          (str "two-layer should have higher fraud survival than three-layer: "
+               two " vs " three)))))
+
+(deftest fraud-survival-probability-band-ordering
+  (testing "pessimistic >= base >= optimistic in fraud capture risk"
+    (let [p (econ/fraud-survival-probability (:pessimistic econ/default-escalation-assumptions))
+          b (econ/fraud-survival-probability (:base        econ/default-escalation-assumptions))
+          o (econ/fraud-survival-probability (:optimistic  econ/default-escalation-assumptions))]
+      (is (>= p b o)
+          (str "expected pessimistic >= base >= optimistic, got " [p b o])))))
+
+(deftest sequential-fraud-model-lowers-upside-vs-single-stage
+  (testing "sequential model yields <= upside than single-stage default 0.90"
+    (let [r1   (rng/make-rng 42)
+          r2   (rng/make-rng 42)
+          base (dispute/resolve-dispute r1 10000 150 700 2.5 :malicious 0.05 0.4 0.1
+                                        :fraud-model :single-stage-ev
+                                        :fraud-success-rate 0.90)
+          seqm (dispute/resolve-dispute r2 10000 150 700 2.5 :malicious 0.05 0.4 0.1
+                                        :fraud-model :sequential-escalation
+                                        :escalation-assumption-band :base)]
+      (when (and (not (:slashed? base)) (not (:slashed? seqm)))
+        (is (<= (:fraud-upside seqm) (:fraud-upside base))
+            (str "sequential upside should not exceed single-stage at same trial: "
+                 (:fraud-upside seqm) " vs " (:fraud-upside base)))))))
+
+(deftest strict-all-tiers-fraud-model
+  (testing "strict-all-tiers uses only L1/L2 failure product (appeal always-on assumption)"
+    ;; With p-l1-reversal=0.75 and p-l2-reversal=0.88:
+    ;; P(loss) = (1-0.75)*(1-0.88) = 0.03
+    (let [r (rng/make-rng 42)
+          result (dispute/resolve-dispute r 10000 150 700 2.5 :malicious 0.05 0.4 0.1
+                                         :fraud-model :strict-all-tiers
+                                         :p-l1-reversal 0.75
+                                         :p-l2-reversal 0.88)
+          fee (econ/calculate-fee 10000 150)
+          expected-upside (long (* (- 10000 fee) 0.03))]
+      (when-not (:slashed? result)
+        (is (= expected-upside (:fraud-upside result))
+            (str "strict model expected upside=" expected-upside
+                 " got=" (:fraud-upside result)))))))
+
 (deftest breakeven-means-honest-equals-malice
   (testing "at breakeven detection, honest EV ≈ malicious EV (full fraud model)"
     ;; The breakeven condition is: detect × bond-loss = (1-detect) × (escrow-fee)
@@ -330,3 +409,21 @@
           ev-malice (econ/malicious-expected-value fee bond-loss detect max-upside fsr)]
       (is (> ev-malice ev-honest)
           (str "at 10% detection, malice should dominate: honest=" ev-honest " malice=" ev-malice)))))
+
+(deftest param-bridge-sequential-fields
+  (testing "from-snap maps sequential fraud model fields including has-kleros?"
+    (let [snap {:fraud-model :sequential-escalation
+                :escalation-assumption-band :base
+                :p-appeal-wrong 0.40
+                :p-l1-reversal 0.85
+                :has-kleros? false
+                :p-l2-escalation 0.70
+                :p-l2-reversal 0.95}
+          out  (params/from-snap snap)]
+      (is (= :sequential-escalation (:fraud-model out)))
+      (is (= :base (:escalation-assumption-band out)))
+      (is (= 0.40 (:p-appeal-wrong out)))
+      (is (= 0.85 (:p-l1-reversal out)))
+      (is (= false (:has-kleros? out)) "has-kleros? false must pass through")
+      (is (= 0.70 (:p-l2-escalation out)))
+      (is (= 0.95 (:p-l2-reversal out))))))
