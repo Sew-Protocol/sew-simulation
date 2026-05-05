@@ -252,7 +252,8 @@
         reviewed-win-prob  (get params :reviewed-win-prob 0.03)]
 
     (println "\n📊 PHASE AD: GOVERNANCE BANDWIDTH FLOOR")
-    (println "   Hypothesis: mandatory floor reviews keep attacker win rate < 20%")
+    (println "   Hypothesis: floor ≥ 2 reviews/epoch keeps attacker win rate < 20%")
+    (println "   (Test 2 = no-floor baseline; Tests 3–5 = floor mechanism active)")
     (println (format "   Win-prob calibration: base=%.2f reviewed=%.2f (from 9/41 invariant suite)"
                      base-win-prob reviewed-win-prob))
     (println "")
