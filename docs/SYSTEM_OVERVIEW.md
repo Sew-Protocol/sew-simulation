@@ -1,0 +1,333 @@
+# SEW Simulation: State, Interpretation, and Roadmap
+
+*A plain-language guide for protocol designers, researchers, and grant reviewers.*
+
+---
+
+## What this system is
+
+SEW is a dispute-resolution protocol for on-chain escrow. When a buyer and seller
+disagree, a resolver is called in to make a binding decision. The protocol must ensure
+that the resolver behaves honestly — and that an attacker cannot game the outcome,
+exhaust the resolver network, or drain the insurance pool.
+
+This repository contains **two complementary simulation engines** that test whether
+the protocol actually achieves those goals.
+
+---
+
+## The two engines
+
+### Engine 1 — Deterministic replay (the "proof engine")
+
+Think of this as a **formal stress-test**. You give it a precise scenario — a sequence
+of actions taken by specific actors — and it runs the protocol logic step by step,
+checking 31 invariants after every action. An invariant is a property that must
+*always* hold: "no escrow can be released twice," "the contract can never owe more
+than it holds," "a resolver without authority cannot finalise a dispute."
+
+There are 41 built-in scenarios (S01–S41) covering the full lifecycle: honest
+resolution, adversarial manipulation, governance failure, liveness under no-resolver
+conditions, and Kleros fallback. If a scenario produces a single invariant violation,
+the run fails.
+
+**What it proves:** Specific, named attack sequences either succeed or fail under the
+current protocol logic. This is *mechanistic* evidence — not statistical.
+
+**What it cannot prove:** That the scenarios chosen cover every possible attack. It
+tests what you put in front of it.
+
+### Engine 2 — Monte Carlo simulation (the "economic pressure test")
+
+Think of this as running **thousands of disputes simultaneously** with randomised
+actors. Resolvers are assigned strategies — honest, lazy, malicious, or collusive —
+and the engine measures whether the economic payoffs make honesty rational. Does an
+honest resolver consistently earn more than a malicious one? Does governance capture
+become profitable above a certain coalition size?
+
+There are 23 Monte Carlo phases (O through AI) sweeping across different hypotheses:
+market-exit dynamics, governance threshold fragility, adversarial profitability,
+ring-attack stability, multi-epoch reputation decay.
+
+**What it proves:** That under a *distribution of behaviours*, the protocol's economic
+incentives point in the right direction. This is *statistical* evidence.
+
+**What it cannot prove:** That no individual attack path is profitable in isolation.
+That requires the deterministic engine.
+
+---
+
+## How the two engines relate
+
+The engines share the same fee, bond, and slashing formulas — verified by a suite of
+cross-engine calibration tests (762 assertions). When the Monte Carlo model says
+"malicious profit is negative on average," it is using identical arithmetic to the
+contract model. A calibration failure would surface as a test failure before it reached
+any results.
+
+The engines are **not redundant**. They address different threat models:
+
+| Question | Engine |
+|---|---|
+| *Can this specific attack succeed?* | Deterministic replay |
+| *Is fraud economically rational on average?* | Monte Carlo |
+| *Does the state machine follow the spec?* | Deterministic replay |
+| *Does governance capture become viable at scale?* | Monte Carlo |
+| *Are funds conserved across all transitions?* | Deterministic replay |
+| *Do honest resolvers consistently out-earn malicious ones?* | Monte Carlo |
+
+Think of them as a double-entry bookkeeping check: the same economic reality, measured
+from two directions.
+
+---
+
+## Current state
+
+### What is solid
+
+**Deterministic engine — production-quality.**
+The 41-scenario invariant suite is the most reliable part of the codebase. Scenarios
+are named, documented, and independently runnable. The 31 invariant predicates mirror
+the intended on-chain guards. This output is suitable for inclusion in a grant
+application or audit brief.
+
+**Cross-engine calibration — verified.**
+Fee, bond, reversal-slash, and appeal-bond formulas are identical across both engines
+(15 test groups, 762 assertions). Results from the two engines are commensurable.
+
+**Governance and liveness failure classes — demonstrated.**
+Three distinct failure classes have reproducible evidence with named scenarios:
+- *Security*: adversarial pressure (S01 vs S08)
+- *Governance*: resolver-role takeover mid-dispute (`governance-decay-exploit`)
+- *Liveness*: fund-lock vs Kleros fallback (S17 vs S18)
+
+**Monte Carlo phases — functional for directional analysis.**
+Phases O (market-exit), P-lite (adversarial), AA (governance), and the full phase
+suite provide consistent directional signals across thousands of parameter combinations.
+
+### What is recent (and changes what results mean)
+
+The Monte Carlo model has been updated with four accuracy improvements:
+
+1. **Fraud upside is now modellable.** The original model only counted the resolver's
+   *protocol income* (fee minus bond loss). It ignored the fact that a malicious
+   resolver who is not caught can redirect the full escrow to a colluding party — an
+   upside roughly 665× larger than the fee for a typical transaction. A new parameter
+   (`fraud-success-rate`, default 0.0) allows this to be included explicitly. At the
+   default, all existing results are unchanged. At `0.22` (calibrated to the
+   adversarial suite's 22% attack-success rate), the model becomes significantly more
+   honest about fraud attractiveness.
+
+2. **Slash proceeds are now tracked.** Every slashing event now records how the
+   penalty is split between the insurance pool, the protocol, and the burn address.
+   This enables insurance solvency questions to be asked of the Monte Carlo output.
+
+3. **Appeal economics are modellable.** Honest resolvers can now optionally earn a
+   share of failed challenge bonds, making the appeal incentive structure more
+   realistic. Off by default.
+
+4. **Collusive gain rate is now parameter-driven.** The original model used a
+   hard-coded mathematical formula for collusion bonuses. This is now a calibratable
+   input, with the original formula as the fallback.
+
+---
+
+## How to interpret results today
+
+### The deterministic engine — high confidence
+
+A scenario that passes all 31 invariants is strong evidence that the *specific event
+sequence* does not violate the protocol. A scenario that fails is a falsifiable,
+reproducible bug.
+
+Read the scenario IDs as claims: S08 (*adversarial pressure does not break
+invariants*), S17 (*liveness holds without a resolver*). The scenario library is the
+primary output.
+
+### The Monte Carlo engine — directional, not exact
+
+**Dominance ratios** (honest EV / malicious EV) tell you the *direction* of economic
+incentives, not exact magnitudes. A ratio of 3× means honest play earns three times
+as much *in protocol income*, not that fraud is three times less valuable overall.
+
+**Do not read MC results as proof that fraud is economically unattractive.** Until
+`fraud-success-rate` is set above zero, the model underestimates the total gain from
+misdirecting escrow. The correct claim from current MC output is:
+
+> "The protocol's fee and slashing parameters make honest participation
+> economically superior to malicious participation *in terms of protocol income*."
+
+The correct claim about fraud's *total* unattractiveness comes from the deterministic
+engine's funds-conservation and no-double-release invariants — not the MC output.
+
+**Phase results read as pass/fail per hypothesis.** Each MC phase tests one hypothesis
+(e.g., "honest dominance holds across all market-exit parameter combinations"). The
+binary outcome is what matters; the exact numbers are illustrative.
+
+### The 22% adversarial success rate
+
+Nine of 41 attack scenarios in the adversarial suite produce a successful outcome for
+the attacker. This is the denominator for the headline claim. It does *not* mean
+9 of 41 scenarios in the invariant suite fail — all 41 invariant scenarios pass. The
+adversarial suite tests *whether an attacker can find a profitable position*; the
+invariant suite tests *whether the state machine breaks*. These are different questions.
+
+---
+
+## Recommendations for use today
+
+### For protocol designers
+
+1. **Run the invariant suite first.** `./scripts/test.sh invariants` takes about
+   one second and is the most reliable signal in the repository. If you change a
+   protocol parameter, run this.
+
+2. **Use the deterministic engine for any specific attack claim.** If you want to
+   know whether attack pattern X is possible, write a scenario trace and run it. Do
+   not use Monte Carlo output to answer scenario-specific questions.
+
+3. **Use Monte Carlo for parameter sensitivity.** Sweeping `fee-bps` from 100 to 500,
+   or `fraud-slash-bps` from 1000 to 8000, is exactly the right use of the MC engine.
+   It will tell you how directional incentives change across the parameter space.
+
+4. **Set `fraud-success-rate` when modelling adversarial economics.** The calibrated
+   value (0.22, from the adversarial suite) gives a more realistic picture of whether
+   fraud is economically rational for a given parameter set. The zero default is
+   conservative in the wrong direction.
+
+### For grant reviewers and auditors
+
+The most auditable output is the deterministic scenario suite. Each of the 41
+scenarios can be run individually and its full event trace inspected:
+
+```
+clojure -M:run -- --invariants
+```
+
+The scenario IDs, expected outcomes, and invariant predicates are all documented in
+`docs/evidence/RESEARCHER_EVIDENCE_PACK.md`. The full reproducibility instructions —
+exact commands, parameter files, and expected outputs — are in that document.
+
+The Monte Carlo results are supporting evidence for the economic design. Treat them
+as sensitivity analysis, not as security proofs.
+
+### For researchers who want to challenge the results
+
+See `docs/challenge/BENCHMARK_CHALLENGE.md` for three specific tasks:
+- Find a profitable attack not covered by the 41 scenarios
+- Find an invariant violation in the deterministic suite
+- Beat the baseline dispute resolution cost/latency model
+
+The falsification checklist in the evidence pack lists the exact assumptions that
+would invalidate the headline claim if violated.
+
+---
+
+## What comes next
+
+### Immediate gap: the fraud economic model
+
+The most important open problem is completing the economic argument about fraud.
+Currently the system proves:
+- The state machine does not permit double-release or fund diversion *in the modelled scenarios*
+- Protocol income from honest play exceeds protocol income from malice
+
+It does **not** yet prove:
+- That the total expected gain from fraud (including escrow redirection) is negative
+- How that gain varies as a function of detection probability and bond size
+
+Closing this requires:
+1. Calibrating `fraud-success-rate` empirically from on-chain dispute data or a richer
+   agent model
+2. Adding a multi-party model where the *recipient of the misdirected escrow* is also
+   a modelled actor with costs and risks
+3. Running the combined model across the fee/bond/detection-probability parameter space
+
+This is the single change that would most materially strengthen the economic security
+argument.
+
+### Near-term: scenario coverage expansion
+
+The 41 deterministic scenarios cover the main lifecycle paths well. The gaps are:
+
+- **Multi-party collusion** at scale (>2 colluders with coordinated timing)
+- **Economic griefing** (attacker absorbs loss to impose disproportionate cost on
+  honest parties)
+- **Oracle manipulation** (false price signals fed to a resolver that uses external
+  data)
+- **Cross-workflow attacks** (attacker uses a sequence of small disputes to build
+  position before a large one)
+
+Each of these can be added as new scenario traces without changing the protocol logic.
+
+### Medium-term: live contract integration
+
+The simulation currently mirrors the protocol specification. The next step is to run
+the deterministic engine against a deployed testnet contract, using real transaction
+traces as the scenario input. This would convert the simulation from a *spec-level*
+test to a *contract-level* test — directly falsifiable against deployed code.
+
+The architecture already supports this: the replay engine is designed to accept any
+event sequence, and the protocol interface is pluggable.
+
+### Target end state
+
+A complete security argument for the SEW protocol requires three layers that reinforce
+each other:
+
+```
+Layer 3 — Formal verification
+         ┌─────────────────────────────────────────────────┐
+         │  Halmos / Foundry invariant tests on deployed   │
+         │  contract bytecode. Proves properties hold for  │
+         │  ALL inputs, not just sampled ones.             │
+         └─────────────────────────────────────────────────┘
+                              ↑ feeds
+Layer 2 — Simulation (current work)
+         ┌─────────────────────────────────────────────────┐
+         │  Deterministic scenarios + Monte Carlo sweeps.  │
+         │  Discovers candidate invariants and parameter   │
+         │  ranges. Shows which claims are worth proving.  │
+         └─────────────────────────────────────────────────┘
+                              ↑ feeds
+Layer 1 — Economic theory
+         ┌─────────────────────────────────────────────────┐
+         │  Game-theoretic equilibrium analysis.           │
+         │  Establishes conditions under which no rational │
+         │  actor would prefer to defect.                  │
+         └─────────────────────────────────────────────────┘
+```
+
+The repository currently covers Layer 2 well and provides partial evidence for
+Layer 1. The target end state is a system where:
+
+- Every claim made in the research note is directly traceable to a passing test or
+  calibrated model output
+- The simulation suite is used as the *specification* for Layer 3 formal tests — each
+  invariant predicate in `invariants.clj` becomes a Halmos property
+- The economic model includes a full multi-party payoff matrix (resolver, challenger,
+  colluder, insurance pool) with calibrated parameters
+- The fraud-success-rate is bounded empirically, not assumed
+
+At that point the simulation moves from *exploratory evidence* to *engineering
+specification*.
+
+---
+
+## Quick reference
+
+| Task | Command |
+|---|---|
+| Run all deterministic tests | `./scripts/test.sh invariants` |
+| Run full unit suite | `./scripts/test.sh unit` |
+| Run Monte Carlo phases | `./scripts/test.sh monte-carlo` |
+| Run everything | `./scripts/test.sh all` |
+| Run single MC phase | `clojure -M:run -- -p data/params/baseline.edn -O` |
+| Generate attack-outcome diagrams | `python python/attack_outcome_map.py` |
+
+Parameter files live in `data/params/`. Results are written to `results/`. The
+evidence pack and research note are in `docs/evidence/` and `docs/RESEARCH_NOTE_V0.md`.
+
+---
+
+*Document reflects repository state as of commit `346c13f` (branch `monte-carlo-sync`).*
