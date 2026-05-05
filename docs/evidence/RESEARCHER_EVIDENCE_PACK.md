@@ -9,12 +9,28 @@ This pack is designed for dispute researchers who want to quickly:
 
 ## 1) Scope and claim framing
 
-### Headline claim
+### Headline claim (deterministic engine)
 > **Under multi-agent adversarial conditions, governance rotation mid-dispute enables 100% outcome manipulation with zero invariant violations — invisible to per-function audits and fuzz testing.**
 
 Supporting evidence: 22% adversarial success rate across 33 deterministic scenarios, spanning three structurally distinct failure classes (governance manipulation, rational liveness failure, state-machine pressure). In every case, `invariant_violations=0` — the protocol does not malfunction; it is *used correctly* against itself.
 
 This is a **sequence-level composability** claim, not a single-function vulnerability claim.
+
+### Economic security finding (Monte Carlo engine)
+> **Bond-and-detection deterrence alone is insufficient at current parameter levels. Fraud deterrence requires either detection ≥ 70% (current: 10%) or bond-at-stake 21× current levels. The state machine — not the bond — is the load-bearing mechanism for economic security.**
+
+Key numbers at baseline (escrow=10,000 wei, fee=1.5%, bond=7%, slash=2.5×, detection=10%):
+
+| Model | Honest EV | Malice EV | Winner |
+|---|---|---|---|
+| Protocol income only (original) | 142 | -275 | Honest 3× ✓ |
+| Calibrated fraud model (fsr=0.22) | 142 | 201 | Malice 1.4× ✗ |
+| Worst case (fsr=0.90) | 142 | 7,703 | Malice 54× ✗ |
+
+Breakeven formula: `d* = (escrow - fee) / (bond-loss + escrow - fee)` = **70%**
+
+These numbers are computed by `stochastic/economics.clj:breakeven-detection` and verified
+by `test/resolver_sim/stochastic/calibration_test.clj` (156 assertions).
 
 ---
 
@@ -155,6 +171,8 @@ Use this checklist to challenge the claim quickly.
 - [ ] If s17 and s18 produce the same final state, the liveness/fallback claim is falsified.
 - [ ] If `s08` candidate does **not** show higher attack/dispute event intensity vs `s01`, the "adversarial pressure" claim for pair 1 is falsified.
 - [ ] If deterministic invariant runs fail for the same corpus, the "protocol integrity under tested assumptions" claim is falsified.
+- [ ] If `breakeven-detection` at baseline params returns < 0.69, the "70% detection needed" economic claim is falsified. Run: `clojure -M:test -e "(require '[resolver-sim.stochastic.calibration-test])(clojure.test/run-tests 'resolver-sim.stochastic.calibration-test)"`
+- [ ] If `malicious-expected-value` with fsr=0.22 returns < `honest-expected-value` at baseline, the "malice dominates at calibrated fraud rate" claim is falsified.
 
 ### D. Where tests live
 - replay + protocol behavior:

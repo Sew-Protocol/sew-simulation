@@ -63,7 +63,8 @@
             :unstaking-delay-days (:unstaking-delay-days params 14)
             :freeze-on-detection? (:freeze-on-detection? params true)
             :freeze-duration-days (:freeze-duration-days params 3)
-            :appeal-window-days (:appeal-window-days params 7)))
+            :appeal-window-days (:appeal-window-days params 7)
+            :fraud-success-rate (:fraud-success-rate params 0.0)))
         
         profits-honest (map :profit-honest results)
         profits-malice (map :profit-malice results)
@@ -192,7 +193,8 @@
                   :unstaking-delay-days (:unstaking-delay-days params 14)
                   :freeze-on-detection? (:freeze-on-detection? params true)
                   :freeze-duration-days (:freeze-duration-days params 3)
-                  :appeal-window-days (:appeal-window-days params 7))))
+                  :appeal-window-days (:appeal-window-days params 7)
+                  :fraud-success-rate (:fraud-success-rate params 0.0))))
 
         profits-honest (map :profit-honest trials)
         profits-malice (map :profit-malice trials)

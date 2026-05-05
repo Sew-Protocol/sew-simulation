@@ -277,3 +277,56 @@
           mean-malice-up (:mean-malice up-r)]
       (is (>= mean-malice-up mean-malice)
           "fraud upside should never decrease mean malice profit"))))
+
+;; ── 11. Breakeven-detection helper (MC-B1) ───────────────────────────────────
+
+(deftest breakeven-detection-formula
+  (testing "breakeven-detection returns correct threshold"
+    ;; At baseline: escrow=10000, fee=150, bond-loss=4250
+    ;; breakeven = (10000-150) / (4250 + 10000-150) = 9850/14100 ≈ 0.699
+    (let [escrow 10000 fee 150 bond-loss 4250.0
+          result (econ/breakeven-detection escrow fee bond-loss)]
+      (is (< (Math/abs (- result 0.699)) 0.001)
+          (str "breakeven should be ~0.699, got " result)))))
+
+(deftest worst-case-fraud-success-rate
+  (testing "worst-case-fraud-success-rate = 1 - detection-prob"
+    (is (= 0.9  (econ/worst-case-fraud-success-rate 0.1)))
+    (is (= 0.7  (econ/worst-case-fraud-success-rate 0.3)))
+    (is (= 0.0  (econ/worst-case-fraud-success-rate 1.0)))
+    (is (= 0.0  (econ/worst-case-fraud-success-rate 1.5)))))
+
+(deftest breakeven-means-honest-equals-malice
+  (testing "at breakeven detection, honest EV ≈ malicious EV (full fraud model)"
+    ;; The breakeven condition is: detect × bond-loss = (1-detect) × (escrow-fee)
+    ;; In malicious-expected-value: fraud-upside = (escrow-fee), fsr = (1-detect)
+    ;; So expected-fraud-gain = (escrow-fee) × fsr = (escrow-fee) × (1-detect) = detect × bond-loss
+    ;; → malice EV = fee, honest EV ≈ fee. They should be approximately equal.
+    (let [escrow 10000 fee-bps 150 bond-bps 700 slash-mult 2.5
+          fee       (econ/calculate-fee escrow fee-bps)
+          bond      (+ (econ/calculate-bond escrow bond-bps)
+                       (econ/calculate-bond escrow 1000))
+          bond-loss (* bond slash-mult)
+          breakeven (econ/breakeven-detection escrow fee bond-loss)
+          fsr       (econ/worst-case-fraud-success-rate breakeven)
+          ;; Pass (escrow - fee) as the max potential upside; fsr is the probability
+          max-upside (- escrow fee)
+          ev-honest (double (econ/honest-expected-value fee 0.05))
+          ev-malice (double (econ/malicious-expected-value fee bond-loss breakeven max-upside fsr))]
+      (is (< (Math/abs (- ev-honest ev-malice)) 20.0)
+          (str "at breakeven, EVs should be ~equal: honest=" ev-honest " malice=" ev-malice)))))
+
+(deftest below-breakeven-malice-dominates
+  (testing "below breakeven detection, full-fraud malice EV > honest EV"
+    (let [escrow 10000 fee-bps 150 bond-bps 700 slash-mult 2.5
+          fee       (econ/calculate-fee escrow fee-bps)
+          bond      (+ (econ/calculate-bond escrow bond-bps)
+                       (econ/calculate-bond escrow 1000))
+          bond-loss (* bond slash-mult)
+          detect    0.10  ; baseline: 10%, well below 70% breakeven
+          fsr       (econ/worst-case-fraud-success-rate detect)
+          max-upside (- escrow fee)
+          ev-honest (econ/honest-expected-value fee 0.05)
+          ev-malice (econ/malicious-expected-value fee bond-loss detect max-upside fsr)]
+      (is (> ev-malice ev-honest)
+          (str "at 10% detection, malice should dominate: honest=" ev-honest " malice=" ev-malice)))))

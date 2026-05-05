@@ -96,11 +96,38 @@
 
 (defn strategy-dominance-score
   "How much better is honest than malicious?
-   
+
    score = ev_honest / ev_malicious
-   
+
    score > 2.0 means honest is 2× better."
   [ev-honest ev-malicious]
   (if (zero? ev-malicious)
     (if (zero? ev-honest) 1.0 Double/POSITIVE_INFINITY)
     (/ ev-honest ev-malicious)))
+
+(defn worst-case-fraud-success-rate
+  "Worst-case fraud-success-rate: every undetected malicious resolver diverts funds.
+   fraud-success-rate = 1 - detection-prob.
+
+   This is the correct default for economic security analysis. It means:
+   'if not caught, the malicious resolver captures the escrow.'
+   Setting fraud-success-rate=0.0 (the original default) only models protocol income."
+  [detection-prob]
+  (max 0.0 (- 1.0 detection-prob)))
+
+(defn breakeven-detection
+  "Minimum detection probability for honest EV to exceed full malicious EV.
+
+   Derivation (worst-case model: fraud-success-rate = 1 - detection-prob):
+     malice-EV = fee + (1-d) × (escrow - fee) - d × bond-loss
+     honest-EV ≈ fee
+
+   Setting honest-EV = malice-EV and solving for d:
+     d = (escrow - fee) / (bond-loss + escrow - fee)
+
+   If current detection-prob < breakeven-detection, bond deterrence alone is insufficient.
+   The protocol's economic security relies on the state machine constraining
+   fraud-success-rate (via invariants: funds-conservation, no-double-release)."
+  [escrow-wei fee-wei bond-loss]
+  (let [escrow-net (- escrow-wei fee-wei)]
+    (double (/ escrow-net (+ bond-loss escrow-net)))))

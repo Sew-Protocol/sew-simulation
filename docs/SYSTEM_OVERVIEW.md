@@ -60,7 +60,7 @@ That requires the deterministic engine.
 ## How the two engines relate
 
 The engines share the same fee, bond, and slashing formulas — verified by a suite of
-cross-engine calibration tests (762 assertions). When the Monte Carlo model says
+cross-engine calibration tests (769 assertions). When the Monte Carlo model says
 "malicious profit is negative on average," it is using identical arithmetic to the
 contract model. A calibration failure would surface as a test failure before it reached
 any results.
@@ -109,14 +109,28 @@ suite provide consistent directional signals across thousands of parameter combi
 
 The Monte Carlo model has been updated with four accuracy improvements:
 
-1. **Fraud upside is now modellable.** The original model only counted the resolver's
+1. **Fraud upside is now modellable — and the corrected model produces the most
+   important finding in the repository.** The original model only counted the resolver's
    *protocol income* (fee minus bond loss). It ignored the fact that a malicious
-   resolver who is not caught can redirect the full escrow to a colluding party — an
-   upside roughly 665× larger than the fee for a typical transaction. A new parameter
-   (`fraud-success-rate`, default 0.0) allows this to be included explicitly. At the
-   default, all existing results are unchanged. At `0.22` (calibrated to the
-   adversarial suite's 22% attack-success rate), the model becomes significantly more
-   honest about fraud attractiveness.
+   resolver who is not caught can redirect the full escrow — an upside roughly 665×
+   larger than the fee. With this correction, two results follow immediately:
+
+   - **At calibrated fraud-success-rate (0.22)**, malice EV (201) already exceeds
+     honest EV (142). The original "honest dominates" result was pointing in the wrong
+     direction.
+
+   - **The breakeven detection rate is 70%.** To deter fraud through bond-and-detection
+     alone (ignoring the state machine), detection probability must be ≥ 70%.
+     Current baseline: 10%. Required bond at current detection: **21× current levels**
+     (88,650 wei per 10,000 wei escrow; current: 4,250).
+
+   **What this means for the protocol:** The state machine is not just good design —
+   it is *load-bearing* for economic security. The invariant suite constrains the
+   effective fraud-success-rate to near zero for all 41 modelled attack vectors.
+   Bond deterrence alone is insufficient at current parameter levels.
+
+   The new `fraud-success-rate` parameter (default 0.0) allows this to be set
+   explicitly. At the default, all existing results are unchanged.
 
 2. **Slash proceeds are now tracked.** Every slashing event now records how the
    penalty is split between the insurance pool, the protocol, and the burn address.
@@ -150,12 +164,18 @@ primary output.
 incentives, not exact magnitudes. A ratio of 3× means honest play earns three times
 as much *in protocol income*, not that fraud is three times less valuable overall.
 
-**Do not read MC results as proof that fraud is economically unattractive.** Until
-`fraud-success-rate` is set above zero, the model underestimates the total gain from
-misdirecting escrow. The correct claim from current MC output is:
+**Do not read MC results as proof that fraud is economically unattractive.** The
+corrected fraud model (fraud-success-rate = 0.22, calibrated from the adversarial
+suite) shows malice EV (201) > honest EV (142) at baseline parameters. The original
+"honest dominates" finding applied only to protocol income. The correct claims are:
 
 > "The protocol's fee and slashing parameters make honest participation
 > economically superior to malicious participation *in terms of protocol income*."
+
+> "At current bond and detection parameters, deterrence of escrow-diversion requires
+> detection probability ≥ 70% (current: 10%), or bond-at-stake 21× current levels.
+> The invariant suite constrains effective fraud-success-rate to near zero for the
+> 41 modelled attack vectors — making it the load-bearing mechanism for economic security."
 
 The correct claim about fraud's *total* unattractiveness comes from the deterministic
 engine's funds-conservation and no-double-release invariants — not the MC output.
@@ -225,16 +245,19 @@ would invalidate the headline claim if violated.
 
 ## What comes next
 
-### Immediate gap: the fraud economic model
+### Immediate gap: the multi-party fraud model
 
-The most important open problem is completing the economic argument about fraud.
-Currently the system proves:
-- The state machine does not permit double-release or fund diversion *in the modelled scenarios*
-- Protocol income from honest play exceeds protocol income from malice
+The most important open problem is extending the economic argument to cover the full
+payoff matrix. The breakeven analysis (implemented in mc-b1 through mc-b4) establishes
+the required conditions for bond-and-detection deterrence to work. The current finding:
 
-It does **not** yet prove:
-- That the total expected gain from fraud (including escrow redirection) is negative
-- How that gain varies as a function of detection probability and bond size
+- **At baseline params:** detection must be ≥ 70% OR bond must be 21× current to deter
+  fraud through incentives alone
+- **The state machine is load-bearing:** if the invariant suite constrains fraud-success-rate
+  to near zero (which it does for the 41 modelled vectors), the bond-and-detection gap
+  does not matter
+- **The open question:** what is the effective fraud-success-rate for *unmodelled* attack
+  vectors? The invariant suite cannot answer this for attacks it has not yet been shown
 
 Closing this requires:
 1. Calibrating `fraud-success-rate` empirically from on-chain dispute data or a richer
@@ -244,7 +267,7 @@ Closing this requires:
 3. Running the combined model across the fee/bond/detection-probability parameter space
 
 This is the single change that would most materially strengthen the economic security
-argument.
+argument — and the breakeven calculation now provides the target numbers.
 
 ### Near-term: scenario coverage expansion
 
@@ -330,4 +353,4 @@ evidence pack and research note are in `docs/evidence/` and `docs/RESEARCH_NOTE_
 
 ---
 
-*Document reflects repository state as of commit `346c13f` (branch `monte-carlo-sync`).*
+*Document reflects repository state as of branch `monte-carlo-sync` (post mc-b series).*

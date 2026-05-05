@@ -25,6 +25,13 @@
  :appeal-probability-if-wrong 0.40
  :slashing-detection-probability 0.10
 
+ ;; Fraud model (MC-1/MC-B)
+ ;; fraud-success-rate = probability that an undetected malicious resolver
+ ;; successfully diverts the escrow to a colluding party.
+ ;; Worst-case = (1 - detection-prob) = 0.90 at baseline detection.
+ ;; Set to 0.0 to reproduce the original protocol-income-only model.
+ :fraud-success-rate 0.90   ; worst-case: every undetected fraud succeeds
+
  ;; Simulation config
  :n-trials 1000
  :n-seeds 10                    ; 10 independent runs with different seeds
