@@ -279,7 +279,7 @@
 (defn run-phase-p-lite
   "Run Phase P Lite falsification test."
   [params]
-  (let [trials-per-combo (get params :num-trials 1)
+  (let [trials-per-combo (get params :num-trials 30)
         sweep-results (run-phase-p-lite-sweep params trials-per-combo)
         report (generate-full-report sweep-results params)]
     
