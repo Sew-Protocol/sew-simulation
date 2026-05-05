@@ -32,6 +32,24 @@ Breakeven formula: `d* = (escrow - fee) / (bond-loss + escrow - fee)` = **70%**
 These numbers are computed by `stochastic/economics.clj:breakeven-detection` and verified
 by `test/resolver_sim/stochastic/calibration_test.clj` (156 assertions).
 
+### Governance capacity finding (Phase AA)
+> **The 20% attacker win-rate hypothesis is falsified under capacity-constrained governance. A learning attacker with selective enforcement capability reaches 33.6% win rate. Reviewed-share ≥ 50% is required to restore the bound.**
+
+Phase AA results across 5 scenarios (`data/params/phase-aa-governance.edn`):
+
+| Scenario | Attacker win rate | Status |
+|---|---|---|
+| High capacity, naive attacker | < 20% | ✅ SAFE |
+| Limited capacity (cap=3), learning attacker | 33.6% | ❌ VULNERABLE |
+| Biased governance (focus on high-value disputes) | > 20% | ❌ VULNERABLE |
+| Low-value flooding | > 20% | ❌ VULNERABLE |
+| Adversarial threshold search | > 20% | ❌ VULNERABLE |
+
+This extends the deterministic `governance-decay-exploit` finding from a single trace to
+a statistical result: the governance manipulation failure class holds at scale.
+
+Run: `clojure -M:run -- -p data/params/phase-aa-governance.edn --phase-aa`
+
 ---
 
 ## 2) Scenario pairs to reproduce — three failure classes
@@ -173,6 +191,8 @@ Use this checklist to challenge the claim quickly.
 - [ ] If deterministic invariant runs fail for the same corpus, the "protocol integrity under tested assumptions" claim is falsified.
 - [ ] If `breakeven-detection` at baseline params returns < 0.69, the "70% detection needed" economic claim is falsified. Run: `clojure -M:test -e "(require '[resolver-sim.stochastic.calibration-test])(clojure.test/run-tests 'resolver-sim.stochastic.calibration-test)"`
 - [ ] If `malicious-expected-value` with fsr=0.22 returns < `honest-expected-value` at baseline, the "malice dominates at calibrated fraud rate" claim is falsified.
+- [ ] If Phase AA scenario 2 (limited capacity) returns attacker win rate ≤ 20%, the "capacity-constrained governance is vulnerable" claim is falsified. Run: `./scripts/test.sh monte-carlo` and check the AA summary.
+- [ ] If Phase AA reports that reviewed-share < 50% is sufficient to hold the 20% bound, the "50% reviewed-share required" claim is falsified.
 
 ### D. Where tests live
 - replay + protocol behavior:

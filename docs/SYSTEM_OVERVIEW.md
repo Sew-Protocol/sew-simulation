@@ -144,6 +144,32 @@ The Monte Carlo model has been updated with four accuracy improvements:
    hard-coded mathematical formula for collusion bonuses. This is now a calibratable
    input, with the original formula as the fallback.
 
+5. **Governance capacity boundary — falsified hypothesis, actionable policy numbers.**
+   Phase AA ("governance as adversary") tests whether attackers can exceed a 20% win rate
+   via selective enforcement gaming. Results across 5 scenarios:
+
+   | Scenario | Result |
+   |---|---|
+   | High capacity, naive attacker | ✅ SAFE |
+   | Limited capacity (cap=3), learning attacker | ❌ VULNERABLE |
+   | Biased governance (focus on high-value disputes) | ❌ VULNERABLE |
+   | Low-value flooding | ❌ VULNERABLE |
+   | Adversarial threshold search | ❌ VULNERABLE |
+
+   **Key numbers:** Max attacker win rate 33.6% (threshold 20%). Reviewed-share ≥ 50%
+   required to hold the hypothesis. Governance capacity floor: 3 reviews/epoch.
+
+   **What this means:** The 20% bound holds only when governance has unconstrained
+   capacity and the attacker is naive — an unrealistic baseline. Under capacity
+   constraints, a learning attacker exceeds the threshold via selective non-enforcement.
+   This is a *governance mechanism design gap*, not an implementation bug.
+   The deterministic `governance-decay-exploit` trace shows the same vulnerability class
+   in a single trace; Phase AA shows it holds statistically at scale.
+
+   **Policy implication:** Reviewed-share ≥ 50% is a necessary condition for the 20%
+   bound. If governance capacity cannot guarantee this, a stronger bound or alternative
+   enforcement mechanism is required before mainnet.
+
 ---
 
 ## How to interpret results today
@@ -269,7 +295,29 @@ Closing this requires:
 This is the single change that would most materially strengthen the economic security
 argument — and the breakeven calculation now provides the target numbers.
 
-### Near-term: scenario coverage expansion
+### Governance capacity design
+
+Phase AA establishes a concrete design requirement: the governance mechanism must either
+guarantee reviewed-share ≥ 50%, or the 20% attacker win-rate bound must be replaced with
+a weaker one that is defensible under realistic capacity. Three concrete options:
+
+1. **Minimum reviewed-share protocol rule.** Require that every governance epoch reviews
+   at least 50% of disputes before threshold votes are executed. Failing epochs trigger
+   an automatic capacity extension. This is implementable without changing the core
+   state machine.
+
+2. **Commit-reveal threshold submission.** Attackers exploit the visibility of which
+   disputes are reviewed to selectively target unreviewed ones. Hiding review status until
+   the epoch closes removes the information advantage. Adds one round-trip to governance.
+
+3. **Random audit with deterrence bond.** Instead of guaranteeing review coverage,
+   randomly audit a fraction of disputes after the fact. Resolvers who submitted
+   governance-gaming requests face retroactive slashing. Effective deterrence at lower
+   governance cost, but requires a slashing mechanism for governance actors.
+
+The Phase AA model can be used to evaluate each of these options before implementation.
+
+
 
 The 41 deterministic scenarios cover the main lifecycle paths well. The gaps are:
 
