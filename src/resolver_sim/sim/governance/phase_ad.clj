@@ -216,7 +216,7 @@
         :passed?      (some? min-viable)
         :results      (vec grid-results)
         :summary      {:viable-count (count viable) :total-count (count grid-results)
-                       :min-viable min-viable}})))
+                       :min-viable min-viable}}))))
 
 (defn run-phase-ad-sweep
   "Sweep governance bandwidth floor configurations against attacker strategies."
@@ -277,4 +277,4 @@
         :hypothesis   "Mandatory floor reviews keep attacker win rate < 20%"
         :passed?      hypothesis-holds?
         :results      results
-        :summary      {:class-a class-a :class-c class-c :max-win-rate max-win-rate}})))))
+        :summary      {:class-a class-a :class-c class-c :max-win-rate max-win-rate}})))) 

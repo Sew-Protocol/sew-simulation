@@ -56,14 +56,35 @@
 
 ;; ============ Engine Adapters ============
 
+(defn biased-review-probability
+  "Governance attention probability, with optional bias override per value tier.
+
+   bias-high: review probability for disputes valued ≥ 100,000 (default 0.95)
+   bias-med:  review probability for disputes valued ≥ 10,000  (default 0.60)
+   bias-low:  review probability for disputes below 10,000     (default 0.20)"
+  [dispute-value bias]
+  (cond
+    (>= dispute-value 100000) (get bias :bias-high 0.95)
+    (>= dispute-value 10000)  (get bias :bias-med  0.60)
+    :else                     (get bias :bias-low  0.20)))
+
+(defn select-reviewed-disputes-biased
+  "Like select-reviewed-disputes but applies the bias map to review probabilities."
+  [disputes capacity bias d-rng]
+  (let [candidates (filter (fn [d] (> (rng/next-double d-rng)
+                                      (- 1.0 (biased-review-probability (:value d) bias))))
+                           disputes)
+        sorted (sort-by :value > candidates)]
+    (take capacity sorted)))
+
 (defn simulate-epoch-aa
   [epoch state params d-rng]
-  (let [{:keys [capacity learning? bias-overrides]} params
+  (let [{:keys [capacity learning? bias]} params
         history  (:history state [])
         attacker-strategy (if (and learning? (> epoch 20))
                                   (infer-grey-zone history)
                                   :random)
-        
+
         ;; Generate disputes for this epoch
         epoch-disputes (for [i (range 5)]
                          (let [val (case attacker-strategy
@@ -72,8 +93,10 @@
                                      :high (+ 100000 (rng/next-int d-rng 100000))
                                      :random (+ 1000 (rng/next-int d-rng 150000)))]
                            {:id (str epoch "-" i) :value val}))
-        
-        reviewed (select-reviewed-disputes epoch-disputes capacity d-rng)
+
+        reviewed (if bias
+                   (select-reviewed-disputes-biased epoch-disputes capacity bias d-rng)
+                   (select-reviewed-disputes epoch-disputes capacity d-rng))
         reviewed-ids (set (map :id reviewed))
         
         outcomes (for [d epoch-disputes]
@@ -143,7 +166,7 @@
     :epochs 50
     :seed seed
     :params {:capacity 5 :learning? false}}
-   
+
    {:label "TEST 2: Limited Capacity (Cap=3, learning attacker)"
     :initial-state {:history [] :total-wins 0 :total-attempts 0}
     :update-fn simulate-epoch-aa
@@ -151,24 +174,28 @@
     :epochs 50
     :seed (+ seed 1)
     :params {:capacity 3 :learning? true}}
-   
-   {:label "TEST 3: Biased Governance (Focus on >$50K)"
+
+   {:label "TEST 3: Biased Governance (Focus on high-value; low-value bias-low=0.05)"
     :initial-state {:history [] :total-wins 0 :total-attempts 0}
     :update-fn simulate-epoch-aa
     :summary-fn summarize-aa-history
     :epochs 50
     :seed (+ seed 2)
-    :params {:capacity 3 :bias {:bias :high} :learning? true}}
-   
-   {:label "TEST 4: Low-Value Flooding"
+    ;; Governance reviews high-value disputes almost always, low-value almost never.
+    ;; Attacker learns to stay in the low-value blind spot.
+    :params {:capacity 3
+             :bias {:bias-high 0.95 :bias-med 0.30 :bias-low 0.05}
+             :learning? true}}
+
+   {:label "TEST 4: Low-Value Flooding (cap=2, learning attacker)"
     :initial-state {:history [] :total-wins 0 :total-attempts 0}
     :update-fn simulate-epoch-aa
     :summary-fn summarize-aa-history
     :epochs 50
     :seed (+ seed 3)
     :params {:capacity 2 :learning? true}}
-   
-   {:label "TEST 5: Adversarial Threshold Search"
+
+   {:label "TEST 5: Extreme Capacity Constraint (cap=1, learning attacker)"
     :initial-state {:history [] :total-wins 0 :total-attempts 0}
     :update-fn simulate-epoch-aa
     :summary-fn summarize-aa-history

@@ -225,11 +225,12 @@ run_monte_carlo() {
   #    A replay invariant violation that MC doesn't catch = the MC model is incomplete.
   # ──────────────────────────────────────────────────────────────────────────
 
-  echo "Running Monte Carlo representative sweep (3 domains)..."
+  echo "Running Monte Carlo representative sweep (4 domains)..."
   echo ""
   echo "  Phase O  — Economic:    market exit cascade (honest vs malice profitability)"
   echo "  Phase P  — Adversarial: appeals falsification (difficulty/evidence/herding)"
   echo "  Phase AA — Governance:  governance-as-adversary (selective enforcement gaming)"
+  echo "  Phase AD — Governance:  bandwidth floor safeguard (AA remediation)"
   echo ""
 
   local mc_fail=0
@@ -246,8 +247,12 @@ run_monte_carlo() {
   clojure -M:run -- -A -p data/params/phase-aa-governance.edn || mc_fail=$((mc_fail + 1))
   echo ""
 
+  echo "── Phase AD: Governance Bandwidth Floor (AA safeguard) ───────────────────"
+  clojure -M:run -- -D -p data/params/phase-ad-governance-floor.edn || mc_fail=$((mc_fail + 1))
+  echo ""
+
   if [ "$mc_fail" -eq 0 ]; then
-    echo "Monte Carlo sweep: all 3 phases PASSED"
+    echo "Monte Carlo sweep: all 4 phases PASSED"
     echo "  (Calibrated to same fee/bond formula as the 41-scenario invariant suite)"
   else
     echo "Monte Carlo sweep: $mc_fail phase(s) FAILED"
