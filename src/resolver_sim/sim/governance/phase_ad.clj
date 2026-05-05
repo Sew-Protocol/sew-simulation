@@ -257,18 +257,19 @@
                      base-win-prob reviewed-win-prob))
     (println "")
 
-    (let [scenario (fn [label cap floor strategy seed-offset]
+    (let [scenario (fn [label epochs cap floor strategy seed-offset]
                      (run-governance-floor-scenario
-                      label n-epochs disputes-per-epoch cap floor floor-threshold
+                      label epochs disputes-per-epoch cap floor floor-threshold
                       strategy (+ seed seed-offset)
                       :base-win-prob base-win-prob
                       :reviewed-win-prob reviewed-win-prob))
           results
-          [(scenario "TEST 1: No floor, cap=3, random attacker"              3 0 :random 0)
-           (scenario "TEST 2: No floor, cap=3, low-value flooding attacker"  3 0 :low    1)
-           (scenario "TEST 3: Floor=1, cap=3, low-value flooding attacker"   3 1 :low    2)
-           (scenario "TEST 4: Floor=2, cap=3, low-value flooding attacker"   3 2 :low    3)
-           (scenario "TEST 5: Floor=1, cap=2 (constrained), mixed attacker"  2 1 :random 4)]
+          [(scenario "TEST 1: No floor, cap=3, random attacker"                      n-epochs 3 0 :random 0)
+           (scenario "TEST 2: No floor, cap=3, low-value flooding attacker"          n-epochs 3 0 :low    1)
+           (scenario "TEST 3: Floor=1, cap=3, low-value flooding attacker"           n-epochs 3 1 :low    2)
+           (scenario "TEST 4: Floor=2, cap=3, low-value flooding attacker"           n-epochs 3 2 :low    3)
+           ;; 200 epochs: borderline configuration — extra samples for stable reading
+           (scenario "TEST 5: Floor=1, cap=2 (constrained), mixed attacker"         200      2 1 :random 4)]
 
           class-a           (count (filter #(= "A" (:class %)) results))
           class-c           (count (filter #(= "C" (:class %)) results))
