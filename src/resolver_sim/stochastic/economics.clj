@@ -44,13 +44,21 @@
 
 (defn malicious-expected-value
   "Expected value for malicious resolver.
-   
-   EV = fee - slashing_loss * detection_probability
-   
-   Malicious always tries to exploit, but may be caught."
-  [fee-wei slashing-loss detection-prob]
-  (let [net-profit (- fee-wei (* slashing-loss detection-prob))]
-    net-profit))
+
+   EV = fee + fraud-upside * fraud-success-rate - slashing-loss * detection-probability
+
+   fraud-upside is the escrow-diversion gain: escrow × (1 − fee-rate).
+   When fraud-success-rate=0.0 (the default), this reduces to the original
+   EV = fee - slashing-loss * detection-probability, keeping backward compatibility.
+
+   IMPORTANT: This is protocol income only. It does not model the full economic
+   gain to a colluding *party* who receives the misdirected escrow."
+  ([fee-wei slashing-loss detection-prob]
+   (malicious-expected-value fee-wei slashing-loss detection-prob 0 0.0))
+  ([fee-wei slashing-loss detection-prob fraud-upside fraud-success-rate]
+   (let [expected-fraud-gain (* fraud-upside fraud-success-rate)
+         net-profit (+ fee-wei expected-fraud-gain (- (* slashing-loss detection-prob)))]
+     net-profit)))
 
 (defn lazy-expected-value
   "Expected value for lazy resolver.
@@ -65,21 +73,26 @@
     (max 0 ev)))
 
 (defn collusive-expected-value
-  "Expected value for collusive resolver (simplified).
-   
-   Assumes collusive resolvers coordinate to extract maximum profit.
-   EV depends on coalition size + network enforcement.
-   
-   Simplified: EV = fee * coordination_bonus - slashing_loss * higher_detection"
-  [fee-wei coalition-size detection-prob-increased]
-  (let [; Larger coalition = lower per-member bonus but safer
-        coordination-bonus (/ 1.2 (Math/log (+ 2 coalition-size)))
-        ; More coordination = higher chance of detection
-        effective-detection (min 0.5 detection-prob-increased)
-        
-        ev (- (* fee-wei coordination-bonus)
+  "Expected value for collusive resolver.
+
+   EV = fee * colluder-gain-rate - fee * effective-detection
+
+   colluder-gain-rate drives extra profit from coordinated wrong verdicts.
+   Default 1.2 reproduces the original model's coordination bonus at coalition=1.
+   Calibrated value from ring-attack trace: use ~1.15 (Phase AI escalation-trap).
+
+   To use the original hard-coded formula: omit colluder-gain-rate (or pass nil).
+   To calibrate from trace data: pass the measured gain multiplier directly."
+  ([fee-wei coalition-size detection-prob-increased]
+   (collusive-expected-value fee-wei coalition-size detection-prob-increased nil))
+  ([fee-wei coalition-size detection-prob-increased colluder-gain-rate]
+   (let [; colluder-gain-rate nil → fall back to the original log-based formula
+         gain-rate (or colluder-gain-rate
+                       (/ 1.2 (Math/log (+ 2 coalition-size))))
+         effective-detection (min 0.5 detection-prob-increased)
+         ev (- (* fee-wei gain-rate)
                (* fee-wei effective-detection))]
-    (max 0 ev)))
+     (max 0 ev))))
 
 (defn strategy-dominance-score
   "How much better is honest than malicious?

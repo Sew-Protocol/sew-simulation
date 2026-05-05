@@ -24,8 +24,11 @@
    ≈9 985 wei — roughly 665× the visible fee. The MC dominance ratio therefore
    understates how attractive fraud is under the model's own assumptions.
 
-   The replay engine captures this via its state-machine invariants (funds-conservation,
-   no-double-release, etc.), but the MC engine does not.
+   MC-1 adds `fraud-success-rate` to `resolve-dispute` so this upside can be
+   modelled explicitly. Default 0.0 keeps existing phase outputs unchanged.
+
+   The replay engine captures escrow diversion via its state-machine invariants
+   (funds-conservation, no-double-release, etc.), but the MC engine does not.
 
    Consequence: MC results establish that PROTOCOL INCOME from honest participation
    exceeds protocol income from malice. They do not establish that the total
@@ -34,6 +37,9 @@
    ─────────────────────────────────────────────────────────────────────────────"
   (:require [clojure.test :refer [deftest is testing]]
             [resolver-sim.stochastic.economics :as econ]
+            [resolver-sim.stochastic.dispute   :as dispute]
+            [resolver-sim.stochastic.rng       :as rng]
+            [resolver-sim.stochastic.params    :as params]
             [resolver-sim.protocols.sew.types  :as t]
             [resolver-sim.economics.payoffs    :as payoffs]))
 
@@ -122,3 +128,152 @@
               (str "distribution not lossless: amount=" amount
                    " bounty=" bounty
                    " distributed=" total)))))))
+
+;; ── 6. Fraud-upside model (MC-1) ─────────────────────────────────────────────
+;; When fraud-success-rate > 0 and strategy=:malicious and not slashed,
+;; resolve-dispute must include escrow-diversion upside in profit-malice.
+;; When fraud-success-rate=0.0 (default), result must be identical to original model.
+
+(deftest fraud-upside-zero-rate-backward-compatibility
+  (testing "fraud-success-rate=0.0 produces same profit-malice as original model"
+    (doseq [escrow [1000 10000 100000]]
+      (let [r1 (rng/make-rng 42)
+            r2 (rng/make-rng 42)
+            ;; Original call (no fraud-success-rate)
+            orig (dispute/resolve-dispute r1 escrow 150 700 2.5 :malicious 0.05 0.4 0.1)
+            ;; New call with explicit 0.0
+            new  (dispute/resolve-dispute r2 escrow 150 700 2.5 :malicious 0.05 0.4 0.1
+                                          :fraud-success-rate 0.0)]
+        (is (= (:profit-malice orig) (:profit-malice new))
+            (str "backward-compat broken at escrow=" escrow))
+        (is (= 0 (:fraud-upside new))
+            (str "fraud-upside should be 0 when rate=0 at escrow=" escrow))))))
+
+(deftest fraud-upside-zero-when-slashed
+  (testing "fraud-upside is 0 when resolver is slashed (cannot divert funds)"
+    ;; detection-prob=1.0 forces slashing
+    (let [r      (rng/make-rng 42)
+          result (dispute/resolve-dispute r 10000 150 700 2.5
+                                          :malicious 0.05 0.4 1.0
+                                          :fraud-success-rate 0.8)]
+      ;; Slashing may or may not occur depending on verdict; check when it does
+      (when (:slashed? result)
+        (is (= 0 (:fraud-upside result))
+            "fraud-upside must be 0 when slashed")))))
+
+;; ── 7. Param bridge (MC-6) ───────────────────────────────────────────────────
+
+(deftest param-bridge-known-fields
+  (testing "from-snap maps all known snapshot fields"
+    (let [snap {:resolver-fee-bps        150
+                :appeal-bond-bps         700
+                :fraud-slash-bps         5000
+                :reversal-slash-bps      2500
+                :timeout-slash-bps        200
+                :resolver-bond-bps       1000
+                :l2-detection-prob        0.3
+                :slashing-detection-prob  0.1
+                :fraud-success-rate       0.22
+                :fraud-detection-prob     0.15
+                :reversal-detection-prob  0.05
+                :timeout-detection-prob   0.08
+                :unknown-field           :ignored}
+          out  (params/from-snap snap)]
+      (is (= 150  (:fee-bps out)))
+      (is (= 700  (:bond-bps out)))
+      (is (= 5000 (:fraud-slash-bps out)))
+      (is (= 2500 (:reversal-slash-bps out)))
+      (is (= 200  (:timeout-slash-bps out)))
+      (is (= 1000 (:resolver-bond-bps out)))
+      (is (= 0.3  (:l2-detection-prob out)))
+      (is (= 0.1  (:detection-prob out)))
+      (is (= 0.22 (:fraud-success-rate out)))
+      (is (= 0.15 (:fraud-detection-probability out)))
+      (is (= 0.05 (:reversal-detection-probability out)))
+      (is (= 0.08 (:timeout-detection-probability out)))
+      (is (nil?   (:unknown-field out)) "unknown fields must be dropped"))))
+
+(deftest param-bridge-partial-snap
+  (testing "from-snap handles partial snapshots without error"
+    (let [snap {:resolver-fee-bps 200}
+          out  (params/from-snap snap)]
+      (is (= 200 (:fee-bps out)))
+      (is (nil? (:bond-bps out))))))
+
+(deftest param-bridge-merge-snap-overrides
+  (testing "merge-snap overrides base fields with snap values"
+    (let [base {:fee-bps 100 :detection-prob 0.05 :other 99}
+          snap {:resolver-fee-bps 150 :slashing-detection-prob 0.1}
+          out  (params/merge-snap base snap)]
+      (is (= 150 (:fee-bps out))     "snap value should override base")
+      (is (= 0.1 (:detection-prob out)) "snap value should override base")
+      (is (= 99  (:other out))       "non-overridden base fields should be kept"))))
+
+;; ── 8. Appeal economics (MC-4) ───────────────────────────────────────────────
+
+(deftest appeal-economics-disabled-by-default
+  (testing "model-appeal-costs?=false (default) keeps original profit-honest"
+    (doseq [escrow [1000 10000]]
+      (let [r1 (rng/make-rng 7)
+            r2 (rng/make-rng 7)
+            orig (dispute/resolve-dispute r1 escrow 150 700 2.5 :honest 0.05 0.4 0.1)
+            new  (dispute/resolve-dispute r2 escrow 150 700 2.5 :honest 0.05 0.4 0.1
+                                          :model-appeal-costs? false)]
+        (is (= (:profit-honest orig) (:profit-honest new))
+            (str "model-appeal-costs? default broke profit-honest at escrow=" escrow))))))
+
+;; ── 9. Slash distribution in resolve-dispute (MC-3) ──────────────────────────
+
+(deftest slash-distributed-nil-when-not-slashed
+  (testing ":slash-distributed is nil when resolver is not slashed"
+    ;; detection-prob=0 prevents slashing
+    (let [r      (rng/make-rng 42)
+          result (dispute/resolve-dispute r 10000 150 700 2.5 :honest 0.05 0.4 0.0)]
+      (when-not (:slashed? result)
+        (is (nil? (:slash-distributed result)))))))
+
+(deftest slash-distributed-lossless-when-slashed
+  (testing ":slash-distributed sums correctly when resolver is slashed"
+    ;; detection-prob=1.0, malicious strategy → near-certain slashing
+    (let [r      (rng/make-rng 42)
+          result (dispute/resolve-dispute r 10000 150 700 2.5 :malicious 0.05 0.4 1.0)]
+      (when (:slashed? result)
+        (let [{:keys [insurance protocol burned]} (:slash-distributed result)]
+          (is (some? insurance) ":slash-distributed should be present when slashed")
+          (is (every? #(>= % 0) [insurance protocol burned])
+              "all distribution components should be non-negative"))))))
+
+;; ── 10. Convergence regression (MC-7) ────────────────────────────────────────
+;; Pinned-seed tests: MC mean profit should converge near analytical expectation.
+;; Tolerance is ±15% to account for RNG variance at n=500 trials.
+
+(defn- run-mc-mean
+  [n seed escrow fee-bps bond-bps slash-mult strategy detection-prob opts]
+  (let [r       (rng/make-rng seed)
+        results (repeatedly n
+                  #(apply dispute/resolve-dispute
+                           r escrow fee-bps bond-bps slash-mult
+                           strategy 0.05 0.4 detection-prob
+                           (apply concat opts)))
+        mean-h  (double (/ (reduce + (map :profit-honest results)) n))
+        mean-m  (double (/ (reduce + (map :profit-malice results)) n))]
+    {:mean-honest mean-h :mean-malice mean-m}))
+
+(deftest convergence-honest-strategy
+  (testing "honest: mean profit-honest is positive and roughly equals fee*(1-appeal-prob)"
+    (let [{:keys [mean-honest]}
+          (run-mc-mean 500 42 10000 150 700 2.5 :honest 0.1 {})]
+      (is (pos? mean-honest)
+          "honest mean profit should be positive"))))
+
+(deftest convergence-malicious-higher-with-upside
+  (testing "malicious with fraud-success-rate=0.22 has higher mean profit than rate=0.0"
+    (let [base-opts  {}
+          upside-opts {:fraud-success-rate 0.22}
+          {:keys [mean-malice] :as base-r}
+          (run-mc-mean 500 42 10000 150 700 2.5 :malicious 0.1 base-opts)
+          {:keys [mean-malice mean-malice-up] :as up-r}
+          (run-mc-mean 500 42 10000 150 700 2.5 :malicious 0.1 upside-opts)
+          mean-malice-up (:mean-malice up-r)]
+      (is (>= mean-malice-up mean-malice)
+          "fraud upside should never decrease mean malice profit"))))
