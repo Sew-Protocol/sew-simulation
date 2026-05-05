@@ -243,28 +243,55 @@
 (defn get-transfer
   "Retrieve EscrowTransfer map for workflow-id, or nil."
   [world workflow-id]
-  (get-in world [:escrow-transfers workflow-id]))
+  (let [m (:escrow-transfers world)
+        k workflow-id
+        ks (cond-> [k]
+             (string? k) (conj (try (parse-long k) (catch Exception _ nil)))
+             (keyword? k) (conj (name k))
+             (number? k) (conj (str k)))
+        keys* (remove nil? ks)]
+    (some #(get m %) keys*)))
 
 (defn get-settings
   "Retrieve EscrowSettings map for workflow-id, or nil."
   [world workflow-id]
-  (get-in world [:escrow-settings workflow-id]))
+  (let [m (:escrow-settings world)
+        k workflow-id
+        ks (cond-> [k]
+             (string? k) (conj (try (parse-long k) (catch Exception _ nil)))
+             (keyword? k) (conj (name k))
+             (number? k) (conj (str k)))
+        keys* (remove nil? ks)]
+    (some #(get m %) keys*)))
 
 (defn get-snapshot
   "Retrieve ModuleSnapshot for workflow-id, or nil."
   [world workflow-id]
-  (get-in world [:module-snapshots workflow-id]))
+  (let [m (:module-snapshots world)
+        k workflow-id
+        ks (cond-> [k]
+             (string? k) (conj (try (parse-long k) (catch Exception _ nil)))
+             (keyword? k) (conj (name k))
+             (number? k) (conj (str k)))
+        keys* (remove nil? ks)]
+    (some #(get m %) keys*)))
 
 (defn get-pending
   "Retrieve PendingSettlement for workflow-id (defaults to empty)."
   [world workflow-id]
-  (get-in world [:pending-settlements workflow-id] empty-pending-settlement))
+  (let [m (:pending-settlements world)
+        k workflow-id
+        ks (cond-> [k]
+             (string? k) (conj (try (parse-long k) (catch Exception _ nil)))
+             (keyword? k) (conj (name k))
+             (number? k) (conj (str k)))
+        keys* (remove nil? ks)]
+    (or (some #(get m %) keys*) empty-pending-settlement)))
 
 (defn escrow-state
   "Current EscrowState keyword for workflow-id. Normalizes string IDs."
   [world workflow-id]
-  (let [wf-id (if (string? workflow-id) workflow-id (str workflow-id))]
-    (get-in world [:escrow-transfers wf-id :escrow-state])))
+  (:escrow-state (get-transfer world workflow-id)))
 
 (defn terminal-state?
   "True if the escrow is in an absorbing (terminal) state."
@@ -272,17 +299,22 @@
   (contains? #{:released :refunded :resolved} (escrow-state world workflow-id)))
 
 (defn valid-workflow-id?
-  "True if workflow-id exists in escrow-transfers. Normalizes to string IDs."
+  "True if workflow-id exists in escrow-transfers (accepts int/string/keyword IDs)."
   [world workflow-id]
-  (let [wf-id (str workflow-id)  ; Convert anything to string
-        wf-id (clojure.string/replace wf-id ":" "")]  ; Remove colon if keyword
-    (contains? (:escrow-transfers world) wf-id)))
+  (some? (get-transfer world workflow-id)))
 
 (defn dispute-level
   "Current escalation round for workflow-id (0 = initial, 1 = senior, 2 = external).
    Defaults to 0 when no escalation has occurred."
   [world workflow-id]
-  (get-in world [:dispute-levels workflow-id] 0))
+  (let [m (:dispute-levels world)
+        k workflow-id
+        ks (cond-> [k]
+             (string? k) (conj (try (parse-long k) (catch Exception _ nil)))
+             (keyword? k) (conj (name k))
+             (number? k) (conj (str k)))
+        keys* (remove nil? ks)]
+    (or (some #(get m %) keys*) 0)))
 
 (defn final-round?
   "True when the escrow is at the maximum escalation round (no further appeals)."

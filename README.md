@@ -77,9 +77,9 @@ This was reproduced and fixed using deterministic traces:
 
 ## Grant-ready impact metrics (for applications)
 
-- **47 deterministic trace fixtures** in `data/fixtures/traces/*.trace.json` covering
+- **44 deterministic trace fixtures** in `data/fixtures/traces/*.trace.json` covering
   happy-path, adversarial, regression, and equilibrium-proxy scenarios.
-- **10+ adversarial failure-mode scenarios (S24–S33)** implemented in the Python
+- **12 adversarial failure-mode scenarios (S24–S35)** implemented in the Python
   invariant suite (`python/invariant_suite.py`, with scenario modules in
   `python/eth_failure_modes.py` and `python/eth_failure_modes_2.py`).
 
