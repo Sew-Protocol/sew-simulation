@@ -81,13 +81,26 @@
                 (= resolver-addr (:dispute-resolver et))))
          (:escrow-transfers world))))
 
+(defn- wf-id
+  "Compatibility accessor for workflow identifiers.
+   Accepts either {:workflow-id n} (current) or {:id n} (legacy)."
+  [event]
+  (or (get-in event [:params :workflow-id])
+      (get-in event [:params :id])))
+
 ;; ---------------------------------------------------------------------------
 ;; Dispatch (The SEW State Machine Actions)
 ;; ---------------------------------------------------------------------------
 
 (defmulti apply-action
   "Dispatch on action name (string), not keyword."
-  (fn [_ctx _world event] (name (:action event))))  ; Convert keyword to string
+  (fn [_ctx _world event]
+    ;; Normalize incoming action names so both legacy snake_case and
+    ;; current kebab-case spellings dispatch to the same handlers.
+    ;; Examples: create_escrow -> create-escrow, :raise_dispute -> raise-dispute
+    (-> (:action event)
+        name
+        (clojure.string/replace "_" "-"))))
 
 (defmethod apply-action "create-escrow"
   [{:keys [agent-index snapshot]} world event]
@@ -119,7 +132,7 @@
       ar
       (if (:paused? world)
         (t/fail :protocol-paused)
-        (lc/raise-dispute world (get-in event [:params :workflow-id]) (:address ar))))))
+        (lc/raise-dispute world (wf-id event) (:address ar))))))
 
 (defmethod apply-action "execute-resolution"
   [{:keys [agent-index resolution-module-fn resolution-level-map]} world event]
@@ -139,18 +152,18 @@
                                      resolution-level-map
                                      #(t/dispute-level world %)))
                                   resolution-module-fn)]
-          (res/execute-resolution world workflow-id (:address ar)
+          (res/execute-resolution world (or workflow-id (wf-id event)) (:address ar)
                                   is-release resolution-hash effective-rm-fn))))))
 
 (defmethod apply-action "execute-pending-settlement"
   [_ctx world event]
   (if (:paused? world)
     (t/fail :protocol-paused)
-    (res/execute-pending-settlement world (get-in event [:params :workflow-id]))))
+    (res/execute-pending-settlement world (wf-id event))))
 
 (defmethod apply-action "automate-timed-actions"
   [_ctx world event]
-  (res/automate-timed-actions world (get-in event [:params :workflow-id])))
+  (res/automate-timed-actions world (wf-id event)))
 
 (defmethod apply-action "release"
   [{:keys [agent-index]} world event]
@@ -159,7 +172,7 @@
       ar
       (if (:paused? world)
         (t/fail :protocol-paused)
-        (lc/release world (get-in event [:params :workflow-id])
+        (lc/release world (wf-id event)
                     (:address ar) sender-only-release)))))
 
 (defmethod apply-action "sender-cancel"
@@ -170,7 +183,7 @@
       (if (:paused? world)
         (t/fail :protocol-paused)
         ;; nil cancel-strategy → mutual-consent path only
-        (lc/sender-cancel world (get-in event [:params :workflow-id]) (:address ar) nil)))))
+        (lc/sender-cancel world (wf-id event) (:address ar) nil)))))
 
 (defmethod apply-action "recipient-cancel"
   [{:keys [agent-index]} world event]
@@ -179,11 +192,11 @@
       ar
       (if (:paused? world)
         (t/fail :protocol-paused)
-        (lc/recipient-cancel world (get-in event [:params :workflow-id]) (:address ar) nil)))))
+        (lc/recipient-cancel world (wf-id event) (:address ar) nil)))))
 
 (defmethod apply-action "auto-cancel-disputed"
   [_ctx world event]
-  (lc/auto-cancel-disputed-escrow world (get-in event [:params :workflow-id])))
+  (lc/auto-cancel-disputed-escrow world (wf-id event)))
 
 (defmethod apply-action "escalate-dispute"
   [{:keys [agent-index escalation-fn]} world event]
@@ -192,7 +205,7 @@
       ar
       (if (:paused? world)
         (t/fail :protocol-paused)
-        (let [workflow-id (get-in event [:params :workflow-id])
+        (let [workflow-id (wf-id event)
               result      (res/escalate-dispute world workflow-id (:address ar) escalation-fn)]
           (if (:ok result)
             (assoc result :extra {:new-level    (:new-level result)
@@ -204,7 +217,7 @@
   (let [ar (resolve-address agent-index (:agent event))]
     (if-not (:ok ar)
       ar
-      (let [workflow-id   (get-in event [:params :workflow-id])
+      (let [workflow-id   (wf-id event)
             new-resolver  (get-in event [:params :new-resolver])
             result        (res/rotate-dispute-resolver world workflow-id new-resolver)]
         (if (:ok result)
@@ -252,7 +265,7 @@
     (if-not (:ok ar)
       ar
       (let [p           (:params event)
-            workflow-id (:workflow-id p)]
+            workflow-id (or (:workflow-id p) (wf-id event))]
         (println "[DEBUG] dispatch withdraw_escrow. event=" event)
         (acct/withdraw-escrow world workflow-id (:address ar))))))
 
@@ -317,7 +330,7 @@
     (if-not (:ok ar)
       ar
       (let [p             (:params event)
-            workflow-id   (:workflow-id p)
+            workflow-id   (or (:workflow-id p) (wf-id event))
             resolver-addr (:resolver-addr p)
             amount        (:amount p)]
         (res/propose-fraud-slash world workflow-id (:address ar) resolver-addr amount)))))
@@ -327,7 +340,7 @@
   (let [ar (resolve-address agent-index (:agent event))]
     (if-not (:ok ar)
       ar
-      (res/challenge-resolution world (get-in event [:params :workflow-id]) (:address ar) escalation-fn))))
+      (res/challenge-resolution world (wf-id event) (:address ar) escalation-fn))))
 
 (defmethod apply-action "appeal-slash"
   [{:keys [agent-index]} world event]
@@ -335,8 +348,8 @@
     (if-not (:ok ar)
       ar
       (let [p (:params event)]
-        (res/appeal-slash world (:workflow-id p) (:address ar)
-                          (or (:slash-id p) (:workflow-id p)))))))
+        (res/appeal-slash world (or (:workflow-id p) (wf-id event)) (:address ar)
+                          (or (:slash-id p) (:workflow-id p) (wf-id event)))))))
 
 (defmethod apply-action "resolve-appeal"
   [{:keys [agent-index]} world event]
@@ -344,13 +357,13 @@
     (if-not (:ok ar)
       ar
       (let [p (:params event)]
-        (res/resolve-appeal world (:workflow-id p) (:address ar) (:upheld? p))))))
+        (res/resolve-appeal world (or (:workflow-id p) (wf-id event)) (:address ar) (:upheld? p))))))
 
 (defmethod apply-action "execute-fraud-slash"
   [_ctx world event]
   (let [p (:params event)]
-    (res/execute-fraud-slash world (:workflow-id p)
-                             (or (:slash-id p) (:workflow-id p)))))
+    (res/execute-fraud-slash world (or (:workflow-id p) (wf-id event))
+                             (or (:slash-id p) (:workflow-id p) (wf-id event)))))
 
 (defmethod apply-action "advance-time"
   [_ctx world _event]

@@ -8,7 +8,8 @@
 #   ./scripts/test.sh invariants # S01–S41 deterministic invariant scenarios only
 #   ./scripts/test.sh contracts  # Cross-layer contract checks (proto/service/wire compatibility)
 #   ./scripts/test.sh suites     # fixture suite runner (all-invariants + equilibrium-validation)
-#   ./scripts/test.sh triage     # Failure triage grouped by purpose/threat-tag
+#   ./scripts/test.sh triage         # Failure triage grouped by purpose/threat-tag
+#   ./scripts/test.sh monte-carlo    # Representative Monte Carlo phase sweep (3 domains)
 #
 # Exit code: 0 = all passed, 1 = any failure.
 
@@ -63,12 +64,14 @@ run_unit() {
 (require '[resolver-sim.scenario.expectations-test])
 (require '[resolver-sim.scenario.equilibrium-test])
 (require '[resolver-sim.sim.multi-epoch-test])
+(require '[resolver-sim.stochastic.calibration-test])
 (let [results (t/run-tests
                 'resolver-sim.core-tests
                 'resolver-sim.protocols.sew.replay-test
                 'resolver-sim.scenario.expectations-test
                 'resolver-sim.scenario.equilibrium-test
-                'resolver-sim.sim.multi-epoch-test)]
+                'resolver-sim.sim.multi-epoch-test
+                'resolver-sim.stochastic.calibration-test)]
   (when (pos? (+ (:error results) (:fail results)))
     (System/exit 1)))"
   return $?
@@ -196,6 +199,68 @@ run_suites() {
   return $?
 }
 
+run_monte_carlo() {
+  # ──────────────────────────────────────────────────────────────────────────
+  # HOW THE TWO SIMULATION ENGINES RELATE
+  #
+  # This repository contains two complementary simulation engines that answer
+  # different questions about the SEW dispute-resolution protocol:
+  #
+  #  Engine 1 — Monte Carlo (stochastic/ + sim/economic|adversarial|governance/)
+  #    Models resolvers as probability distributions over outcomes.
+  #    Asks: "Is honest participation MORE PROFITABLE than malice across N trials?"
+  #    Produces: dominance ratios, expected-value comparisons, parameter sensitivity.
+  #    Calibrated to the same fee/bond formula as Engine 2 (see stochastic/economics.clj).
+  #
+  #  Engine 2 — Replay / Invariant (contract_model/ + protocols/sew/)
+  #    Executes deterministic event sequences against the actual state machine.
+  #    Checks 31 protocol invariants at every step.
+  #    Asks: "Does THIS specific attack sequence violate a protocol guarantee?"
+  #    Produces: pass/fail per invariant, JSON traces (data/fixtures/traces/).
+  #
+  #  Together they form a layered evidence argument:
+  #    MC  → "attacks are unprofitable in expectation across the parameter space"
+  #    Replay → "specific attack sequences fail or succeed, with proof"
+  #    A failure in MC flags a parameter regime worth probing with a replay trace.
+  #    A replay invariant violation that MC doesn't catch = the MC model is incomplete.
+  # ──────────────────────────────────────────────────────────────────────────
+
+  echo "Running Monte Carlo representative sweep (4 domains)..."
+  echo ""
+  echo "  Phase O  — Economic:    market exit cascade (honest vs malice profitability)"
+  echo "  Phase P  — Adversarial: appeals falsification (difficulty/evidence/herding)"
+  echo "  Phase AA — Governance:  governance-as-adversary (selective enforcement gaming)"
+  echo "  Phase AD — Governance:  bandwidth floor safeguard (AA remediation)"
+  echo ""
+
+  local mc_fail=0
+
+  echo "── Phase O: Market Exit Cascade ──────────────────────────────────────────"
+  clojure -M:run -- -O -p data/params/phase-o-baseline.edn || mc_fail=$((mc_fail + 1))
+  echo ""
+
+  echo "── Phase P Lite: Appeals Falsification ───────────────────────────────────"
+  clojure -M:run -- -P -p data/params/phase-p-lite-baseline.edn || mc_fail=$((mc_fail + 1))
+  echo ""
+
+  echo "── Phase AA: Governance as Adversary ─────────────────────────────────────"
+  clojure -M:run -- -A -p data/params/phase-aa-governance.edn || mc_fail=$((mc_fail + 1))
+  echo ""
+
+  echo "── Phase AD: Governance Bandwidth Floor (AA safeguard) ───────────────────"
+  clojure -M:run -- -D -p data/params/phase-ad-governance-floor.edn || mc_fail=$((mc_fail + 1))
+  echo ""
+
+  if [ "$mc_fail" -eq 0 ]; then
+    echo "Monte Carlo sweep: all 4 phases PASSED"
+    echo "  (Calibrated to same fee/bond formula as the 41-scenario invariant suite)"
+  else
+    echo "Monte Carlo sweep: $mc_fail phase(s) FAILED"
+  fi
+
+  return $mc_fail
+}
+
 case "$MODE" in
   unit)
     run_unit || FAILURES=$((FAILURES + 1))
@@ -215,6 +280,9 @@ case "$MODE" in
   suites)
     run_target suites run_suites || FAILURES=$((FAILURES + 1))
     ;;
+  monte-carlo)
+    run_target monte-carlo run_monte_carlo || FAILURES=$((FAILURES + 1))
+    ;;
   all)
     : > "$ARTIFACT_DIR/.targets-${RUN_ID}.csv"
     run_target unit run_unit || FAILURES=$((FAILURES + 1))
@@ -226,10 +294,12 @@ case "$MODE" in
     run_target invariants run_invariants || FAILURES=$((FAILURES + 1))
     echo ""
     run_target suites run_suites || FAILURES=$((FAILURES + 1))
+    echo ""
+    run_target monte-carlo run_monte_carlo || FAILURES=$((FAILURES + 1))
     ;;
   *)
     echo "Unknown mode: $MODE"
-    echo "Usage: $0 [unit|generators|contracts|invariants|suites|triage|all]"
+    echo "Usage: $0 [unit|generators|contracts|invariants|suites|triage|monte-carlo|all]"
     exit 1
     ;;
 esac
