@@ -2,10 +2,10 @@
 
 ## 🚀 Running Your First Simulation
 
-### Option 1: Using the Wrapper Script (Recommended)
+### Option 1: Canonical Validation Gate (Recommended)
 ```bash
-# Quick validation check (all phases, ~4 mins)
-./test-all.sh
+# Quick validation check (canonical test gate)
+./scripts/test.sh all
 
 # Run a specific scenario suite
 ./run.sh -p data/params/baseline.edn
@@ -103,4 +103,4 @@ This works because:
 - Ensure the gRPC server is NOT required for the command you are running (most commands are in-process).
 
 **Permission denied on run.sh**
-- Make it executable: `chmod +x run.sh test-all.sh`
+- Make it executable: `chmod +x run.sh scripts/test.sh`

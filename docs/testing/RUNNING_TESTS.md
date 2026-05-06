@@ -2,30 +2,114 @@
 
 ## Quick Start
 
-### Run all major tests (integrity check)
+### Canonical test entrypoint (recommended)
 ```bash
-./test-all.sh
+./scripts/test.sh all
 ```
-Takes ~5 minutes. Tests:
-- ✓ Baseline (neutral scenario)
-- ✓ Phase I (detection mechanisms)
-- ✓ Phase H (realistic mechanics)
-- ✓ Phase J (multi-epoch reputation)
+This is the authoritative repository-wide validation command.
+
+It runs five targets in sequence:
+- `unit` → Clojure unit tests
+- `generators` → deterministic generator/property regression checks
+- `contracts` → cross-layer contract checks (`proto/simulation.proto` ↔ gRPC server ↔ Python client)
+- `invariants` → deterministic scenario run (`--invariants`, S01–S41)
+- `suites` → fixture suites (`all-invariants`, `equilibrium-validation`, `spe-validation`)
 
 ### Run comprehensive suite with full reporting
 ```bash
 ./run.sh all
 ```
-Takes ~15 minutes. Generates detailed HTML/markdown reports.
+Use this for report generation workflows; use `scripts/test.sh` as the canonical validation gate.
 
-### Run generator regression target (pinned seeds)
+### Run specific canonical targets
 ```bash
+./scripts/test.sh unit
 ./scripts/test.sh generators
+./scripts/test.sh contracts
+./scripts/test.sh invariants
+./scripts/test.sh suites
+./scripts/test.sh triage
 ```
-Runs deterministic generator + replay/equilibrium-focused checks:
-- `resolver-sim.generators.equilibrium-test`
-- `resolver-sim.generators.fixtures-test`
-- `resolver-sim.properties.invariants-test`
+
+### Machine-readable CI artifacts
+
+When running `./scripts/test.sh all`, the script writes a JSON summary:
+
+```text
+results/test-artifacts/test-summary.json
+```
+
+It includes per-target status, exit codes, durations, and log file paths.
+
+### Baseline vs scenario comparison (research-shareable)
+
+Use this to generate a compact, researcher-facing diff between two replay outputs.
+
+```bash
+bb trace:compare \
+  --baseline results/baseline.trace.json \
+  --candidate results/candidate.trace.json \
+  --out-dir results/trace-compare/example
+```
+
+Outputs:
+- `results/trace-compare/example/comparison.json`
+- `results/trace-compare/example/comparison.md`
+
+The report includes:
+- outcome + events processed
+- key metric deltas
+- terminal-state count differences
+- a single headline line you can paste into research notes
+
+### Attack-to-outcome visual map (shareable diagrams)
+
+Generate three canonical visual artifacts from fixtures/sweep outputs:
+
+```bash
+bb report:attack-map --out-dir results/attack-outcome-map
+```
+
+Outputs (timestamped directory):
+- `state-transition-heatmap.md` — action→action transition heatmap table
+- `profitability-surface-snapshot.md` — top risk points from latest `adv:sweep` surface
+- `escalation-timeline.md` — Mermaid escalation/settlement timeline
+
+If no profitability surface exists yet, run:
+
+```bash
+bb adv:sweep
+```
+
+### Transition/guard coverage release gate
+
+```bash
+bb report:release-gate
+```
+
+Prints:
+- transition hit frequencies
+- guard hit frequencies
+- purpose-grouped hit maps
+- explicit **unhit transition backlog** for release-candidate closure
+
+### Adversarial profitability surfaces (rational-agent coverage)
+
+```bash
+bb adv:sweep
+```
+
+Outputs:
+- `results/profitability-surfaces/<timestamp>/surface.csv`
+- `results/profitability-surfaces/<timestamp>/surface.json`
+- `results/profitability-surfaces/<timestamp>/regions.json`
+- `results/profitability-surfaces/<timestamp>/promotions.json`
+
+For expanded promotion backlog:
+
+```bash
+bb adv:sweep:promote
+```
 
 ### Run specific phase
 ```bash
@@ -224,8 +308,8 @@ Output includes:
 
 set -e  # Exit on error
 
-echo "Running integrity tests..."
-./test-all.sh || exit 1
+echo "Running canonical validation gate..."
+./scripts/test.sh all || exit 1
 
 echo "Running comprehensive suite..."
 ./run.sh all

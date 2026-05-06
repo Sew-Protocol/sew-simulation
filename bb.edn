@@ -6,20 +6,38 @@
   sweep {:doc "Run a parameter sweep"
          :task (println "Sweep task - run with bb sweep data/params/baseline.edn")}
 
-  test {:doc "Run canonical test script (all)"
+  test {:doc "Run canonical validation gate (all targets via scripts/test.sh)"
         :task (shell "./scripts/test.sh all")}
 
-  test:unit {:doc "Run unit-only tests"
+  test:unit {:doc "Run canonical unit target"
              :task (shell "./scripts/test.sh unit")}
 
-  test:generators {:doc "Run generator regression tests"
+  test:generators {:doc "Run canonical generator/property regression target"
                    :task (shell "./scripts/test.sh generators")}
 
-  test:invariants {:doc "Run deterministic invariant scenarios"
+  test:contracts {:doc "Run canonical cross-layer contract target (proto/service/wire compatibility)"
+                  :task (shell "./scripts/test.sh contracts")}
+
+  test:invariants {:doc "Run canonical deterministic invariant target (S01–S41)"
                    :task (shell "./scripts/test.sh invariants")}
 
-  test:suites {:doc "Run fixture suites"
+  test:suites {:doc "Run canonical fixture suites target"
                :task (shell "./scripts/test.sh suites")}
+
+  test:triage {:doc "Run failure triage grouped by purpose/threat-tag"
+               :task (shell "./scripts/test.sh triage")}
+
+  adv:sweep {:doc "Run adversarial profitability sweeps and generate safe/unsafe regions"
+             :task (shell "python3 python/adversarial_profitability_sweep.py")}
+
+  adv:sweep:promote {:doc "Run sweep and emit top risky promotion backlog"
+                     :task (shell "python3 python/adversarial_profitability_sweep.py --top-n 20")}
+
+  trace:compare {:doc "Compare baseline vs candidate trace JSON and emit markdown+json report"
+                 :task (apply shell "python3" "python/trace_compare.py" *command-line-args*)}
+
+  report:attack-map {:doc "Generate visual attack-to-outcome artifacts (state diagram, surface snapshot, timeline — all Mermaid)"
+                     :task (apply shell "python3" "python/attack_outcome_map.py" *command-line-args*)}
 
   lint {:doc "Lint code with clj-kondo"
         :task (clojure {:dir "." :extra-deps {clj-kondo/clj-kondo {:mvn/version "2024.01.11"}}}
@@ -37,6 +55,11 @@
           :task (clojure {:dir "."}
                          "-M" "-e"
                          "(require '[resolver-sim.scenario.coverage :as cov] '[resolver-sim.sim.reporter :as r]) (r/print-coverage (cov/coverage-report))")}
+
+  report:release-gate {:doc "Print transition/guard coverage + unhit transition backlog"
+                       :task (clojure {:dir "."}
+                                      "-M" "-e"
+                                      "(require '[resolver-sim.scenario.coverage :as cov] '[resolver-sim.sim.reporter :as r]) (r/print-coverage (cov/coverage-report))")}
 
   report:dir {:doc "Print scenario coverage report for a directory. Usage: bb report:dir data/fixtures/traces"
               :task (clojure {:dir "."}

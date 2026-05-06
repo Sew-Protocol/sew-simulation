@@ -6,7 +6,10 @@
 #   ./scripts/test.sh unit       # Clojure unit tests only
 #   ./scripts/test.sh generators # Generator + equilibrium regression tests (pinned seeds)
 #   ./scripts/test.sh invariants # S01–S41 deterministic invariant scenarios only
+#   ./scripts/test.sh contracts  # Cross-layer contract checks (proto/service/wire compatibility)
 #   ./scripts/test.sh suites     # fixture suite runner (all-invariants + equilibrium-validation)
+#   ./scripts/test.sh triage         # Failure triage grouped by purpose/threat-tag
+#   ./scripts/test.sh monte-carlo    # Representative Monte Carlo phase sweep (3 domains)
 #
 # Exit code: 0 = all passed, 1 = any failure.
 
@@ -14,6 +17,43 @@ cd "$(dirname "$0")/.."
 
 MODE="${1:-all}"
 FAILURES=0
+ARTIFACT_DIR="results/test-artifacts"
+ARTIFACT_FILE="$ARTIFACT_DIR/test-summary.json"
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+
+mkdir -p "$ARTIFACT_DIR"
+
+TARGET_LOG=""
+
+start_target() {
+  TARGET_LOG="$ARTIFACT_DIR/.target-${1}-${RUN_ID}.log"
+  : > "$TARGET_LOG"
+}
+
+record_target() {
+  target="$1"
+  code="$2"
+  dur_ms="$3"
+  status="pass"
+  if [ "$code" -ne 0 ]; then
+    status="fail"
+  fi
+  printf '%s,%s,%s,%s,%s\n' "$target" "$status" "$code" "$dur_ms" "$TARGET_LOG" >> "$ARTIFACT_DIR/.targets-${RUN_ID}.csv"
+}
+
+run_target() {
+  target="$1"
+  func="$2"
+  start_target "$target"
+  t0="$(date +%s)"
+  "$func" >"$TARGET_LOG" 2>&1
+  code=$?
+  t1="$(date +%s)"
+  dur_ms=$(( (t1 - t0) * 1000 ))
+  record_target "$target" "$code" "$dur_ms"
+  cat "$TARGET_LOG"
+  return "$code"
+}
 
 run_unit() {
   echo "Running unit tests..."
@@ -24,12 +64,14 @@ run_unit() {
 (require '[resolver-sim.scenario.expectations-test])
 (require '[resolver-sim.scenario.equilibrium-test])
 (require '[resolver-sim.sim.multi-epoch-test])
+(require '[resolver-sim.stochastic.calibration-test])
 (let [results (t/run-tests
                 'resolver-sim.core-tests
                 'resolver-sim.protocols.sew.replay-test
                 'resolver-sim.scenario.expectations-test
                 'resolver-sim.scenario.equilibrium-test
-                'resolver-sim.sim.multi-epoch-test)]
+                'resolver-sim.sim.multi-epoch-test
+                'resolver-sim.stochastic.calibration-test)]
   (when (pos? (+ (:error results) (:fail results)))
     (System/exit 1)))"
   return $?
@@ -57,6 +99,89 @@ run_generators() {
   return $?
 }
 
+run_contracts() {
+  echo "Running cross-layer contract checks (proto/service/wire compatibility)..."
+
+  # Proto service + RPC contract
+  grep -q 'package sew.simulation;' proto/simulation.proto
+  grep -q 'service SimulationEngine' proto/simulation.proto
+  grep -q 'rpc StartSession' proto/simulation.proto
+  grep -q 'rpc Step' proto/simulation.proto
+  grep -q 'rpc DestroySession' proto/simulation.proto
+
+  # Python client must target same service/methods
+  grep -q '_SERVICE = "sew.simulation.SimulationEngine"' python/sew_sim/grpc_client.py
+  grep -q 'StartSession' python/sew_sim/grpc_client.py
+  grep -q 'DestroySession' python/sew_sim/grpc_client.py
+
+  # Clojure server must expose same RPC names and snake_case↔kebab-case bridge
+  grep -q 'SimulationEngine' src/resolver_sim/server/grpc.clj
+  grep -q 'make-method "StartSession"' src/resolver_sim/server/grpc.clj
+  grep -q 'make-method "Step"' src/resolver_sim/server/grpc.clj
+  grep -q 'make-method "DestroySession"' src/resolver_sim/server/grpc.clj
+  grep -q 'snake_case' src/resolver_sim/server/grpc.clj
+
+  # Scenario naming convention sanity checks (supports legacy + canonical ids)
+  python - <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+root = pathlib.Path('data/fixtures/traces')
+pat_s = re.compile(r'^s\d{2}[a-z]?-[a-z0-9\-]+\.trace\.json$')
+pat_other = re.compile(r'^(eq-v\d+|spe-v\d+)-[a-z0-9\-]+\.trace\.json$')
+bad = []
+for p in sorted(root.glob('*.trace.json')):
+    name = p.name
+    is_eq_spe = name.startswith('eq-v') or name.startswith('spe-v')
+    is_sxx = bool(re.match(r'^s\d{2}[a-z]?-', name))
+
+    # Validate known canonical families only; allow legacy/non-canonical
+    # traces (e.g. same-block-ordering.trace.json) to coexist.
+    if is_eq_spe:
+        if not pat_other.match(name):
+            bad.append(f"bad-filename:{p}")
+            continue
+    elif is_sxx:
+        if not pat_s.match(name):
+            bad.append(f"bad-filename:{p}")
+            continue
+
+    if is_eq_spe and not pat_other.match(name):
+        bad.append(f"bad-filename:{p}")
+        continue
+    try:
+        obj = json.loads(p.read_text())
+    except Exception as e:
+        bad.append(f"bad-json:{p}:{e}")
+        continue
+    sid = obj.get('id')
+    if sid:
+        sid_s = str(sid)
+        stem = p.name.replace('.trace.json', '')
+        valid_ids = {stem, f"scenarios/{stem}"}
+        if sid_s not in valid_ids:
+            bad.append(f"id-mismatch:{p}:id={sid_s}:expected-one-of={sorted(valid_ids)}")
+
+if bad:
+    print("Scenario naming/ID convention checks failed:")
+    for b in bad:
+        print(" -", b)
+    sys.exit(1)
+
+print("Scenario naming/ID convention checks passed")
+PY
+
+  return $?
+}
+
+run_triage() {
+  echo "Running failure triage (purpose/threat-tag grouping)..."
+  clojure -M -m resolver-sim.scenario.triage ${1:-data/fixtures/traces}
+  return $?
+}
+
 run_suites() {
   echo "Running fixture suites (all-invariants + equilibrium-validation + spe-validation)..."
   clojure -M:test -e "
@@ -74,6 +199,68 @@ run_suites() {
   return $?
 }
 
+run_monte_carlo() {
+  # ──────────────────────────────────────────────────────────────────────────
+  # HOW THE TWO SIMULATION ENGINES RELATE
+  #
+  # This repository contains two complementary simulation engines that answer
+  # different questions about the SEW dispute-resolution protocol:
+  #
+  #  Engine 1 — Monte Carlo (stochastic/ + sim/economic|adversarial|governance/)
+  #    Models resolvers as probability distributions over outcomes.
+  #    Asks: "Is honest participation MORE PROFITABLE than malice across N trials?"
+  #    Produces: dominance ratios, expected-value comparisons, parameter sensitivity.
+  #    Calibrated to the same fee/bond formula as Engine 2 (see stochastic/economics.clj).
+  #
+  #  Engine 2 — Replay / Invariant (contract_model/ + protocols/sew/)
+  #    Executes deterministic event sequences against the actual state machine.
+  #    Checks 31 protocol invariants at every step.
+  #    Asks: "Does THIS specific attack sequence violate a protocol guarantee?"
+  #    Produces: pass/fail per invariant, JSON traces (data/fixtures/traces/).
+  #
+  #  Together they form a layered evidence argument:
+  #    MC  → "attacks are unprofitable in expectation across the parameter space"
+  #    Replay → "specific attack sequences fail or succeed, with proof"
+  #    A failure in MC flags a parameter regime worth probing with a replay trace.
+  #    A replay invariant violation that MC doesn't catch = the MC model is incomplete.
+  # ──────────────────────────────────────────────────────────────────────────
+
+  echo "Running Monte Carlo representative sweep (4 domains)..."
+  echo ""
+  echo "  Phase O  — Economic:    market exit cascade (honest vs malice profitability)"
+  echo "  Phase P  — Adversarial: appeals falsification (difficulty/evidence/herding)"
+  echo "  Phase AA — Governance:  governance-as-adversary (selective enforcement gaming)"
+  echo "  Phase AD — Governance:  bandwidth floor safeguard (AA remediation)"
+  echo ""
+
+  local mc_fail=0
+
+  echo "── Phase O: Market Exit Cascade ──────────────────────────────────────────"
+  clojure -M:run -- -O -p data/params/phase-o-baseline.edn || mc_fail=$((mc_fail + 1))
+  echo ""
+
+  echo "── Phase P Lite: Appeals Falsification ───────────────────────────────────"
+  clojure -M:run -- -P -p data/params/phase-p-lite-baseline.edn || mc_fail=$((mc_fail + 1))
+  echo ""
+
+  echo "── Phase AA: Governance as Adversary ─────────────────────────────────────"
+  clojure -M:run -- -A -p data/params/phase-aa-governance.edn || mc_fail=$((mc_fail + 1))
+  echo ""
+
+  echo "── Phase AD: Governance Bandwidth Floor (AA safeguard) ───────────────────"
+  clojure -M:run -- -D -p data/params/phase-ad-governance-floor.edn || mc_fail=$((mc_fail + 1))
+  echo ""
+
+  if [ "$mc_fail" -eq 0 ]; then
+    echo "Monte Carlo sweep: all 4 phases PASSED"
+    echo "  (Calibrated to same fee/bond formula as the 41-scenario invariant suite)"
+  else
+    echo "Monte Carlo sweep: $mc_fail phase(s) FAILED"
+  fi
+
+  return $mc_fail
+}
+
 case "$MODE" in
   unit)
     run_unit || FAILURES=$((FAILURES + 1))
@@ -84,23 +271,64 @@ case "$MODE" in
   generators)
     run_generators || FAILURES=$((FAILURES + 1))
     ;;
+  contracts)
+    run_target contracts run_contracts || FAILURES=$((FAILURES + 1))
+    ;;
+  triage)
+    run_target triage run_triage || FAILURES=$((FAILURES + 1))
+    ;;
   suites)
-    run_suites || FAILURES=$((FAILURES + 1))
+    run_target suites run_suites || FAILURES=$((FAILURES + 1))
+    ;;
+  monte-carlo)
+    run_target monte-carlo run_monte_carlo || FAILURES=$((FAILURES + 1))
     ;;
   all)
-    run_unit       || FAILURES=$((FAILURES + 1))
+    : > "$ARTIFACT_DIR/.targets-${RUN_ID}.csv"
+    run_target unit run_unit || FAILURES=$((FAILURES + 1))
     echo ""
-    run_generators || FAILURES=$((FAILURES + 1))
+    run_target generators run_generators || FAILURES=$((FAILURES + 1))
     echo ""
-    run_invariants || FAILURES=$((FAILURES + 1))
+    run_target contracts run_contracts || FAILURES=$((FAILURES + 1))
     echo ""
-    run_suites     || FAILURES=$((FAILURES + 1))
+    run_target invariants run_invariants || FAILURES=$((FAILURES + 1))
+    echo ""
+    run_target suites run_suites || FAILURES=$((FAILURES + 1))
+    echo ""
+    run_target monte-carlo run_monte_carlo || FAILURES=$((FAILURES + 1))
     ;;
   *)
     echo "Unknown mode: $MODE"
-    echo "Usage: $0 [unit|generators|invariants|suites|all]"
+    echo "Usage: $0 [unit|generators|contracts|invariants|suites|triage|monte-carlo|all]"
     exit 1
     ;;
 esac
+
+if [ -f "$ARTIFACT_DIR/.targets-${RUN_ID}.csv" ]; then
+  python - <<PY
+import csv, json, pathlib
+csv_path = pathlib.Path("$ARTIFACT_DIR/.targets-${RUN_ID}.csv")
+rows = []
+for r in csv.reader(csv_path.read_text().splitlines()):
+    if len(r) != 5:
+        continue
+    rows.append({
+        "target": r[0],
+        "status": r[1],
+        "exit_code": int(r[2]),
+        "duration_ms": int(r[3]),
+        "log_file": r[4]
+    })
+out = {
+  "run_id": "$RUN_ID",
+  "mode": "$MODE",
+  "overall_status": "pass" if $FAILURES == 0 else "fail",
+  "failure_count": $FAILURES,
+  "targets": rows,
+}
+pathlib.Path("$ARTIFACT_FILE").write_text(json.dumps(out, indent=2))
+print(f"Wrote machine-readable summary: $ARTIFACT_FILE")
+PY
+fi
 
 exit $FAILURES

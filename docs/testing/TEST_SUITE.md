@@ -1,28 +1,57 @@
-# Complete Test Suite: test_all.sh
+# Complete Test Suite: scripts/test.sh
 
 ## Overview
 
-The `test_all.sh` script provides comprehensive validation of the dispute resolver simulation system across **all 8 phases (G through O)**, executing **24 test scenarios** with **147,500+ Monte Carlo trials**.
+The canonical validation gate is `scripts/test.sh`. It provides repository-wide validation across unit tests, generator/property regressions, cross-layer contract checks, deterministic invariants, and fixture suites.
 
-**Status**: ✅ **ALL 24 TESTS PASSING**
+Primary command:
+
+```bash
+./scripts/test.sh all
+```
 
 ## Quick Start
 
 ```bash
-./test_all.sh
+./scripts/test.sh all
 ```
 
-Expected output:
-```
-✅ ALL TESTS PASSED
+Execution time depends on scenario complexity and environment.
 
-System Status: READY FOR MAINNET
-Confidence: 99%+ (147,500+ trials validated)
-```
+## Canonical Test Matrix
 
-Execution time: ~75 seconds
+### `unit`
+- Clojure unit tests for core protocol/model behavior:
+  - `resolver-sim.core-tests`
+  - `resolver-sim.protocols.sew.replay-test`
+  - `resolver-sim.scenario.expectations-test`
+  - `resolver-sim.scenario.equilibrium-test`
+  - `resolver-sim.sim.multi-epoch-test`
 
-## Test Coverage
+### `generators`
+- Deterministic generator/property regression tests:
+  - `resolver-sim.generators.equilibrium-test`
+  - `resolver-sim.generators.fixtures-test`
+  - `resolver-sim.properties.invariants-test`
+
+### `contracts`
+- Cross-layer contract compatibility checks:
+  - `proto/simulation.proto` service/RPC contract
+  - `src/resolver_sim/server/grpc.clj` gRPC method exposure + snake_case bridge
+  - `python/sew_sim/grpc_client.py` service/method targeting
+
+### `invariants`
+- Deterministic scenario execution via `clojure -M:run -- --invariants` (S01–S41).
+
+### `suites`
+- Fixture suite execution:
+  - `:suites/all-invariants`
+  - `:suites/equilibrium-validation`
+  - `:suites/spe-validation`
+
+## Legacy phase-based simulations (still available)
+
+The phase-based G→O simulations and associated parameter files remain available via `clojure -M:run ...` and `run.sh`, but they are not the canonical repository-wide CI gate.
 
 ### Phase G: Slashing Delays (2 tests)
 - `phase-g-slashing-delays` - Baseline slash mechanics

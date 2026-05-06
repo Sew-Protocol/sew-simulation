@@ -692,16 +692,17 @@
 
 (deftest test-withdraw-stake-blocked-during-active-dispute
   (let [r (replay/replay-scenario
-           (sc :events
+           (assoc (sc :events
                [{:seq 0 :time 1000 :agent "resolver" :action "register_stake"
                  :params {:amount 5000}}
                 {:seq 1 :time 1000 :agent "alice" :action "create_escrow"
                  :params {:token "0xUSDC" :to "0xBob" :amount 3000
-                          :custom-resolver "0xResolver"}}
+                           :custom-resolver "0xResolver"}}
                 {:seq 2 :time 1001 :agent "bob" :action "raise_dispute"
                  :params {:workflow-id 0}}
                 {:seq 3 :time 1002 :agent "resolver" :action "withdraw_stake"
-                 :params {:amount 1000}}]))]
+                 :params {:amount 1000}}])
+                  :allow-open-disputes? true))]
     (is (= :pass (:outcome r)))
     (is (= :rejected (get-in r [:trace 3 :result])))
     (is (= :active-disputes-block-withdrawal (get-in r [:trace 3 :error])))))

@@ -268,7 +268,8 @@
         ;; legitimate accepted actions by the same agent).
         attack?   (or (:adversarial? event)
                       (= "malicious" (:strategy agent))
-                      (= "attacker" (:role agent)))
+                      (= "attacker" (:role agent))
+                      (= "attacker" (:type agent)))
         tags      (:event-tags trace-entry)
         ;; double-settlements: a second accepted lifecycle-ending action on what
         ;; is (for single-escrow scenarios) already a resolved/settled workflow.
