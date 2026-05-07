@@ -268,7 +268,8 @@
         ;; legitimate accepted actions by the same agent).
         attack?   (or (:adversarial? event)
                       (= "malicious" (:strategy agent))
-                      (= "attacker" (:role agent)))
+                      (= "attacker" (:role agent))
+                      (= "attacker" (:type agent)))
         tags      (:event-tags trace-entry)
         ;; double-settlements: a second accepted lifecycle-ending action on what
         ;; is (for single-escrow scenarios) already a resolved/settled workflow.
@@ -433,10 +434,10 @@
             (let [open (when-not (:allow-open-disputes? scenario)
                          (seq (engine/open-disputes protocol world)))]
               (if open
-                {:outcome :fail :scenario-id scenario-id :events-processed (count trace) :halt-reason :open-disputes-at-end :detail {:open-disputes (vec open)} :trace trace :metrics metrics}
+                {:outcome :fail :scenario-id scenario-id :events-processed (count trace) :halt-reason :open-disputes-at-end :detail {:open-disputes (vec open)} :trace trace :metrics metrics :agents agents}
                 (do
                   (log/info :scenario/end {:id scenario-id :outcome :pass})
-                  {:outcome :pass :scenario-id scenario-id :events-processed (count trace) :trace trace :metrics metrics})))
+                  {:outcome :pass :scenario-id scenario-id :events-processed (count trace) :trace trace :metrics metrics :agents agents})))
             (let [raw-event  (first events)
                   alias-res  (engine/resolve-id-alias protocol raw-event id-alias-map)]
               (if-not (:ok alias-res)
