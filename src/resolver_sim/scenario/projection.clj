@@ -21,6 +21,18 @@
 (defn- terminal-state? [state]
   (contains? terminal-escrow-states (keyword (or state ""))))
 
+(defn- map-delta
+  "Return per-key (new-old) deltas for numeric maps."
+  [old-map new-map]
+  (let [keys-all (into #{} (concat (keys (or old-map {})) (keys (or new-map {}))))]
+    (reduce (fn [m k]
+              (let [old-v (long (get old-map k 0))
+                    new-v (long (get new-map k 0))
+                    d     (- new-v old-v)]
+                (if (zero? d) m (assoc m k d))))
+            {}
+            keys-all)))
+
 ;; ---------------------------------------------------------------------------
 ;; Projection
 ;; ---------------------------------------------------------------------------
@@ -80,8 +92,81 @@
                                      (let [agent-id (:agent entry)
                                            addr     (get agents-by-id agent-id agent-id)]
                                        (assoc (select-keys entry [:seq :time :agent :action :extra])
-                                              :address addr))))
-                                 trace))]
+                                               :address addr))))
+                                  trace))
+
+            transitions (map vector trace (rest trace))
+
+            token-deltas
+            (reduce (fn [acc [a b]]
+                      (let [held-d (map-delta (get-in a [:world :total-held] {}) (get-in b [:world :total-held] {}))
+                            fee-d  (map-delta (get-in a [:world :total-fees] {}) (get-in b [:world :total-fees] {}))
+                            toks   (into #{} (concat (keys held-d) (keys fee-d)))]
+                        (reduce (fn [m t]
+                                  (-> m
+                                      (update-in [t :held-delta] (fnil + 0) (long (get held-d t 0)))
+                                      (update-in [t :fee-delta] (fnil + 0) (long (get fee-d t 0)))
+                                      (update-in [t :claimable-delta] (fnil + 0) 0)))
+                                acc
+                                toks)))
+                    {}
+                    transitions)
+
+            pending-lifecycle
+            (reduce (fn [{:keys [created cleared superseded] :as acc} [a b]]
+                      (let [p0 (long (get-in a [:world :pending-count] 0))
+                            p1 (long (get-in b [:world :pending-count] 0))
+                            action (str (or (:action b) ""))]
+                        (cond
+                          (> p1 p0) (update acc :created + (- p1 p0))
+                          (< p1 p0) (-> acc
+                                        (update :cleared + (- p0 p1))
+                                        (update :superseded + (if (re-find #"escalat" action) (- p0 p1) 0)))
+                          :else acc)))
+                    {:created 0 :cleared 0 :superseded 0}
+                    transitions)
+
+            stake-flow
+            (let [first-stakes (get-in (first trace) [:world :resolver-stakes] {})
+                  last-stakes  (get world :resolver-stakes {})
+                  keys-all     (into #{} (concat (keys first-stakes) (keys last-stakes)))]
+              (reduce (fn [m r]
+                        (assoc m r {:start     (long (get first-stakes r 0))
+                                    :withdrawn 0
+                                    :slashed   0
+                                    :end       (long (get last-stakes r 0))}))
+                      {}
+                      keys-all))
+
+            stake-flow
+            (reduce (fn [acc [a b]]
+                      (let [before (get-in a [:world :resolver-stakes] {})
+                            after  (get-in b [:world :resolver-stakes] {})
+                            deltas (map-delta before after)
+                            action (str (or (:action b) ""))]
+                        (reduce (fn [m [resolver d]]
+                                  (if (neg? d)
+                                    (cond
+                                      (re-find #"withdraw" action) (update-in m [resolver :withdrawn] + (- d))
+                                      (re-find #"slash|auto_cancel_disputed" action) (update-in m [resolver :slashed] + (- d))
+                                      :else m)
+                                    m))
+                                acc
+                                deltas)))
+                    stake-flow
+                    transitions)
+
+            workflow-outcomes
+            (into {}
+                  (map (fn [[wf st]]
+                         [wf {:terminal-state st
+                              :path (case st
+                                      :released :release
+                                      :refunded :refund
+                                      :cancelled :cancel
+                                      :timeout :timeout
+                                      :non-terminal)}])
+                       escrows))]
 
         {:terminal-world
          {:escrows             escrows
@@ -120,6 +205,14 @@
           :escalation-levels escalation-levels
           :terminal-time     (get world :block-time 0)
           :halt-reason       (:halt-reason result nil)}
+
+         :money-movement-summary
+         {:workflow-outcomes workflow-outcomes
+          :post-dispute-transfers {:unknown {:to-sender 0 :to-recipient 0 :fees 0}}
+          :pending-lifecycle {:unknown pending-lifecycle}
+          :token-deltas token-deltas}
+
+         :stake-flow-summary stake-flow
 
          :decisions decisions
          :raw-trace trace}))))

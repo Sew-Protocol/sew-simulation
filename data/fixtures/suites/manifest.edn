@@ -17,4 +17,5 @@
   :suites/equivalence-ordering-terminal-determinism {:file "equivalence-ordering-terminal-determinism.edn" :title "Equivalence Ordering/Terminal/Determinism" :class :ordering :criticality :high}
   :suites/equivalence-economic-stress {:file "equivalence-economic-stress.edn" :title "Equivalence Economic Stress" :class :economic :criticality :high}
   :suites/equivalence-governance-snapshot {:file "equivalence-governance-snapshot.edn" :title "Equivalence Governance Snapshot Isolation" :class :governance :criticality :high}
+  :suites/equivalence-money-path-integrity {:file "equivalence-money-path-integrity.edn" :title "Equivalence Money Path Integrity" :class :economic :criticality :high}
 }

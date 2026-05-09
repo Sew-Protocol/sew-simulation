@@ -5,9 +5,14 @@
    These tests cover cases that cannot be included in the fixture suite directly
    (mechanism :fail cases) as well as the full set of :pass, :inconclusive, and
    :not-applicable paths for each validator."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing run-tests]]
             [resolver-sim.scenario.equilibrium :as eq]
             [resolver-sim.scenario.projection  :as proj]))
+
+(defn -main
+  "Allow direct execution via: clojure -M:test -m resolver-sim.scenario.equilibrium-test"
+  [& _]
+  (run-tests 'resolver-sim.scenario.equilibrium-test))
 
 ;; ---------------------------------------------------------------------------
 ;; Synthetic projection helpers
@@ -345,3 +350,52 @@
                      :unknown-future-property)]
       (is (= :inconclusive (:status result)))
       (is (= :absent-evidence (:basis result))))))
+
+(deftest test-force-refund-path-integrity-pass
+  (testing "refunded path remains refund-only"
+    (let [proj (assoc (projection {})
+                      :money-movement-summary
+                      {:workflow-outcomes {0 {:terminal-state :refunded :path :refund}}})
+          result (-> (eq/evaluate-mechanism-properties [:force-refund-path-integrity] proj)
+                     :force-refund-path-integrity)]
+      (is (= :pass (:status result))))))
+
+(deftest test-force-refund-path-integrity-fail
+  (testing "refunded workflow marked as release path fails"
+    (let [proj (assoc (projection {})
+                      :money-movement-summary
+                      {:workflow-outcomes {0 {:terminal-state :refunded :path :release}}})
+          result (-> (eq/evaluate-mechanism-properties [:force-refund-path-integrity] proj)
+                     :force-refund-path-integrity)]
+      (is (= :fail (:status result)))
+      (is (seq (:offending result))))))
+
+(deftest test-pending-lifecycle-integrity
+  (testing "pending lifecycle pass and fail cases"
+    (let [pass-proj (assoc (projection {})
+                           :money-movement-summary
+                           {:pending-lifecycle {:unknown {:created 2 :cleared 2 :superseded 1}}})
+          fail-proj (assoc (projection {})
+                           :money-movement-summary
+                           {:pending-lifecycle {:unknown {:created 1 :cleared 2 :superseded 0}}})
+          pass-r (-> (eq/evaluate-mechanism-properties [:pending-lifecycle-integrity] pass-proj)
+                     :pending-lifecycle-integrity)
+          fail-r (-> (eq/evaluate-mechanism-properties [:pending-lifecycle-integrity] fail-proj)
+                     :pending-lifecycle-integrity)]
+      (is (= :pass (:status pass-r)))
+      (is (= :fail (:status fail-r))))))
+
+(deftest test-stake-flow-conservation
+  (testing "stake flow conservation pass and fail"
+    (let [pass-proj (assoc (projection {})
+                           :stake-flow-summary
+                           {"0xR" {:start 100 :withdrawn 20 :slashed 30 :end 50}})
+          fail-proj (assoc (projection {})
+                           :stake-flow-summary
+                           {"0xR" {:start 100 :withdrawn 20 :slashed 30 :end 60}})
+          pass-r (-> (eq/evaluate-mechanism-properties [:stake-flow-conservation] pass-proj)
+                     :stake-flow-conservation)
+          fail-r (-> (eq/evaluate-mechanism-properties [:stake-flow-conservation] fail-proj)
+                     :stake-flow-conservation)]
+      (is (= :pass (:status pass-r)))
+      (is (= :fail (:status fail-r))))))

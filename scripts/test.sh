@@ -217,13 +217,14 @@ run_suites() {
 
 run_equivalence_new() {
   require_clojure || return $?
-  echo "Running new equivalence comparison suites (auth/race/escalation/accounting)..."
+  echo "Running new equivalence comparison suites (auth/race/escalation/accounting + money-path)..."
   clojure -M:test -e "
 (require '[resolver-sim.sim.fixtures :as f])
 (let [suites [:suites/equivalence-auth-paths
               :suites/equivalence-race-pairs
               :suites/equivalence-escalation-boundaries
-              :suites/equivalence-accounting-min]
+              :suites/equivalence-accounting-min
+              :suites/equivalence-money-path-integrity]
       results (map (fn [id] [id (f/run-suite id)]) suites)
       any-fail (some (fn [[_ r]] (not (:ok? r))) results)]
   (doseq [[suite-id result] results]

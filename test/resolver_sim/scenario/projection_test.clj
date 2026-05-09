@@ -95,3 +95,40 @@
        (is (= #{1 2} (get-in p [:trace-summary :escalation-levels])))
        (is (= #{"buyer"} (get-in p [:trace-summary :actors])))
        (is (= 4 (get-in p [:trace-summary :events-count]))))))
+
+(deftest test-trace-end-projection-money-movement-summary
+  (testing "money movement summary captures token deltas and pending lifecycle"
+    (let [trace [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
+                  :world {:live-states {0 :disputed}
+                          :pending-count 0
+                          :total-held {"USDC" 1000}
+                          :total-fees {"USDC" 0}
+                          :resolver-stakes {"0xR" 100}
+                          :block-time 1000}}
+                 {:seq 1 :time 1010 :agent "resolver" :action "execute_resolution"
+                  :world {:live-states {0 :pending}
+                          :pending-count 1
+                          :total-held {"USDC" 1000}
+                          :total-fees {"USDC" 10}
+                          :resolver-stakes {"0xR" 100}
+                          :block-time 1010}}
+                 {:seq 2 :time 1020 :agent "buyer" :action "escalate_dispute"
+                  :world {:live-states {0 :disputed}
+                          :pending-count 0
+                          :total-held {"USDC" 1000}
+                          :total-fees {"USDC" 10}
+                          :resolver-stakes {"0xR" 100}
+                          :block-time 1020}}
+                 {:seq 3 :time 1030 :agent "resolver" :action "withdraw_stake"
+                  :world {:live-states {0 :released}
+                          :pending-count 0
+                          :total-held {"USDC" 0}
+                          :total-fees {"USDC" 10}
+                          :resolver-stakes {"0xR" 70}
+                          :block-time 1030}}]
+          p (proj/trace-end-projection (replay-result {:trace trace :metrics {}}))]
+      (is (= -1000 (get-in p [:money-movement-summary :token-deltas "USDC" :held-delta])))
+      (is (= 10 (get-in p [:money-movement-summary :token-deltas "USDC" :fee-delta])))
+      (is (= {:created 1 :cleared 1 :superseded 1}
+             (get-in p [:money-movement-summary :pending-lifecycle :unknown])))
+      (is (= 30 (get-in p [:stake-flow-summary "0xR" :withdrawn]))))))

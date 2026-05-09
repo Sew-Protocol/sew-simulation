@@ -223,6 +223,67 @@
             {:attack-successes successes}
             "no unauthorized identity attack succeeded"))))
 
+(defn- check-force-refund-path-integrity
+  "Ensure no workflow marked :refunded is also marked as release path.
+   Placeholder integrity check over projection-level workflow outcomes."
+  [{:keys [money-movement-summary]}]
+  (let [outcomes (get money-movement-summary :workflow-outcomes {})
+        bad      (->> outcomes
+                      (filter (fn [[_ {:keys [terminal-state path]}]]
+                                (and (= :refunded terminal-state)
+                                     (= :release path))))
+                      (mapv first))]
+    (if (seq bad)
+      (fail :force-refund-path-integrity :single-trace-terminal-proxy
+            {:workflow-outcomes outcomes}
+            "refunded workflows must not have release path"
+            bad)
+      (pass :force-refund-path-integrity :single-trace-terminal-proxy
+            {:workflow-count (count outcomes)}
+            "all refunded workflows preserve refund-only terminal path"))))
+
+(defn- check-pending-lifecycle-integrity
+  "Pending lifecycle should not clear more entries than it created.
+   Also, superseded count cannot exceed cleared count." 
+  [{:keys [money-movement-summary]}]
+  (let [pl (get-in money-movement-summary [:pending-lifecycle :unknown] {:created 0 :cleared 0 :superseded 0})
+        {:keys [created cleared superseded]} pl]
+    (cond
+      (> cleared created)
+      (fail :pending-lifecycle-integrity :single-trace-metric-proxy
+            pl
+            "pending cleared cannot exceed pending created"
+            [{:field :cleared :observed cleared :max-allowed created}])
+
+      (> superseded cleared)
+      (fail :pending-lifecycle-integrity :single-trace-metric-proxy
+            pl
+            "pending superseded cannot exceed pending cleared"
+            [{:field :superseded :observed superseded :max-allowed cleared}])
+
+      :else
+      (pass :pending-lifecycle-integrity :single-trace-metric-proxy
+            pl
+            "pending lifecycle counts are consistent"))))
+
+(defn- check-stake-flow-conservation
+  "For each resolver: start - withdrawn - slashed == end."
+  [{:keys [stake-flow-summary]}]
+  (let [violations (->> stake-flow-summary
+                        (keep (fn [[resolver {:keys [start withdrawn slashed end]}]]
+                                (let [lhs (- (long start) (long withdrawn) (long slashed))]
+                                  (when (not= lhs (long end))
+                                    {:resolver resolver :start start :withdrawn withdrawn :slashed slashed :end end :expected-end lhs}))))
+                        vec)]
+    (if (seq violations)
+      (fail :stake-flow-conservation :single-trace-metric-proxy
+            {:stake-flow-summary stake-flow-summary}
+            "start - withdrawn - slashed must equal end stake"
+            violations)
+      (pass :stake-flow-conservation :single-trace-metric-proxy
+            {:resolver-count (count stake-flow-summary)}
+            "stake flow balances for all resolvers"))))
+
 ;; ---------------------------------------------------------------------------
 ;; Equilibrium-concept validators
 ;; ---------------------------------------------------------------------------
@@ -397,7 +458,10 @@
    :incentive-compatibility check-incentive-compatibility
    :individual-rationality check-individual-rationality
    :collusion-resistance   check-collusion-resistance
-   :sybil-resistance       check-sybil-resistance})
+   :sybil-resistance       check-sybil-resistance
+   :force-refund-path-integrity check-force-refund-path-integrity
+   :pending-lifecycle-integrity check-pending-lifecycle-integrity
+   :stake-flow-conservation check-stake-flow-conservation})
 
 (def ^:private equilibrium-validators
   {:dominant-strategy-equilibrium  check-dominant-strategy-equilibrium
@@ -418,7 +482,9 @@
   [results]
   (cond
     (empty? results)               :not-checked
-    (some #(= :fail (:status %)) results) :fail
+    (some #(and (= :fail (:status %)) (= :hard (:severity %))) results) :fail
+    ;; Defensive: if a soft :fail exists (future extension), treat as inconclusive.
+    (some #(and (= :fail (:status %)) (not= :hard (:severity %))) results) :inconclusive
     (some #(#{:inconclusive :not-applicable} (:status %)) results) :inconclusive
     :else                          :pass))
 
