@@ -248,7 +248,7 @@
       (is (= :inconclusive (:status result)))
       (is (= :multi-trace-required (:basis result)))))
 
-  (testing "SPE PASS: rational escalation (won after appeal)"
+  (testing "SPE PASS: bounded counterfactual regret table has zero max regret"
     (let [proj {:raw-trace [{:world {:claimable {"e1" {"buyer" 0}}}}    ; t=0
                             {:world {:bond-balances {"e1" {"buyer" 50}}}}  ; t=1 (escalate)
                             {:world {:claimable {"e1" {"buyer" 150}}}}] ; t=2 (won: escrow 100 + bond 50)
@@ -257,11 +257,13 @@
           result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
                      :subgame-perfect-equilibrium)]
       (is (= :pass (:status result)))
-      (is (= :single-trace-node-proxy (:basis result)))
+      (is (= :single-trace-node-counterfactual-proxy (:basis result)))
       (is (= 1 (get-in result [:observed :decisions-checked])))
-      (is (= :pass (get-in result [:observed :spe-status])))))
+      (is (= :pass (get-in result [:observed :spe-status])))
+      (is (= 0 (get-in result [:observed :spe-max-regret])))
+      (is (= 1 (count (get-in result [:observed :spe-regret-table]))))))
 
-  (testing "SPE FAIL: irrational escalation (lost after appeal)"
+  (testing "SPE FAIL: bounded counterfactual regret exceeds threshold"
     (let [proj {:raw-trace [{:world {:claimable {"e1" {"buyer" 0}}}}    ; t=0
                             {:world {:bond-balances {"e1" {"buyer" 50}}}}  ; t=1 (escalate)
                             {:world {:claimable {"e1" {"buyer" 0}}}}] ; t=2 (lost: bond slashed)
@@ -270,10 +272,10 @@
           result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
                      :subgame-perfect-equilibrium)]
       (is (= :fail (:status result)))
-      (is (= :single-trace-node-proxy (:basis result)))
+      (is (= :single-trace-node-counterfactual-proxy (:basis result)))
       (is (= 1 (count (get-in result [:observed :spe-violations]))))
-      (is (= 50 (get-in result [:offending 0 :loss])))
-      (is (= :ex-post-regret (get-in result [:offending 0 :class])))))
+      (is (= 50 (get-in result [:observed :spe-max-regret])))
+      (is (= 50 (get-in result [:offending 0 :local-regret])))))
 
   (testing "SPE PASS: rational dispute"
     (let [proj {:raw-trace [{:world {:claimable {"e1" {"seller" 0}}}}
@@ -296,7 +298,23 @@
           result (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
                      :subgame-perfect-equilibrium)]
       (is (= :fail (:status result)))
-      (is (= 2 (count (get-in result [:observed :spe-violations])))))))
+      (is (= 2 (count (get-in result [:observed :spe-violations]))))))
+
+  (testing "SPE determinism: identical projection reruns produce identical regret table"
+    (let [proj {:raw-trace [{:world {:claimable {"e1" {"buyer" 0}}}}
+                            {:world {:bond-balances {"e1" {"buyer" 50}}}}
+                            {:world {:claimable {"e1" {"buyer" 0}}}}]
+                :decisions [{:index 1 :seq 1 :agent "buyer" :action "escalate_dispute"}]
+                :terminal-world {:terminal? true}}
+          r1 (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
+                 :subgame-perfect-equilibrium
+                 :observed
+                 :spe-regret-table)
+          r2 (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
+                 :subgame-perfect-equilibrium
+                 :observed
+                 :spe-regret-table)]
+      (is (= r1 r2)))))
 
 
 (deftest test-bne-always-inconclusive

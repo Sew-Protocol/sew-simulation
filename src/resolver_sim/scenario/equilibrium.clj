@@ -38,7 +38,8 @@
      :soft — a :fail is a warning; :inconclusive is always soft
 
    This namespace is pure — no I/O, no DB, no side effects."
-  (:require [resolver-sim.scenario.projection :as proj]))
+  (:require [resolver-sim.scenario.projection :as proj]
+            [resolver-sim.scenario.subgame-counterfactual :as subgame-cf]))
 
 ;; ---------------------------------------------------------------------------
 ;; Result constructors
@@ -362,23 +363,6 @@
             {:invariant-violations violations :attack-successes successes}
             "no unilateral deviation succeeded in this trace (single-trace proxy)"))))
 
-(defn- get-agent-wealth
-  "Approximate wealth of an agent in a given world snapshot.
-   Sums: resolver stake + claimable balances + active bond balances."
-  [world agent-id]
-  (let [stakes    (get world :resolver-stakes {})
-        claimable (get world :claimable {})
-        bonds     (get world :bond-balances {})
-        ;; Resolver stake (if applicable)
-        s (get stakes agent-id 0)
-        ;; Total claimable across all workflows for this agent
-        c (reduce + 0 (for [[_ workflow-claims] claimable]
-                        (get workflow-claims agent-id 0)))
-        ;; Active bonds held by the protocol for this agent
-        b (reduce + 0 (for [[_ workflow-bonds] bonds]
-                        (get workflow-bonds agent-id 0)))]
-    (+ s c b)))
-
 (defn- check-subgame-perfect-equilibrium
   "Heuristic: No Profitable Regret (Trace-level SPE Proxy).
    An agent strategy is SPE-consistent if every decision node in the trace
@@ -395,64 +379,34 @@
      :inconclusive-payoff     — wealth cannot be calculated
 
    :inconclusive when no strategic decisions were made."
-  [{:keys [raw-trace decisions terminal-world]}]
-  (let [;; Strategic actions are points where an agent makes a material choice:
-        ;; - raise_dispute:      party contests an escrow outcome (posts implicit claim)
-        ;; - escalate_dispute:   party appeals to a higher authority (posts appeal bond)
-        ;; - execute_resolution: resolver decides outcome (may lose stake if fraudulent)
-        strategic-actions #{"raise_dispute" "escalate_dispute" "execute_resolution"}
-        decision-nodes    (filter #(strategic-actions (:action %)) decisions)]
-    (cond
-      (empty? decision-nodes)
-      (inconclusive :subgame-perfect-equilibrium :absent-evidence
-                    "no strategic decision nodes (disputes/escalations) in this trace")
+  [projection]
+  (let [{:keys [status basis regret-table max-regret threshold checked-nodes requires]}
+        (subgame-cf/evaluate-subgame-counterfactual projection)
+        observed {:spe-status      status
+                  :spe-summary     (case status
+                                     :pass (str "bounded counterfactual regret <= threshold across " checked-nodes " node(s)")
+                                     :fail (str "bounded counterfactual regret exceeds threshold at one or more nodes")
+                                     :inconclusive (or (first requires) "counterfactual evidence unavailable")
+                                     "counterfactual evidence unavailable")
+                  :spe-regret-table regret-table
+                  :spe-max-regret   max-regret
+                  :spe-threshold    threshold
+                  :decisions-checked checked-nodes
+                  :spe-violations   (vec (filter (fn [r] (pos? (long (or (:local-regret r) 0)))) regret-table))}]
+    (case status
+      :pass
+      (pass :subgame-perfect-equilibrium basis
+            observed
+            {:spe-status :pass :max-regret (str "<= " threshold)})
 
-      (not (:terminal? terminal-world))
-      (inconclusive :subgame-perfect-equilibrium :multi-trace-required
-                    "trace ends before settlement; cannot evaluate ex-post regret")
+      :fail
+      (fail :subgame-perfect-equilibrium basis
+            observed
+            {:spe-status :pass :max-regret (str "<= " threshold)}
+            (:spe-violations observed))
 
-      :else
-      (let [terminal-state (:world (last raw-trace))
-            violations (keep (fn [decision]
-                               ;; :seq equals the array index in raw-trace (events are
-                               ;; validated to have contiguous seq values starting at 0)
-                               (let [t-idx   (:seq decision)
-                                     agent   (:agent decision)
-                                     ;; Use resolved address for world-state lookup;
-                                     ;; world keys (resolver-stakes, claimable, etc.)
-                                     ;; are keyed by address, not agent ID.
-                                     addr    (or (:address decision) agent)
-                                     action  (:action decision)]
-                                 (when (and (strategic-actions action)
-                                             (some? t-idx)
-                                             (< t-idx (count raw-trace)))
-                                   (let [world-at (:world (nth raw-trace t-idx))
-                                         w-at     (get-agent-wealth world-at addr)
-                                         w-T      (get-agent-wealth terminal-state addr)]
-                                     (when (< w-T w-at)
-                                       {:index   t-idx
-                                        :seq     t-idx
-                                        :agent   agent
-                                        :action  action
-                                        :loss    (- w-at w-T)
-                                        :class   :ex-post-regret
-                                        :summary (str "Agent " agent " " action " at step " t-idx
-                                                      " led to net loss of " (- w-at w-T))})))))
-                             decisions)]
-        (if (seq violations)
-          (fail :subgame-perfect-equilibrium :single-trace-node-proxy
-                {:spe-status     :fail
-                 :spe-summary    (str "observed " (count violations) " strategic actions led to avoidable net losses")
-                 :spe-violations (vec violations)}
-                {:spe-status :pass}
-                violations)
-          (let [checked (count decision-nodes)]
-            (pass :subgame-perfect-equilibrium :single-trace-node-proxy
-                  {:spe-status     :pass
-                   :spe-summary    (str "all " checked " strategic decisions resulted in non-negative terminal payoff contributions")
-                   :spe-violations []
-                   :decisions-checked checked}
-                  {:spe-status :pass})))))))
+      (inconclusive :subgame-perfect-equilibrium basis
+                    (or (first requires) "counterfactual evidence unavailable")))))
 
 (defn- check-bayesian-nash-equilibrium
   "Requires population/belief distributions across resolvers. Always
