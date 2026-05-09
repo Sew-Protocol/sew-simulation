@@ -601,6 +601,98 @@
       (inconclusive eq-concept basis
                     (or (first requires) "counterfactual evidence unavailable")))))
 
+(defn- check-resolver-reputation-spe
+  "Reputation-aware epsilon-SPE proxy (Gap D).
+
+   Same as check-bounded-public-state-epsilon-spe but forces utility-spec type to
+   :resolver-reputation-v1 so each decision node's utility includes the additional
+   future-earnings reputation penalty for slashed resolvers.
+
+   Key accounting note: terminal-realized-wealth already includes the stake reduction
+   from slashing. The reputation-slash-penalty is an ADDITIONAL future-earnings term
+   only — it is not a second subtraction of the stake loss.
+
+   Parameters from spe-config.utility-spec:
+     :reputation-slash-penalty  — token-equivalent future earnings lost per slash event
+     :reputation-discount-rate  — multiplier on penalty (default 1.0)
+     :slash-detection-mode      — :explicit-slash-total (default) | :stake-delta
+     :slash-threshold           — minimum stake drop for :stake-delta mode (default 1)
+
+   When :reputation-slash-penalty is 0 (the default), results match
+   :terminal-realized-v1 (zero-penalty compatibility).
+
+   Observed map includes :min-reputation-penalty-for-spe-pass: the minimum penalty
+   magnitude required to deter every profitable deviation identified in the trace.
+   This converts a pass/fail verdict into a quantitative deterrence threshold."
+  [projection]
+  (let [projection' (update projection :spe-config
+                            (fn [cfg]
+                              (update cfg :utility-spec
+                                      (fn [us] (merge us {:type :resolver-reputation-v1})))))
+        {:keys [status basis regret-table max-regret threshold checked-nodes requires
+                continuation-policy replay-boundary utility-spec
+                spe-result strategy-profile
+                proper-subgames-checked information-set-nodes-checked not-checkable-nodes
+                counterexamples off-path-coverage epsilon-abs epsilon-rel
+                class-counts exceed-epsilon-count memoization regret-distribution
+                max-deviation-depth mean-regret
+                evaluation-mode min-reputation-penalty-for-spe-pass]}
+        (subgame-cf/evaluate-subgame-counterfactual projection')
+        eq-concept :resolver-reputation-spe
+        penalty    (get-in projection' [:spe-config :utility-spec :reputation-slash-penalty] 0)
+        slash-detected-count (count (filter #(get-in % [:utility-breakdown :slash-detected?])
+                                            regret-table))]
+    (cond
+      (zero? (long (or proper-subgames-checked 0)))
+      (inconclusive eq-concept :absent-evidence
+                    (str "no proper subgames found (proper-subgames-checked=0); "
+                         "all nodes were information-set or not-checkable"))
+
+      (= status :pass)
+      (pass eq-concept basis
+            {:spe-result spe-result
+             :spe-max-regret max-regret
+             :spe-threshold threshold
+             :spe-epsilon-abs epsilon-abs
+             :spe-epsilon-rel epsilon-rel
+             :strategy-profile strategy-profile
+             :proper-subgames-checked proper-subgames-checked
+             :information-set-nodes-checked information-set-nodes-checked
+             :counterexamples counterexamples
+             :off-path-coverage off-path-coverage
+             :decisions-checked checked-nodes
+             :utility-type :resolver-reputation-v1
+             :reputation-slash-penalty penalty
+             :slash-detected-count slash-detected-count
+             :min-reputation-penalty-for-spe-pass min-reputation-penalty-for-spe-pass}
+            {:spe-result #{:spe/pass :spe/epsilon-pass}
+             :profitable-deviation-count 0})
+
+      (= status :fail)
+      (fail eq-concept basis
+            {:spe-result spe-result
+             :spe-max-regret max-regret
+             :spe-threshold threshold
+             :counterexamples counterexamples
+             :profitable-deviation-count (count counterexamples)
+             :proper-subgames-checked proper-subgames-checked
+             :strategy-profile strategy-profile
+             :utility-type :resolver-reputation-v1
+             :reputation-slash-penalty penalty
+             :slash-detected-count slash-detected-count
+             :min-reputation-penalty-for-spe-pass min-reputation-penalty-for-spe-pass}
+            {:spe-result #{:spe/pass :spe/epsilon-pass}
+             :profitable-deviation-count 0}
+            (mapv (fn [ce] {:metric :profitable-deviation
+                            :node/id (:node/id ce)
+                            :regret (:regret ce)
+                            :agent (:agent ce)})
+                  counterexamples))
+
+      :else
+      (inconclusive eq-concept basis
+                    (or (first requires) "counterfactual evidence unavailable")))))
+
 (defn- check-bayesian-nash-equilibrium
   "Requires population/belief distributions across resolvers. Always
    :inconclusive for single-trace replay."
@@ -628,6 +720,7 @@
    :subgame-perfect-equilibrium             check-subgame-perfect-equilibrium
    :bounded-public-state-epsilon-spe        check-bounded-public-state-epsilon-spe
    :bounded-backward-induction-spe          check-bounded-backward-induction-spe
+   :resolver-reputation-spe                 check-resolver-reputation-spe
    :bayesian-nash-equilibrium               check-bayesian-nash-equilibrium})
 
 ;; ---------------------------------------------------------------------------

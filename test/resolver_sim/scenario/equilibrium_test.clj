@@ -7,7 +7,8 @@
    :not-applicable paths for each validator."
   (:require [clojure.test :refer [deftest is testing run-tests]]
             [resolver-sim.scenario.equilibrium :as eq]
-            [resolver-sim.scenario.projection  :as proj]))
+            [resolver-sim.scenario.projection  :as proj]
+            [resolver-sim.scenario.subgame-counterfactual :as subgame-cf]))
 
 (defn -main
   "Allow direct execution via: clojure -M:test -m resolver-sim.scenario.equilibrium-test"
@@ -644,3 +645,270 @@
                 :equilibrium-results :bounded-backward-induction-spe)]
       (is (contains? #{:pass :inconclusive} (:status r))
           "honest resolution with no profitable deviation must pass or be inconclusive"))))
+
+;; ---------------------------------------------------------------------------
+;; Gap D — Reputation utility (:resolver-reputation-v1) tests
+;; ---------------------------------------------------------------------------
+
+(defn- reputation-slash-replay-result
+  "Replay result where resolver executes_resolution, earns a fee, and is slashed.
+   Pre-world  (seq 0): resolver-stakes=100, resolver-slash-total={}
+   Terminal   (seq 1): resolver-stakes=0 (slashed), resolver-slash-total={addr 100},
+                       claimable={e1 {addr 50}} (fee earned).
+   terminal-realized-wealth = 0 + 50 = 50 (stake drop already included).
+   slash-amount (explicit) = 100."
+  ([]
+   (reputation-slash-replay-result "0xresolver"))
+  ([addr]
+   {:trace [{:world {:resolver-stakes {addr 100}
+                     :resolver-slash-total {}
+                     :claimable {}
+                     :bond-balances {}
+                     :live-states {"e1" "disputed"}
+                     :total-held {}
+                     :total-fees {}}
+              :agent "resolver" :action "register_stake" :seq 0 :time 1000}
+             {:world {:resolver-stakes {addr 0}
+                      :resolver-slash-total {addr 100}
+                      :claimable {"e1" {addr 50}}
+                      :bond-balances {}
+                      :live-states {"e1" "released"}
+                      :total-held {}
+                      :total-fees {}
+                      :terminal? true}
+              :agent "resolver" :action "execute_resolution" :seq 1 :time 1100}]
+    :agents [{:id "resolver" :address addr :role "resolver" :strategy "malicious"}]
+    :metrics {}}))
+
+(defn- reputation-no-slash-replay-result
+  "Replay result where resolver executes_resolution and earns fee — no slash.
+   Pre-world  (seq 0): resolver-stakes=100, resolver-slash-total={}
+   Terminal   (seq 1): resolver-stakes=100, resolver-slash-total={}, claimable={e1 {addr 50}}.
+   terminal-realized-wealth = 100 + 50 = 150."
+  []
+  {:trace [{:world {:resolver-stakes {"0xresolver" 100}
+                    :resolver-slash-total {}
+                    :claimable {}
+                    :bond-balances {}
+                    :live-states {"e1" "disputed"}
+                    :total-held {}
+                    :total-fees {}}
+             :agent "resolver" :action "register_stake" :seq 0 :time 1000}
+            {:world {:resolver-stakes {"0xresolver" 100}
+                     :resolver-slash-total {}
+                     :claimable {"e1" {"0xresolver" 50}}
+                     :bond-balances {}
+                     :live-states {"e1" "released"}
+                     :total-held {}
+                     :total-fees {}
+                     :terminal? true}
+             :agent "resolver" :action "execute_resolution" :seq 1 :time 1100}]
+   :agents [{:id "resolver" :address "0xresolver" :role "resolver" :strategy "honest"}]
+   :metrics {}})
+
+(defn- reputation-withdrawal-replay-result
+  "Replay result where resolver's stake drops due to withdrawal (not slash).
+   resolver-slash-total stays at {} so :explicit-slash-total mode detects no slash."
+  []
+  {:trace [{:world {:resolver-stakes {"0xresolver" 100}
+                    :resolver-slash-total {}
+                    :claimable {}
+                    :bond-balances {}
+                    :live-states {"e1" "disputed"}
+                    :total-held {}
+                    :total-fees {}}
+             :agent "resolver" :action "register_stake" :seq 0 :time 1000}
+            {:world {:resolver-stakes {"0xresolver" 50}
+                     :resolver-slash-total {}
+                     :claimable {"e1" {"0xresolver" 50}}
+                     :bond-balances {}
+                     :live-states {"e1" "released"}
+                     :total-held {}
+                     :total-fees {}
+                     :terminal? true}
+             :agent "resolver" :action "execute_resolution" :seq 1 :time 1100}]
+   :agents [{:id "resolver" :address "0xresolver" :role "resolver" :strategy "honest"}]
+   :metrics {}})
+
+(defn- reputation-multi-resolver-replay-result
+  "Two resolvers. Resolver-B is slashed but Resolver-A is the decision actor.
+   Only Resolver-A's decision node exists. Resolver-A should not be penalized."
+  []
+  {:trace [{:world {:resolver-stakes {"0xresolver-a" 100 "0xresolver-b" 100}
+                    :resolver-slash-total {}
+                    :claimable {}
+                    :bond-balances {}
+                    :live-states {}
+                    :total-held {}
+                    :total-fees {}}
+             :agent "resolver-a" :action "register_stake" :seq 0 :time 1000}
+            {:world {:resolver-stakes {"0xresolver-a" 100 "0xresolver-b" 0}
+                     :resolver-slash-total {"0xresolver-b" 100}
+                     :claimable {"e1" {"0xresolver-a" 50}}
+                     :bond-balances {}
+                     :live-states {"e1" "released"}
+                     :total-held {}
+                     :total-fees {}
+                     :terminal? true}
+             :agent "resolver-a" :action "execute_resolution" :seq 1 :time 1100}]
+   :agents [{:id "resolver-a" :address "0xresolver-a" :role "resolver" :strategy "honest"}
+            {:id "resolver-b" :address "0xresolver-b" :role "resolver" :strategy "malicious"}]
+   :metrics {}})
+
+(deftest test-reputation-slash-detected-penalty-applied
+  (testing ":resolver-reputation-v1 — slash detected, penalty reduces total utility"
+    (let [result (reputation-slash-replay-result)
+          ;; pre-wealth=100, terminal-realized=50 (stake 0 + claimable 50)
+          ;; penalty=200, no discount → rep-adj = -200 → total-utility = -150
+          ;; best-alt = pre-wealth = 100 → regret = 250 > threshold=0 → FAIL
+          theory {:equilibrium-concept ["resolver-reputation-spe"]
+                  :spe-config {:regret-threshold 0
+                               :utility-spec {:reputation-slash-penalty 200
+                                              :reputation-discount-rate 1.0}}}
+          r (-> (eq/evaluate-equilibrium theory result)
+                :equilibrium-results :resolver-reputation-spe)]
+      (is (= :fail (:status r))
+          "malicious resolver with large penalty should fail SPE")
+      (is (pos? (get-in r [:observed :slash-detected-count] 0))
+          "slash-detected-count should be positive when resolver was slashed"))))
+
+(deftest test-reputation-no-slash-equals-terminal-realized
+  (testing ":resolver-reputation-v1 with no slash equals :terminal-realized-v1"
+    (let [result-no-slash (reputation-no-slash-replay-result)
+          ;; Both utility types should agree when no slash occurred
+          theory-rep {:equilibrium-concept ["resolver-reputation-spe"]
+                      :spe-config {:regret-threshold 9999
+                                   :utility-spec {:reputation-slash-penalty 200}}}
+          theory-std {:equilibrium-concept ["bounded-public-state-epsilon-spe"]
+                      :spe-config {:regret-threshold 9999}}
+          r-rep (-> (eq/evaluate-equilibrium theory-rep result-no-slash)
+                    :equilibrium-results :resolver-reputation-spe)
+          r-std (-> (eq/evaluate-equilibrium theory-std result-no-slash)
+                    :equilibrium-results :bounded-public-state-epsilon-spe)]
+      (is (= (:status r-rep) (:status r-std))
+          "no slash → reputation-v1 must agree with terminal-realized-v1 on pass/fail"))))
+
+(deftest test-reputation-zero-penalty-matches-terminal-realized
+  (testing ":resolver-reputation-v1 with zero penalty is identical to :terminal-realized-v1"
+    (let [result (reputation-slash-replay-result)
+          ;; Even though resolver is slashed, penalty=0 → no extra adjustment
+          theory-zero {:equilibrium-concept ["resolver-reputation-spe"]
+                       :spe-config {:regret-threshold 9999
+                                    :utility-spec {:reputation-slash-penalty 0}}}
+          theory-std  {:equilibrium-concept ["bounded-public-state-epsilon-spe"]
+                       :spe-config {:regret-threshold 9999}}
+          r-zero (-> (eq/evaluate-equilibrium theory-zero result)
+                     :equilibrium-results :resolver-reputation-spe)
+          r-std  (-> (eq/evaluate-equilibrium theory-std result)
+                     :equilibrium-results :bounded-public-state-epsilon-spe)]
+      (is (= (:status r-zero) (:status r-std))
+          "penalty=0 → reputation-v1 must agree with terminal-realized-v1"))))
+
+(deftest test-reputation-concept-dispatches
+  (testing ":resolver-reputation-spe concept dispatches and returns a valid result"
+    (let [result (reputation-no-slash-replay-result)
+          theory {:equilibrium-concept ["resolver-reputation-spe"]
+                  :spe-config {:regret-threshold 0
+                               :utility-spec {:reputation-slash-penalty 100}}}
+          r (-> (eq/evaluate-equilibrium theory result)
+                :equilibrium-results :resolver-reputation-spe)]
+      (is (some? r) "resolver-reputation-spe result must be present")
+      (is (contains? #{:pass :fail :inconclusive :not-applicable} (:status r))
+          "status must be a valid keyword")
+      (is (= :resolver-reputation-v1 (get-in r [:observed :utility-type]))
+          "observed must report utility-type :resolver-reputation-v1"))))
+
+(deftest test-reputation-wrong-actor-not-penalized
+  (testing ":resolver-reputation-v1 — resolver-B slash does not penalize resolver-A"
+    (let [result (reputation-multi-resolver-replay-result)
+          ;; resolver-B is slashed; resolver-A is the decision actor
+          ;; resolver-A's utility should not include resolver-B's slash penalty
+          theory {:equilibrium-concept ["resolver-reputation-spe"]
+                  :spe-config {:regret-threshold 9999
+                               :utility-spec {:reputation-slash-penalty 500}}}
+          r (-> (eq/evaluate-equilibrium theory result)
+                :equilibrium-results :resolver-reputation-spe)]
+      (is (contains? #{:pass :inconclusive} (:status r))
+          "resolver-B's slash should not penalize resolver-A (wrong actor)")
+      (is (zero? (get-in r [:observed :slash-detected-count] 0))
+          "slash-detected-count must be 0 when only the non-decision actor was slashed"))))
+
+(deftest test-reputation-stake-withdrawal-not-slash
+  (testing ":resolver-reputation-v1 :explicit-slash-total — stake drop without slash-total increase is not a slash"
+    (let [result (reputation-withdrawal-replay-result)
+          ;; stake drops from 100→50 (voluntary withdrawal), resolver-slash-total stays {}
+          ;; penalty=500 but no slash detected → utility = terminal-realized → PASS with lenient threshold
+          theory {:equilibrium-concept ["resolver-reputation-spe"]
+                  :spe-config {:regret-threshold 9999
+                               :utility-spec {:reputation-slash-penalty 500
+                                              :slash-detection-mode :explicit-slash-total}}}
+          r (-> (eq/evaluate-equilibrium theory result)
+                :equilibrium-results :resolver-reputation-spe)]
+      (is (contains? #{:pass :inconclusive} (:status r))
+          "stake withdrawal should not trigger slash penalty in :explicit-slash-total mode")
+      (is (zero? (get-in r [:observed :slash-detected-count] 0))
+          "slash-detected-count must be 0 when resolver-slash-total did not increase"))))
+
+(deftest test-reputation-no-double-counting-stake-loss
+  (testing ":resolver-reputation-v1 — stake loss already in terminal-wealth; only rep-penalty added"
+    ;; resolver slashed: slash-amount=100, stake: 100→0, terminal-realized=50 (0+claimable50)
+    ;; penalty=200 → total-utility = 50 + (-200) = -150
+    ;; If double-counted: 50 - 100 + (-200) = -250 (wrong)
+    ;; We verify by checking the utility breakdown of the row.
+    (let [result (reputation-slash-replay-result)
+          theory {:equilibrium-concept ["resolver-reputation-spe"]
+                  :spe-config {:regret-threshold 9999
+                               :utility-spec {:reputation-slash-penalty 200
+                                              :reputation-discount-rate 1.0}}}
+          r        (-> (eq/evaluate-equilibrium theory result)
+                       :equilibrium-results :resolver-reputation-spe)
+          ;; Find the execute_resolution row in the regret table
+          rows     (get-in r [:observed :counterexamples] [])
+          ;; Get the actual projection to inspect the regret-table directly
+          raw-proj (-> result
+                       proj/trace-end-projection
+                       (assoc :spe-config {:regret-threshold 9999
+                                           :utility-spec {:type :resolver-reputation-v1
+                                                          :reputation-slash-penalty 200
+                                                          :reputation-discount-rate 1.0}}))
+          eval-r   (subgame-cf/evaluate-subgame-counterfactual raw-proj)
+          exec-row (first (filter #(= "execute_resolution" (:chosen-action %))
+                                  (:regret-table eval-r)))
+          bd       (:utility-breakdown exec-row)]
+      (is (some? bd) "utility-breakdown must be present for :resolver-reputation-v1")
+      (when bd
+        (is (= 50 (:terminal-realized-wealth bd))
+            "terminal-realized-wealth should be 50 (stake 0 + claimable 50)")
+        (is (true? (:slash-detected? bd))
+            "slash should be detected via resolver-slash-total")
+        (is (= 100 (:slash-amount bd))
+            "slash-amount should equal resolver-slash-total diff (100), not stake drop")
+        (is (= -200 (:reputation-adjustment bd))
+            "reputation-adjustment should be -(penalty * discount) = -200")
+        (is (= -150 (:total-utility bd))
+            "total-utility = 50 + (-200) = -150 (NOT 50 - 100 - 200 = -250)")))))
+
+(deftest test-reputation-min-required-penalty-emitted
+  (testing ":resolver-reputation-v1 — min-reputation-penalty-required emitted per row"
+    ;; terminal-realized=50, best-alt=100 (pre-wealth), gap=50, discount=1.0
+    ;; min-required = ceil(50/1.0) = 50
+    (let [result (reputation-slash-replay-result)
+          raw-proj (-> result
+                       proj/trace-end-projection
+                       (assoc :spe-config {:regret-threshold 9999
+                                           :utility-spec {:type :resolver-reputation-v1
+                                                          :reputation-slash-penalty 200
+                                                          :reputation-discount-rate 1.0}}))
+          eval-r   (subgame-cf/evaluate-subgame-counterfactual raw-proj)
+          exec-row (first (filter #(= "execute_resolution" (:chosen-action %))
+                                  (:regret-table eval-r)))
+          min-req  (:min-reputation-penalty-required exec-row)
+          global   (:min-reputation-penalty-for-spe-pass eval-r)]
+      (is (some? min-req)
+          "min-reputation-penalty-required must be emitted per row when there is a gap")
+      (is (= 50 min-req)
+          "min-required should be 50: gap=(100-50)=50, discount=1.0, ceil(50/1.0)=50")
+      (is (some? global)
+          "min-reputation-penalty-for-spe-pass must be emitted globally")
+      (is (= 50 global)
+          "global should equal max(per-row min-required)"))))

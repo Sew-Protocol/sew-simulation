@@ -204,23 +204,95 @@
         ;; No downstream nodes: continuation deviation treated like terminal
         pre-w))))
 
+(defn- detect-slash-explicit
+  "Returns the incremental slash amount for actor since pre-world using the
+   :resolver-slash-total accumulator (preferred — not confused with withdrawals).
+   Returns nil when the accumulator key is absent from pre-world (older trace
+   format); an empty accumulator map means no prior slashes (= 0)."
+  [pre-world terminal-world actor]
+  (when (contains? pre-world :resolver-slash-total)
+    (let [pre-tot  (get-in pre-world  [:resolver-slash-total actor] 0)
+          term-tot (get-in terminal-world [:resolver-slash-total actor] 0)]
+      (max 0 (- (long term-tot) (long pre-tot))))))
+
+(defn- detect-slash-stake-delta
+  "Fallback slash detection via stake drop >= threshold.
+   Risk: false positives from voluntary withdrawals / bond unlocks."
+  [pre-world terminal-world actor threshold]
+  (let [pre-s  (get-in pre-world  [:resolver-stakes actor] 0)
+        term-s (get-in terminal-world [:resolver-stakes actor] 0)
+        drop   (max 0 (- (long pre-s) (long term-s)))]
+    (when (>= drop (long threshold)) drop)))
+
+(defn- compute-reputation-utility
+  "Compute :resolver-reputation-v1 utility for actor.
+
+   Accounting invariant: terminal-realized-wealth already includes the stake
+   reduction from slashing (resolver-stakes is debited on slash). Therefore,
+   reputation-slash-penalty represents ONLY additional future-earnings loss —
+   it must NOT subtract the stake loss a second time.
+
+   Slash detection modes (utility-spec :slash-detection-mode):
+     :explicit-slash-total (default) — resolver-slash-total accumulator in world state
+     :stake-delta                    — stake drop fallback (risk: false positives)
+
+   Returns utility map with :utility-breakdown for transparency. When
+   reputation-slash-penalty is 0 the result is identical to :terminal-realized-v1."
+  [terminal-world actor utility-spec pre-world]
+  (let [u-type    (keyword (or (:type utility-spec) :resolver-reputation-v1))
+        u-ver     (str (or (:version utility-spec) "v1"))
+        penalty   (long (or (:reputation-slash-penalty utility-spec) 0))
+        discount  (double (or (:reputation-discount-rate utility-spec) 1.0))
+        det-mode  (keyword (or (:slash-detection-mode utility-spec) :explicit-slash-total))
+        threshold (long (or (:slash-threshold utility-spec) 1))
+        terminal-wealth (get-agent-wealth terminal-world actor)
+        ;; Actor-scoped, node-local slash detection.
+        slash-amount
+        (when pre-world
+          (case det-mode
+            :explicit-slash-total (detect-slash-explicit pre-world terminal-world actor)
+            :stake-delta          (detect-slash-stake-delta pre-world terminal-world actor threshold)
+            (detect-slash-explicit pre-world terminal-world actor)))
+        slashed?    (boolean (and (some? slash-amount) (pos? (long slash-amount))))
+        ;; rep-adj is future-earnings penalty, not stake loss (already in terminal-wealth).
+        rep-adj     (if slashed?
+                      (- (long (Math/round (* (double penalty) discount))))
+                      0)
+        total-util  (when (some? terminal-wealth)
+                      (+ (long terminal-wealth) (long rep-adj)))
+        breakdown   {:terminal-realized-wealth terminal-wealth
+                     :slash-detected?          slashed?
+                     :slash-amount             (or slash-amount 0)
+                     :reputation-adjustment    rep-adj
+                     :total-utility            total-util}]
+    {:defined?          (some? total-util)
+     :value             total-util
+     :utility-type      u-type
+     :utility-version   u-ver
+     :utility-breakdown breakdown}))
+
 (defn- compute-utility
   "Canonical utility interface for Phase A.
-   Returns {:defined? bool :value number|nil :utility-type kw :utility-version str}."
-  [world agent-id utility-spec]
-  (let [u-type (keyword (or (:type utility-spec) :terminal-realized-v1))
-        u-ver  (str (or (:version utility-spec) "v1"))]
-    (case u-type
-      :terminal-realized-v1
-      {:defined? true
-       :value (get-agent-wealth world agent-id)
-       :utility-type u-type
-       :utility-version u-ver}
+   Returns {:defined? bool :value number|nil :utility-type kw :utility-version str}.
+   pre-world is required for :resolver-reputation-v1 (slash detection baseline)."
+  ([world agent-id utility-spec] (compute-utility world agent-id utility-spec nil))
+  ([world agent-id utility-spec pre-world]
+   (let [u-type (keyword (or (:type utility-spec) :terminal-realized-v1))
+         u-ver  (str (or (:version utility-spec) "v1"))]
+     (case u-type
+       :terminal-realized-v1
+       {:defined? true
+        :value (get-agent-wealth world agent-id)
+        :utility-type u-type
+        :utility-version u-ver}
 
-      {:defined? false
-       :value nil
-       :utility-type u-type
-       :utility-version u-ver})))
+       :resolver-reputation-v1
+       (compute-reputation-utility world agent-id utility-spec pre-world)
+
+       {:defined? false
+        :value nil
+        :utility-type u-type
+        :utility-version u-ver}))))
 
 (defn- build-information-set
   "Phase B minimal information-set model.
@@ -310,7 +382,7 @@
         info-set       (build-information-set pre-world node)
         alternatives   (bounded-alternatives node-type action info-set spe-config)
         pre-utility-r  (when pre-world (compute-utility pre-world actor utility-spec))
-        chosen-utility-r (when terminal-state (compute-utility terminal-state actor utility-spec))
+        chosen-utility-r (when terminal-state (compute-utility terminal-state actor utility-spec pre-world))
         pre-utility    (:value pre-utility-r)
         chosen-utility (:value chosen-utility-r)
         ;; Phase K: backward-induction-ctx overrides the forward-pass heuristic when present.
@@ -351,7 +423,21 @@
                         (some? best-alt-utility)
                         (some? chosen-utility))
                  (max 0 (- best-alt-utility chosen-utility))
-                 nil)]
+                 nil)
+        ;; Min reputation penalty required for this node to pass SPE.
+        ;; Only meaningful for :resolver-reputation-v1 when chosen-utility already
+        ;; includes rep-adj. Compare against the terminal-realized baseline so the
+        ;; required threshold is expressed in penalty units (before discount).
+        utility-breakdown (:utility-breakdown chosen-utility-r)
+        min-rep-penalty-required
+        (when (and utility-breakdown (some? best-alt-utility))
+          (let [terminal-w (long (or (:terminal-realized-wealth utility-breakdown) 0))
+                gap        (max 0 (- (long best-alt-utility) terminal-w))
+                disc       (double (or (:reputation-discount-rate utility-spec) 1.0))]
+            (when (pos? gap)
+              (if (pos? disc)
+                (long (Math/ceil (/ (double gap) disc)))
+                gap))))]
     {:node-index idx
      :agent agent
      :address actor
@@ -375,7 +461,10 @@
      :bundle-regret nil
      ;; Phase K
      :deviation-classes deviation-classes
-     :deterministic-key (str idx "|" agent "|" action)}))
+     :deterministic-key (str idx "|" agent "|" action)
+     ;; Reputation utility breakdown (only present for :resolver-reputation-v1)
+     :utility-breakdown utility-breakdown
+     :min-reputation-penalty-required min-rep-penalty-required}))
 
 ;; ---------------------------------------------------------------------------
 ;; Phase H — Rich SPE result vocabulary
@@ -644,7 +733,12 @@
             deviation-terminal-count    (when backward?
                                           (count (filter #(= :terminal-deviation %) all-dev-classes)))
             deviation-continuation-count (when backward?
-                                           (count (filter #(= :continuation-deviation %) all-dev-classes)))]
+                                           (count (filter #(= :continuation-deviation %) all-dev-classes)))
+            ;; Reputation utility: global min-required-penalty aggregate.
+            ;; The minimum penalty that would close every profitable-deviation gap.
+            ;; Only meaningful when utility-spec type is :resolver-reputation-v1.
+            rep-penalties    (keep :min-reputation-penalty-required rows)
+            min-rep-penalty-for-spe-pass (when (seq rep-penalties) (apply max rep-penalties))]
         {:status status
          :spe-result spe-result
          :basis :single-trace-node-counterfactual-proxy
@@ -677,4 +771,7 @@
          :evaluation-mode eval-mode
          :backward-induction-depth (when backward? (count eval-nodes))
          :deviation-terminal-count deviation-terminal-count
-         :deviation-continuation-count deviation-continuation-count}))))
+         :deviation-continuation-count deviation-continuation-count
+         ;; Reputation utility: minimum penalty required across all nodes for SPE pass.
+         ;; nil when utility-spec is not :resolver-reputation-v1 or no gap exists.
+         :min-reputation-penalty-for-spe-pass min-rep-penalty-for-spe-pass}))))

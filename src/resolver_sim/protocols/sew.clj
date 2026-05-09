@@ -411,6 +411,7 @@
    :escrow-amounts     (into {} (map (fn [[id et]] [id (:amount-after-fee et)])
                                      (:escrow-transfers world)))
    :resolver-stakes     (:resolver-stakes world)
+   :resolver-slash-total (:resolver-slash-total world)
    :bond-distribution   (:bond-distribution world)
    :claimable           (:claimable world {})
    :bond-balances       (:bond-balances world {})})
