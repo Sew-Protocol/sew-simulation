@@ -693,6 +693,91 @@
       (inconclusive eq-concept basis
                     (or (first requires) "counterfactual evidence unavailable")))))
 
+(defn- check-resolver-reputation-profile-matrix
+  "Profile-matrix reputation SPE validator.
+
+   Runs the subgame counterfactual evaluator against each profile declared in
+   spe-config.utility-profiles (sequence of profile keys or inline maps).
+
+   Each profile is resolved via the reputation-profiles registry and merged into
+   the projection's utility-spec before evaluation, producing a per-profile
+   comparison table.
+
+   Status semantics:
+     :pass        — ALL profiles return :pass
+     :fail        — ANY profile returns :fail (worst case wins)
+     :inconclusive — no proper subgames found or no profiles declared
+
+   Observed map includes:
+     :profile-results          — vector of per-profile result maps
+     :min-profile-required     — weakest profile id that yields :pass (nil if none pass)
+     :fail-profiles            — vector of profile ids that failed
+     :any-pass?                — boolean
+     :all-pass?                — boolean
+
+   This validator answers: 'Under which resolver-market assumptions does this
+   strategy become incentive-compatible?' rather than a single pass/fail verdict."
+  [projection]
+  (let [eq-concept :resolver-reputation-profile-matrix
+        spe-config (:spe-config projection {})
+        profiles   (get spe-config :utility-profiles [])]
+    (if (empty? profiles)
+      (inconclusive eq-concept :absent-evidence
+                    "no utility-profiles declared in spe-config; add :utility-profiles vector")
+      (let [{:keys [profile-results min-profile-required any-pass? all-pass? fail-profiles]}
+            (subgame-cf/run-profile-matrix projection profiles)
+            proper-checked (apply + (map #(:proper-subgames-checked (:profile-spec %) 0)
+                                         profile-results))]
+        (cond
+          (zero? (count (filter #(pos? (or (:proper-subgames-checked %) 0))
+                                profile-results)))
+          (inconclusive eq-concept :absent-evidence
+                        "no proper subgames found across any profile; all nodes were information-set or not-checkable")
+
+          all-pass?
+          (pass eq-concept :single-trace-node-counterfactual-proxy
+                {:profile-results      profile-results
+                 :min-profile-required min-profile-required
+                 :fail-profiles        fail-profiles
+                 :any-pass?            any-pass?
+                 :all-pass?            all-pass?
+                 :profile-count        (count profiles)}
+                {:all-pass? true})
+
+          any-pass?
+          (fail eq-concept :single-trace-node-counterfactual-proxy
+                {:profile-results      profile-results
+                 :min-profile-required min-profile-required
+                 :fail-profiles        fail-profiles
+                 :any-pass?            any-pass?
+                 :all-pass?            all-pass?
+                 :profile-count        (count profiles)
+                 :interpretation       (str "Strategy is incentive-compatible only under profiles: "
+                                            (pr-str (mapv :profile-id (filter #(= :pass (:status %)) profile-results)))
+                                            ". Fails under: " (pr-str fail-profiles))}
+                {:all-pass? true}
+                (mapv (fn [pr]
+                        {:metric :profile-spe-fail
+                         :profile-id (:profile-id pr)
+                         :max-regret (:max-regret pr)})
+                      (filter #(= :fail (:status %)) profile-results)))
+
+          :else
+          (fail eq-concept :single-trace-node-counterfactual-proxy
+                {:profile-results      profile-results
+                 :min-profile-required nil
+                 :fail-profiles        fail-profiles
+                 :any-pass?            false
+                 :all-pass?            false
+                 :profile-count        (count profiles)
+                 :interpretation       "Strategy fails under all declared profiles."}
+                {:all-pass? true}
+                (mapv (fn [pr]
+                        {:metric :profile-spe-fail
+                         :profile-id (:profile-id pr)
+                         :max-regret (:max-regret pr)})
+                      (filter #(= :fail (:status %)) profile-results))))))))
+
 (defn- check-bayesian-nash-equilibrium
   "Requires population/belief distributions across resolvers. Always
    :inconclusive for single-trace replay."
@@ -721,6 +806,7 @@
    :bounded-public-state-epsilon-spe        check-bounded-public-state-epsilon-spe
    :bounded-backward-induction-spe          check-bounded-backward-induction-spe
    :resolver-reputation-spe                 check-resolver-reputation-spe
+   :resolver-reputation-profile-matrix      check-resolver-reputation-profile-matrix
    :bayesian-nash-equilibrium               check-bayesian-nash-equilibrium})
 
 ;; ---------------------------------------------------------------------------

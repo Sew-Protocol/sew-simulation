@@ -8,7 +8,8 @@
   (:require [clojure.test :refer [deftest is testing run-tests]]
             [resolver-sim.scenario.equilibrium :as eq]
             [resolver-sim.scenario.projection  :as proj]
-            [resolver-sim.scenario.subgame-counterfactual :as subgame-cf]))
+            [resolver-sim.scenario.subgame-counterfactual :as subgame-cf]
+            [resolver-sim.scenario.reputation-profiles :as rep-profiles]))
 
 (defn -main
   "Allow direct execution via: clojure -M:test -m resolver-sim.scenario.equilibrium-test"
@@ -912,3 +913,190 @@
           "min-reputation-penalty-for-spe-pass must be emitted globally")
       (is (= 50 global)
           "global should equal max(per-row min-required)"))))
+
+;; ---------------------------------------------------------------------------
+;; Profile matrix tests
+;; ---------------------------------------------------------------------------
+
+(defn- reputation-gain-then-slash-result
+  "Replay result where resolver earns a large fee AND gets partially slashed.
+   This models the v7 pattern: terminal-realized > pre-wealth without reputation,
+   but reputation penalty flips the comparison.
+
+   Pre-world  (seq 0): resolver-stakes=100, slash-total={}
+   Terminal   (seq 1): resolver-stakes=80 (slashed 20), slash-total={addr 20},
+                       claimable={e1 {addr 60}} (large fee).
+   terminal-realized = 80 + 60 = 140 > pre=100.
+
+   Profile behaviour:
+     :reputation/none         penalty=0 → adj=0  → chosen=140 > 100 → PASS
+     :reputation/conservative penalty=25, disc=0.5 → adj=-12 → chosen=128 > 100 → PASS
+     :reputation/baseline     penalty=100, disc=0.8 → adj=-80 → chosen=60 < 100 → FAIL"
+  []
+  (let [addr "0xresolver"]
+    {:trace [{:world {:resolver-stakes {addr 100}
+                      :resolver-slash-total {}
+                      :claimable {}
+                      :bond-balances {}
+                      :live-states {"e1" "disputed"}
+                      :total-held {}
+                      :total-fees {}}
+               :agent "resolver" :action "register_stake" :seq 0 :time 1000}
+              {:world {:resolver-stakes {addr 80}
+                       :resolver-slash-total {addr 20}
+                       :claimable {"e1" {addr 60}}
+                       :bond-balances {}
+                       :live-states {"e1" "released"}
+                       :total-held {}
+                       :total-fees {}
+                       :terminal? true}
+               :agent "resolver" :action "execute_resolution" :seq 1 :time 1100}]
+     :agents [{:id "resolver" :address addr :role "resolver" :strategy "malicious"}]
+     :metrics {}}))
+
+(deftest test-resolve-utility-profile-keyword
+  (testing "resolve-utility-profile returns built-in profile for known keyword"
+    (let [p (rep-profiles/resolve-utility-profile :reputation/baseline)]
+      (is (map? p) "should return a map")
+      (is (= :reputation/baseline (:profile/id p)))
+      (is (= :sensitivity (:profile/category p)))
+      (is (some? (:reputation-slash-penalty p)) "should have a penalty field"))))
+
+(deftest test-resolve-utility-profile-map-passthrough
+  (testing "resolve-utility-profile returns inline map as-is"
+    (let [inline {:type :resolver-reputation-v1 :reputation-slash-penalty 42}
+          p (rep-profiles/resolve-utility-profile inline)]
+      (is (= inline p) "map should be returned unchanged"))))
+
+(deftest test-resolve-utility-profile-unknown-throws
+  (testing "resolve-utility-profile throws on unknown keyword"
+    (is (thrown? Exception (rep-profiles/resolve-utility-profile :nosuchprofile)))))
+
+(deftest test-resolve-utility-profile-nil-returns-nil
+  (testing "resolve-utility-profile returns nil for nil input"
+    (is (nil? (rep-profiles/resolve-utility-profile nil)))))
+
+(deftest test-expected-future-earnings-model
+  (testing ":expected-future-earnings model computes penalty from routing probability delta"
+    (let [result (reputation-slash-replay-result)
+          raw-proj (-> result
+                       proj/trace-end-projection
+                       (assoc :spe-config {:regret-threshold 9999
+                                           :utility-spec {:type :resolver-reputation-v1
+                                                          :reputation/model :expected-future-earnings
+                                                          :expected-future-cases 100
+                                                          :expected-fee-per-case 2.0
+                                                          :routing-probability-before 0.05
+                                                          :routing-probability-after  0.01
+                                                          :resolver-margin 1.0
+                                                          :reputation-discount-rate 1.0}}))
+          eval-r   (subgame-cf/evaluate-subgame-counterfactual raw-proj)
+          exec-row (first (filter #(= "execute_resolution" (:chosen-action %))
+                                  (:regret-table eval-r)))
+          bd       (:utility-breakdown exec-row)]
+      ;; penalty = (0.05-0.01)*100*2.0*1.0 = 8; discount=1.0 → rep-adj=-8
+      (is (= :expected-future-earnings (:reputation-model bd))
+          "breakdown should record reputation-model")
+      (is (= 8 (:reputation-penalty-used bd))
+          "penalty should be (0.05-0.01)*100*2.0*1.0 = 8")
+      (is (= -8 (:reputation-adjustment bd))
+          "adjustment should be -(8*1.0) = -8"))))
+
+(deftest test-profile-matrix-runner-basic
+  (testing "run-profile-matrix differentiates profiles when resolver gains then is slashed"
+    ;; terminal-realized=140 > pre=100; partial slash of 20
+    ;; none:         adj=0,   chosen=140 > 100 → PASS
+    ;; baseline:     adj=-80, chosen=60  < 100 → FAIL
+    (let [raw-proj (-> (reputation-gain-then-slash-result)
+                       proj/trace-end-projection
+                       (assoc :spe-config {:regret-threshold 0}))
+          matrix   (subgame-cf/run-profile-matrix raw-proj [:reputation/none :reputation/baseline])]
+      (is (map? matrix) "should return a map")
+      (is (= 2 (count (:profile-results matrix))) "should have 2 per-profile results")
+      (is (= :reputation/none    (-> matrix :profile-results first :profile-id)))
+      (is (= :reputation/baseline (-> matrix :profile-results second :profile-id)))
+      (is (= :pass (-> matrix :profile-results first :status))
+          ":reputation/none should pass — resolver gains (140>100) with no reputation penalty")
+      (is (= :fail (-> matrix :profile-results second :status))
+          ":reputation/baseline should fail — adj=-80 makes chosen=60 < pre=100")
+      (is (= :reputation/none (:min-profile-required matrix))
+          "min-profile-required is the first (weakest) PASS profile")
+      (is (true? (:any-pass? matrix)))
+      (is (false? (:all-pass? matrix))))))
+
+(deftest test-profile-matrix-all-pass
+  (testing "run-profile-matrix all-pass? when resolver is honest (no slash, chosen > pre)"
+    (let [raw-proj (-> (reputation-no-slash-replay-result)
+                       proj/trace-end-projection
+                       (assoc :spe-config {:regret-threshold 0}))
+          ;; No slash → no reputation penalty applied → chosen=150, pre=100 → PASS for all
+          matrix   (subgame-cf/run-profile-matrix raw-proj [:reputation/none :reputation/conservative])]
+      (is (true? (:all-pass? matrix)))
+      (is (true? (:any-pass? matrix)))
+      (is (empty? (:fail-profiles matrix))))))
+
+(deftest test-profile-matrix-conservative-also-fails
+  (testing ":reputation/conservative creates regret even at low penalty (any penalty > 0 deters)"
+    ;; terminal-realized=140, pre=100, best-alt=140 (chosen-local, no slash)
+    ;; conservative: adj=-13, chosen=127 < best-alt=140 → regret=13 → FAIL
+    ;; This shows deterrence kicks in at any non-zero reputation penalty.
+    (let [raw-proj (-> (reputation-gain-then-slash-result)
+                       proj/trace-end-projection
+                       (assoc :spe-config {:regret-threshold 0}))
+          matrix   (subgame-cf/run-profile-matrix raw-proj [:reputation/conservative])]
+      (is (= :fail (-> matrix :profile-results first :status))
+          "conservative profile: best-alt=140 (no slash path), chosen=127 → regret=13 → FAIL"))))
+
+(deftest test-profile-matrix-validator-no-profiles-inconclusive
+  (testing ":resolver-reputation-profile-matrix → inconclusive when no utility-profiles declared"
+    (let [raw-proj (-> (reputation-slash-replay-result)
+                       proj/trace-end-projection
+                       (assoc :spe-config {:regret-threshold 0}))
+          eq-map   (eq/evaluate-equilibrium-concepts
+                    [:resolver-reputation-profile-matrix] raw-proj)
+          r        (get eq-map :resolver-reputation-profile-matrix)]
+      (is (= 1 (count eq-map)) "should have exactly one concept result")
+      (is (= :inconclusive (:status r))
+          "should be :inconclusive when :utility-profiles absent"))))
+
+(deftest test-profile-matrix-validator-dispatches
+  (testing ":resolver-reputation-profile-matrix validator dispatches and returns profile-results"
+    (let [raw-proj (-> (reputation-gain-then-slash-result)
+                       proj/trace-end-projection
+                       (assoc :spe-config {:regret-threshold 0
+                                           :utility-profiles [:reputation/none
+                                                              :reputation/baseline]}))
+          eq-map   (eq/evaluate-equilibrium-concepts
+                    [:resolver-reputation-profile-matrix] raw-proj)
+          r        (get eq-map :resolver-reputation-profile-matrix)]
+      (is (= 1 (count eq-map)))
+      ;; none=PASS, baseline=FAIL → any-pass?=true, all-pass?=false → overall :fail
+      (is (= :fail (:status r))
+          "status should be :fail when any profile fails (any-pass? but not all-pass?)")
+      (is (some? (get-in r [:observed :profile-results]))
+          "observed should include :profile-results")
+      (is (= 2 (count (get-in r [:observed :profile-results])))
+          "should have 2 profile results")
+      (is (= :reputation/none (get-in r [:observed :min-profile-required]))
+          "min-profile-required should be :reputation/none (first PASS)"))))
+
+(deftest test-profile-matrix-min-profile-required-identification
+  (testing "min-profile-required is :reputation/none — only profile where regret=0 (no penalty)"
+    ;; gain-then-slash: best-alt=140 in all cases (forward-pass local-alt = max(pre=100, chosen-local=140))
+    ;; none:         adj=0,   chosen=140, regret=0  → PASS
+    ;; conservative: adj=-13, chosen=127, regret=13 → FAIL (any non-zero penalty creates regret)
+    ;; baseline:     adj=-80, chosen=60,  regret=80 → FAIL
+    ;; This shows deterrence is active under conservative and strong assumptions; only purely
+    ;; reputationless actors (none) are indifferent.
+    (let [raw-proj (-> (reputation-gain-then-slash-result)
+                       proj/trace-end-projection
+                       (assoc :spe-config {:regret-threshold 0}))
+          matrix   (subgame-cf/run-profile-matrix raw-proj
+                                                  [:reputation/none
+                                                   :reputation/conservative
+                                                   :reputation/baseline])]
+      (is (= :reputation/none (:min-profile-required matrix))
+          "only :reputation/none passes (no penalty → regret=0)")
+      (is (= [:reputation/conservative :reputation/baseline] (:fail-profiles matrix))
+          "conservative and baseline both fail (any reputation penalty deters)"))))
+

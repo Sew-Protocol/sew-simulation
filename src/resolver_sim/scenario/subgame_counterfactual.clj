@@ -22,7 +22,8 @@
    Phase H — rich SPE result vocabulary (:spe/pass, :spe/epsilon-pass, etc.)
    Phase I — structured counterexample maps for every profitable deviation
    Phase J — off-path coverage reporting"
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [resolver-sim.scenario.reputation-profiles :as rep-profiles]))
 
 (def ^:private default-continuation-policy
   {:mode :trace-following
@@ -224,24 +225,59 @@
         drop   (max 0 (- (long pre-s) (long term-s)))]
     (when (>= drop (long threshold)) drop)))
 
+(defn- compute-rep-penalty
+  "Compute reputation penalty magnitude (token-equivalent future-earnings loss)
+   based on :reputation/model in utility-spec. Returns a non-negative long.
+
+   Models:
+     :fixed-penalty           (default) — use :reputation-slash-penalty directly.
+     :event-penalty           — look up :resolver-slashed in :reputation-event-penalties.
+     :expected-future-earnings — compute from routing-probability delta × volume × fee × margin."
+  [utility-spec]
+  (let [model (keyword (or (:reputation/model utility-spec) :fixed-penalty))]
+    (case model
+      :fixed-penalty
+      (long (or (:reputation-slash-penalty utility-spec) 0))
+
+      :event-penalty
+      (long (or (get-in utility-spec [:reputation-event-penalties :resolver-slashed] 0) 0))
+
+      :expected-future-earnings
+      ;; penalty = (routing-before − routing-after) × cases × fee × margin × discount
+      ;; discount is applied separately in compute-reputation-utility; here we return undiscounted.
+      (let [p-before (double (or (:routing-probability-before utility-spec) 0.0))
+            p-after  (double (or (:routing-probability-after  utility-spec) 0.0))
+            cases    (double (or (:expected-future-cases utility-spec) 0))
+            fee      (double (or (:expected-fee-per-case  utility-spec) 0.0))
+            margin   (double (or (:resolver-margin        utility-spec) 1.0))]
+        (long (Math/round (* (max 0.0 (- p-before p-after)) cases fee margin))))
+
+      ;; Unknown model — treat as zero penalty (safe default, no crash).
+      0)))
+
 (defn- compute-reputation-utility
   "Compute :resolver-reputation-v1 utility for actor.
 
    Accounting invariant: terminal-realized-wealth already includes the stake
    reduction from slashing (resolver-stakes is debited on slash). Therefore,
-   reputation-slash-penalty represents ONLY additional future-earnings loss —
+   the reputation penalty represents ONLY additional future-earnings loss —
    it must NOT subtract the stake loss a second time.
 
    Slash detection modes (utility-spec :slash-detection-mode):
      :explicit-slash-total (default) — resolver-slash-total accumulator in world state
      :stake-delta                    — stake drop fallback (risk: false positives)
 
-   Returns utility map with :utility-breakdown for transparency. When
-   reputation-slash-penalty is 0 the result is identical to :terminal-realized-v1."
+   Penalty models (:reputation/model):
+     :fixed-penalty           (default) — :reputation-slash-penalty * discount
+     :event-penalty           — reputation-event-penalties[:resolver-slashed] * discount
+     :expected-future-earnings — (routing-before - routing-after) * cases * fee * margin * discount
+
+   Returns utility map with :utility-breakdown for transparency. When the
+   computed penalty is 0 the result is identical to :terminal-realized-v1."
   [terminal-world actor utility-spec pre-world]
   (let [u-type    (keyword (or (:type utility-spec) :resolver-reputation-v1))
         u-ver     (str (or (:version utility-spec) "v1"))
-        penalty   (long (or (:reputation-slash-penalty utility-spec) 0))
+        penalty   (compute-rep-penalty utility-spec)
         discount  (double (or (:reputation-discount-rate utility-spec) 1.0))
         det-mode  (keyword (or (:slash-detection-mode utility-spec) :explicit-slash-total))
         threshold (long (or (:slash-threshold utility-spec) 1))
@@ -264,6 +300,9 @@
                      :slash-detected?          slashed?
                      :slash-amount             (or slash-amount 0)
                      :reputation-adjustment    rep-adj
+                     :reputation-model         (keyword (or (:reputation/model utility-spec) :fixed-penalty))
+                     :reputation-penalty-used  penalty
+                     :reputation-discount-rate discount
                      :total-utility            total-util}]
     {:defined?          (some? total-util)
      :value             total-util
@@ -775,3 +814,75 @@
          ;; Reputation utility: minimum penalty required across all nodes for SPE pass.
          ;; nil when utility-spec is not :resolver-reputation-v1 or no gap exists.
          :min-reputation-penalty-for-spe-pass min-rep-penalty-for-spe-pass}))))
+
+;; ---------------------------------------------------------------------------
+;; Profile matrix runner
+;; ---------------------------------------------------------------------------
+
+(defn run-profile-matrix
+  "Run evaluate-subgame-counterfactual against each profile in the profile list.
+
+   `projection` — map with keys :raw-trace, :decisions, :terminal-world, :spe-config.
+   `profiles`   — sequence of profile ids (keywords) or inline maps.
+
+   For each profile, the profile is resolved via reputation-profiles/resolve-utility-profile
+   and merged into projection's :spe-config :utility-spec before evaluation.
+
+   Returns a vector of per-profile result maps:
+   [{:profile-id            kw-or-map
+     :profile/category      kw (when named profile)
+     :profile/evidence-basis kw (when named profile)
+     :status                :pass|:fail|:inconclusive
+     :spe-result            kw
+     :max-regret            n
+     :threshold             n
+     :required-reputation-penalty  n|nil
+     :configured-reputation-penalty n
+     :safety-margin         n|nil
+     :slash-detected-count  n
+     :profile-spec          map}]
+
+   Also returns :min-profile-required — the profile-id of the weakest (earliest in list)
+   profile that yields :pass status, or nil if none pass."
+  [projection profiles]
+  (let [base-spe-config (:spe-config projection {})
+        base-utility    (get base-spe-config :utility-spec {})
+        results
+        (mapv
+         (fn [profile-key]
+           (let [resolved    (rep-profiles/resolve-utility-profile profile-key)
+                 merged-spec (merge base-utility resolved)
+                 new-spe-cfg (assoc base-spe-config :utility-spec merged-spec)
+                 new-proj    (assoc projection :spe-config new-spe-cfg)
+                 eval-result (evaluate-subgame-counterfactual new-proj)
+                 min-req     (:min-reputation-penalty-for-spe-pass eval-result)
+                 configured  (long (or (:reputation-slash-penalty merged-spec)
+                                       (get-in merged-spec [:reputation-event-penalties :resolver-slashed] 0)
+                                       0))
+                 safety      (when (and min-req (= :pass (:status eval-result)))
+                               (- configured (long min-req)))
+                 slash-count (count (filter (fn [row]
+                                              (get-in row [:utility-breakdown :slash-detected?]))
+                                            (:regret-table eval-result)))]
+             (cond-> {:profile-id                    profile-key
+                      :status                        (:status eval-result)
+                      :spe-result                    (:spe-result eval-result)
+                      :max-regret                    (:max-regret eval-result)
+                      :threshold                     (:threshold eval-result)
+                      :required-reputation-penalty   min-req
+                      :configured-reputation-penalty configured
+                      :safety-margin                 safety
+                      :slash-detected-count          slash-count
+                      :proper-subgames-checked       (:proper-subgames-checked eval-result 0)
+                      :profile-spec                  merged-spec}
+               (keyword? profile-key)
+               (merge {:profile/category       (:profile/category resolved)
+                       :profile/evidence-basis (:profile/evidence-basis resolved)
+                       :profile/description    (:profile/description resolved)}))))
+         profiles)
+        first-pass (first (filter #(= :pass (:status %)) results))]
+    {:profile-results   results
+     :min-profile-required (when first-pass (:profile-id first-pass))
+     :any-pass?         (boolean first-pass)
+     :all-pass?         (every? #(= :pass (:status %)) results)
+     :fail-profiles     (mapv :profile-id (filter #(= :fail (:status %)) results))}))
