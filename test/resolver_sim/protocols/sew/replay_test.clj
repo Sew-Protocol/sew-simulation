@@ -810,3 +810,52 @@
     (is (= :pass (:outcome r)))
     (is (= :ok (get-in r [:trace 2 :result])))
     (is (= 0 (get-in r [:metrics :invariant-violations])))))
+
+(deftest test-replay-appeal-bond-custody-lifecycle
+  "Replay-level parity check for appeal bond custody:
+   - appeal holds custody/bond
+   - upheld appeal refunds bond to resolver claimable
+   - rejected appeal forfeits bond to insurance accounting"
+  (let [gov {:id "gov" :type "governance" :address "0xGov"}
+        r-upheld
+        (replay/replay-scenario
+         (sc :agents [alice bob resolver gov]
+             :params (assoc default-params
+                            :appeal-window-duration 100
+                            :appeal-bond-amount 70)
+             :events
+             [{:seq 0 :time 1000 :agent "resolver" :action "register_stake"
+               :params {:amount 5000}}
+              {:seq 1 :time 1000 :agent "alice" :action "create_escrow"
+               :params {:token "0xUSDC" :to "0xBob" :amount 3000 :custom-resolver "0xResolver"}}
+              {:seq 2 :time 1001 :agent "gov" :action "propose_fraud_slash"
+               :params {:workflow-id 0 :resolver-addr "0xResolver" :amount 100}}
+              {:seq 3 :time 1002 :agent "resolver" :action "appeal_slash"
+               :params {:workflow-id 0}}
+              {:seq 4 :time 1003 :agent "gov" :action "resolve_appeal"
+               :params {:workflow-id 0 :upheld? true}}]))
+        r-rejected
+        (replay/replay-scenario
+         (sc :agents [alice bob resolver gov]
+             :params (assoc default-params
+                            :appeal-window-duration 100
+                            :appeal-bond-amount 80)
+             :events
+             [{:seq 0 :time 1000 :agent "resolver" :action "register_stake"
+               :params {:amount 5000}}
+              {:seq 1 :time 1000 :agent "alice" :action "create_escrow"
+               :params {:token "0xUSDC" :to "0xBob" :amount 3000 :custom-resolver "0xResolver"}}
+              {:seq 2 :time 1001 :agent "gov" :action "propose_fraud_slash"
+               :params {:workflow-id 0 :resolver-addr "0xResolver" :amount 100}}
+              {:seq 3 :time 1002 :agent "resolver" :action "appeal_slash"
+               :params {:workflow-id 0}}
+              {:seq 4 :time 1003 :agent "gov" :action "resolve_appeal"
+               :params {:workflow-id 0 :upheld? false}}]))
+        w-upheld   (get-in r-upheld [:trace 4 :world])
+        w-rejected (get-in r-rejected [:trace 4 :world])]
+    (is (= :pass (:outcome r-upheld)))
+    (is (= :pass (:outcome r-rejected)))
+    (is (= 70 (get-in w-upheld [:claimable 0 "0xResolver"] 0)))
+    (is (= 0 (get-in w-upheld [:pending-fraud-slashes 0 :appeal-bond-held] 0)))
+    (is (= 80 (get-in w-rejected [:bond-distribution :insurance] 0)))
+    (is (= 0 (get-in w-rejected [:pending-fraud-slashes 0 :appeal-bond-held] 0)))))

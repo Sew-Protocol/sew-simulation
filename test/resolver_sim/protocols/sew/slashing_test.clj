@@ -174,3 +174,20 @@
     (is (= 0 (get-in world3 [:pending-fraud-slashes workflow-id :appeal-bond-held])))
     (is (= 60 (get-in world3 [:bond-distribution :insurance] 0)))
     (is (= 60 (get world3 :appeal-bonds-forfeited-insurance 0)))))
+
+(deftest resolve-appeal-on-executed-slash-returns-cannot-reverse-executed-slash
+  (let [resolver-addr "0xRes"
+        gov "0xGov"
+        world (-> (t/empty-world 1000)
+                  (assoc-in [:pending-fraud-slashes "s1"]
+                            {:resolver resolver-addr
+                             :amount 100
+                             :reason :fraud
+                             :status :executed
+                             :proposed-at 1000
+                             :appeal-deadline 0
+                             :appeal-bond-held 0
+                             :contest-deadline 0}))
+        r (res/resolve-appeal world 0 gov true "s1")]
+    (is (false? (:ok r)))
+    (is (= :cannot-reverse-executed-slash (:error r)))))

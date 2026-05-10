@@ -560,7 +560,9 @@
        (t/fail :no-pending-slash)
 
        (not= :appealed (:status pending))
-       (t/fail :no-active-appeal)
+       (t/fail (case (:status pending)
+                 :executed :cannot-reverse-executed-slash
+                 :no-active-appeal))
 
        :else
        (let [bond-held   (get-in world [:pending-fraud-slashes slash-id :appeal-bond-held] 0)

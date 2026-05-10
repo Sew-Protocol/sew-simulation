@@ -414,6 +414,34 @@
     {:holds?     (empty? violations)
      :violations (vec violations)}))
 
+(defn appeal-bond-custody-consistent?
+  "Invariant: appeal bond custody lifecycle is coherent.
+
+   Rules per slash-id:
+   - :appeal-bond-held must be >= 0
+   - held > 0  => slash status must be :appealed and custody entry must exist
+   - held == 0 => custody entry must not exist"
+  [world]
+  (let [slashes  (:pending-fraud-slashes world {})
+        custody  (:appeal-bond-custody world {})
+        violations
+        (for [[slash-id ev] slashes
+              :let [held         (or (:appeal-bond-held ev) 0)
+                    status       (:status ev)
+                    has-custody? (contains? custody slash-id)
+                    valid?
+                    (and (>= held 0)
+                         (if (pos? held)
+                           (and (= :appealed status) has-custody?)
+                           (not has-custody?)))]
+              :when (not valid?)]
+          {:slash-id slash-id
+           :status status
+           :appeal-bond-held held
+           :has-custody has-custody?})]
+    {:holds?     (empty? violations)
+     :violations (vec violations)}))
+
 ;; ---------------------------------------------------------------------------
 ;; Invariant 16: Fraud slashes must not be auto-executed
 ;;
@@ -872,6 +900,7 @@
                   :dispute-level-bounded         (dispute-level-bounded? world)
                   :slash-status-consistent       (slash-status-consistent? world)
                   :appeal-bond-conserved         (appeal-bond-conserved? world)
+                  :appeal-bond-custody-consistent (appeal-bond-custody-consistent? world)
                   :no-auto-fraud-execute         (no-auto-fraud-execute? world)
                   :bond-liquidity                (bond-liquidity-holds? world)
                   :bond-slash-bounded            (bond-slash-bounded? world)
