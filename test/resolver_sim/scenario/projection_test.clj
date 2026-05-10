@@ -165,6 +165,67 @@
       (is (= (get-in p [:payoff-ledger-summary :negative-payoff-count])
              (get-in p [:metrics :negative-payoff-count]))))))
 
+(deftest test-negative-payoff-count-prefers-replay-metric-when-present
+  (testing "projection prefers replay-provided :metrics value over derived payoff-ledger count"
+    (let [trace [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
+                  :world {:live-states {0 :disputed}
+                          :pending-count 0
+                          :total-held {"USDC" 1000}
+                          :total-fees {"USDC" 0}
+                          :resolver-stakes {"0xR" 100}
+                          :claimable {0 {"0xbuyer" 0}}
+                          :bond-balances {0 {"0xbuyer" 0}}
+                          :block-time 1000}}
+                 {:seq 1 :time 1010 :agent "resolver" :action "execute_resolution"
+                  :world {:live-states {0 :released}
+                          :pending-count 0
+                          :total-held {"USDC" 0}
+                          :total-fees {"USDC" 10}
+                          :resolver-stakes {"0xR" 90}
+                          :claimable {0 {"0xbuyer" 990}}
+                          :bond-balances {0 {"0xbuyer" 0}}
+                          :block-time 1010}}]
+          p (proj/trace-end-projection
+             (replay-result {:trace trace
+                             :agents [{:id "buyer" :address "0xbuyer" :strategy "honest"}
+                                      {:id "resolver" :address "0xR" :type "resolver"}]
+                             ;; Deliberately set to a sentinel value different from
+                             ;; the derived ledger count to verify preference ordering.
+                             :metrics {:negative-payoff-count 7}}))]
+      (is (= 7 (get-in p [:metrics :negative-payoff-count]))
+          "projection should preserve replay-provided metric when non-nil")
+      (is (not= 7 (get-in p [:payoff-ledger-summary :negative-payoff-count]))
+          "derived payoff-ledger count remains independently computed"))))
+
+(deftest test-negative-payoff-count-falls-back-when-replay-metric-nil
+  (testing "projection falls back to derived payoff-ledger count when replay metric is nil"
+    (let [trace [{:seq 0 :time 1000 :agent "buyer" :action "create_escrow"
+                  :world {:live-states {0 :disputed}
+                          :pending-count 0
+                          :total-held {"USDC" 1000}
+                          :total-fees {"USDC" 0}
+                          :resolver-stakes {"0xR" 100}
+                          :claimable {0 {"0xbuyer" 0}}
+                          :bond-balances {0 {"0xbuyer" 0}}
+                          :block-time 1000}}
+                 {:seq 1 :time 1010 :agent "resolver" :action "execute_resolution"
+                  :world {:live-states {0 :released}
+                          :pending-count 0
+                          :total-held {"USDC" 0}
+                          :total-fees {"USDC" 10}
+                          :resolver-stakes {"0xR" 90}
+                          :claimable {0 {"0xbuyer" 990}}
+                          :bond-balances {0 {"0xbuyer" 0}}
+                          :block-time 1010}}]
+          p (proj/trace-end-projection
+             (replay-result {:trace trace
+                             :agents [{:id "buyer" :address "0xbuyer" :strategy "honest"}
+                                      {:id "resolver" :address "0xR" :type "resolver"}]
+                             :metrics {:negative-payoff-count nil}}))]
+      (is (= (get-in p [:payoff-ledger-summary :negative-payoff-count])
+             (get-in p [:metrics :negative-payoff-count]))
+          "nil replay metric should trigger projection fallback to derived value"))))
+
 (deftest test-trace-end-projection-coalition-net-profit
   (testing "coalition-net-profit is derived when coalition tags exist"
     (let [trace [{:seq 0 :time 1000 :agent "colluder" :action "create_escrow"

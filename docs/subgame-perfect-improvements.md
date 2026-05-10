@@ -1,3 +1,20 @@
+## Mini glossary (shared)
+
+Scope note: This document is **SPE-wide** (conceptual/mechanism-level); for **counterfactual engine implementation details and evaluator output contracts**, start with `docs/subgame-counterfactual-improvements.md`.
+
+- **SPE proxy**: Bounded, replay-based subgame-perfect-equilibrium evidence; not a formal full-game proof.
+- **Decision node**: A strategic action point evaluated for deviation profitability.
+- **Proper subgame node**: Node where relevant state/history is publicly checkable for SPE-style evaluation.
+- **Information-set node**: Node where private/hidden information affects action availability or payoff inference.
+- **Continuation policy**: Rule for downstream behavior after a deviation (e.g., `:trace-following`, `:policy-response`).
+- **Utility spec**: Declared payoff model used for comparisons (e.g., terminal-realized or reputation-aware utility).
+- **Local regret**: `best-alt-utility - chosen-utility` at a node.
+- **Bundle regret**: Bounded multi-step approximation built from local regret.
+- **Epsilon thresholds**: Materiality tolerances (`:epsilon-abs`, `:epsilon-rel`) for practical pass/fail semantics.
+- **Counterexample**: Structured profitable-deviation evidence record.
+- **Off-path coverage**: How many generated/evaluated/inconclusive nodes were explored beyond the realized path.
+- **Proof sketch**: Human-readable Claim/Method/Checked/Result summary emitted with SPE observed output.
+
 Essential additions for credible Subgame Perfect Equilibrium checking
 1. Explicit game tree / subgame representation
 
@@ -483,27 +500,54 @@ This is probably one of the most valuable Sew-specific upgrades.
 
 For reviewers, the system should explain why it believes the candidate is SPE-like.
 
-Very useful addition:
+Implementation-aligned guidance (current output):
 
-Generate a structured explanation:
+The proof sketch should include a **Method** section and a **Result** section,
+with fields aligned to emitted keys from `scenario/equilibrium.clj`:
 
-Claim: Honest resolver behavior is epsilon-SPE under public-state assumptions.
+- Method
+  - continuation policy mode/version
+  - utility spec type/version
+  - max deviation depth
+  - epsilon absolute/relative thresholds
+  - memoization diagnostics (enabled/disabled, entries, hits)
+
+- Checked
+  - proper subgame node count
+  - information-set node count
+  - not-checkable node count
+
+- Result
+  - pass/fail/inconclusive summary
+  - max regret and threshold context
+  - rich SPE result vocabulary key (e.g. `:spe/pass`, `:spe/epsilon-pass`)
+  - counterexample count when failing
+
+Example sketch shape:
+
+Claim: Bounded public-state SPE proxy under declared strategy profile honest-resolution-v1.
+
+Method:
+- continuation-policy: :trace-following (version v1)
+- utility-spec: :terminal-realized-v1 (version v1)
+- max deviation depth: 2
+- epsilon: abs=1.0, rel=0.01
 
 Checked:
-- 14 buyer challenge nodes
-- 8 seller escalation nodes
-- 6 resolver verdict nodes
-- 3 appeal continuation nodes
+- 14 proper subgame node(s)
+- 4 information-set node(s) (inconclusive)
+- 2 not-checkable node(s)
+- memoization: enabled, entries=14, hits=3
 
 Result:
-- No profitable deviation exceeded epsilon = 1.00
-- Max regret: 0.42
-- Worst node: seller escalation timing after disputed delivery
-- 4 information-set nodes marked inconclusive
+- No profitable deviation exceeded epsilon = 1.0
+- Max regret: 0
+- SPE result: :spe/pass
 
 Why it matters:
 
-This bridges raw simulation output and auditor/mechanism-review comprehension.
+This bridges raw simulation output and auditor/mechanism-review comprehension,
+while making assumptions explicit and reducing over-claim risk.
 
 19. Solver/tool integration path
 

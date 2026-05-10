@@ -1,7 +1,7 @@
 {
-  "id": "scenarios/spe-reg-v3-mixed-node-pass",
-  "scenario-id": "spe-reg-v3-mixed-node-pass",
-  "title": "SPE Regression \u2014 mixed classification (buyer raise_dispute=info-set; resolver execute_resolution=proper-subgame; bounded-spe PASS)",
+  "id": "scenarios/spe-reg-v6-backward-induction-two-node",
+  "scenario-id": "spe-reg-v6-backward-induction-two-node",
+  "title": "SPE Regression \u2014 backward-induction two-node pass",
   "description": "Two-node trace (buyer raise_dispute + resolver execute_resolution) validated under backward-induction mode. Demonstrates that bounded-backward-induction-spe evaluates nodes in descending seq order, classifies settle_now as :terminal-deviation using pre-wealth, and returns :pass when no profitable deviation exists.",
   "purpose": "regression",
   "schema-version": "1.1",

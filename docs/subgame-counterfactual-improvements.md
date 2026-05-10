@@ -1,3 +1,20 @@
+## Mini glossary (shared)
+
+Scope note: This document is **counterfactual-engine-focused** (node-level evaluator semantics/output keys); for the **broader SPE concept and mechanism-design framing**, start with `docs/subgame-perfect-improvements.md`.
+
+- **SPE proxy**: Bounded, replay-based subgame-perfect-equilibrium evidence; not a formal full-game proof.
+- **Decision node**: A strategic action point evaluated for deviation profitability.
+- **Proper subgame node**: Node where relevant state/history is publicly checkable for SPE-style evaluation.
+- **Information-set node**: Node where private/hidden information affects action availability or payoff inference.
+- **Continuation policy**: Rule for downstream behavior after a deviation (e.g., `:trace-following`, `:policy-response`).
+- **Utility spec**: Declared payoff model used for comparisons (e.g., terminal-realized or reputation-aware utility).
+- **Local regret**: `best-alt-utility - chosen-utility` at a node.
+- **Bundle regret**: Bounded multi-step approximation built from local regret.
+- **Epsilon thresholds**: Materiality tolerances (`:epsilon-abs`, `:epsilon-rel`) for practical pass/fail semantics.
+- **Counterexample**: Structured profitable-deviation evidence record.
+- **Off-path coverage**: How many generated/evaluated/inconclusive nodes were explored beyond the realized path.
+- **Proof sketch**: Human-readable Claim/Method/Checked/Result summary emitted with SPE observed output.
+
 Essential improvements
 1. Explicit continuation-policy modeling
 
@@ -345,3 +362,79 @@ how utility is computed,
 and what future policy is assumed after deviation.
 
 If those are made explicit, Phase 4 becomes a solid foundation. After that, the highest-value upgrade is expanding from one-step local regret to richer deviation search: better alternatives, better response modeling, and bounded multi-step deviations.
+
+---
+
+## Implementation-aligned vocabulary and key names (current)
+
+To keep this document aligned with actual output, use the following canonical
+field names and result vocabulary from the current evaluator/reporting path.
+
+### Top-level evaluator result (counterfactual engine)
+
+- Core status:
+  - `:status` (`:pass | :fail | :inconclusive`)
+  - `:spe-result` (`:spe/pass`, `:spe/epsilon-pass`, `:spe/fail-profitable-deviation`, etc.)
+- Regret/epsilon:
+  - `:max-regret`, `:mean-regret`, `:threshold`
+  - `:epsilon-abs`, `:epsilon-rel`
+  - `:exceed-epsilon-count`
+- Coverage/classification:
+  - `:checked-nodes`
+  - `:proper-subgames-checked`
+  - `:information-set-nodes-checked`
+  - `:not-checkable-nodes`
+  - `:class-counts`
+- Semantics contracts:
+  - `:continuation-policy`
+  - `:replay-boundary`
+  - `:utility-spec`
+  - `:strategy-profile`
+- Diagnostics:
+  - `:memoization` (`{:enabled .. :entries .. :hits ..}`)
+  - `:regret-distribution`
+  - `:counterexamples`
+  - `:off-path-coverage`
+
+### Row-level regret-table fields
+
+- Node identity/context:
+  - `:node-index`, `:deterministic-key`, `:agent`, `:address`, `:node-type`
+  - `:information-set`
+- SPE checkability:
+  - `:checkability`
+  - `:spe/checkability`
+  - `:checkability-reason`
+- Action/utility:
+  - `:chosen-action`, `:alternatives`
+  - `:chosen-utility`, `:best-alt-utility`
+  - `:local-regret`, `:bundle-regret`
+- Policy binding:
+  - `:governing-policy`
+
+### Equilibrium-layer observed payload (`scenario/equilibrium.clj`)
+
+The SPE concept payload uses `:observed` keys prefixed with `:spe-...`, including:
+
+- `:spe-status`, `:spe-result`, `:spe-summary`
+- `:spe-regret-table`, `:spe-max-regret`, `:spe-mean-regret`
+- `:spe-threshold`, `:spe-epsilon-abs`, `:spe-epsilon-rel`
+- `:spe-max-deviation-depth`
+- `:spe-continuation-policy`, `:spe-replay-boundary`, `:spe-utility-spec`
+- `:spe-strategy-profile`
+- `:spe-proper-subgames-checked`, `:spe-information-set-nodes-checked`, `:spe-not-checkable-nodes`
+- `:spe-class-counts`, `:spe-exceed-epsilon-count`
+- `:spe-memoization`, `:spe-regret-distribution`
+- `:spe-counterexamples`, `:spe-off-path-coverage`
+- `:spe-proof-sketch`
+
+### Proof-sketch alignment
+
+When describing the proof sketch, prefer this structure:
+
+1. **Claim** (bounded SPE proxy + strategy profile id)
+2. **Method** (continuation-policy, utility-spec, max deviation depth, epsilon)
+3. **Checked** (proper/info-set/not-checkable counts + memoization diagnostics)
+4. **Result** (pass/fail/inconclusive summary, max regret, `:spe-result`, counterexample count on fail)
+
+This keeps docs and emitted evidence synchronized and avoids terminology drift.

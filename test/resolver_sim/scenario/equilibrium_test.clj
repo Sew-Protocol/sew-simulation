@@ -497,6 +497,18 @@
       (is (string? (:spe-proof-sketch obs)))
       (is (pos? (count (:spe-proof-sketch obs)))))))
 
+(deftest test-spe-proof-sketch-method-section-and-memoization-line
+  (testing ":spe-proof-sketch includes method metadata and memoization diagnostics"
+    (let [proj (spe-projection {:chosen-wealth 200 :regret-threshold 1000})
+          sketch (-> (eq/evaluate-equilibrium-concepts [:subgame-perfect-equilibrium] proj)
+                     :subgame-perfect-equilibrium :observed :spe-proof-sketch)]
+      (is (re-find #"Method:" sketch))
+      (is (re-find #"continuation-policy:" sketch))
+      (is (re-find #"utility-spec:" sketch))
+      (is (re-find #"max deviation depth:" sketch))
+      (is (re-find #"epsilon: abs=" sketch))
+      (is (re-find #"memoization:" sketch)))))
+
 (deftest test-bounded-public-state-epsilon-spe-pass
   (testing ":bounded-public-state-epsilon-spe passes with a proper-subgame resolver node"
     (let [proj (spe-projection {:chosen-wealth 200 :regret-threshold 1000})

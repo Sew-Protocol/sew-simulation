@@ -399,13 +399,25 @@
         proof-sketch (str
                       "Claim: Bounded public-state SPE proxy under declared strategy profile "
                       (or (:id strategy-profile) "unknown") ".\n\n"
-                      "Note: Alternatives are heuristic utility estimates under a trace-following "
+                      "Method:\n"
+                      "  - continuation-policy: " (or (:mode continuation-policy) :unknown)
+                      " (version " (or (:version continuation-policy) "unknown") ")\n"
+                      "  - utility-spec: " (or (:type utility-spec) :unknown)
+                      " (version " (or (:version utility-spec) "unknown") ")\n"
+                      "  - max deviation depth: " (long (or max-deviation-depth 1)) "\n"
+                      "  - epsilon: abs=" epsilon-abs ", rel=" epsilon-rel "\n\n"
+                      "Note: Alternatives are heuristic utility estimates under the configured "
                       "continuation policy, not independent protocol replays. Regret values are "
                       "proxy measurements; this is not a formal SPE proof.\n\n"
                       "Checked:\n"
                       "  - " (long (or proper-subgames-checked 0)) " proper subgame node(s)\n"
                       "  - " (long (or information-set-nodes-checked 0)) " information-set node(s) (inconclusive)\n"
-                      "  - " (long (or not-checkable-nodes 0)) " not-checkable node(s)\n\n"
+                      "  - " (long (or not-checkable-nodes 0)) " not-checkable node(s)\n"
+                      "  - memoization: " (if (get-in memoization [:enabled])
+                                             (str "enabled, entries=" (long (or (get memoization :entries) 0))
+                                                  ", hits=" (long (or (get memoization :hits) 0)))
+                                             "disabled")
+                      "\n\n"
                       "Result:\n"
                       (case status
                         :pass   (str "  - No profitable deviation exceeded epsilon = " epsilon-abs "\n"

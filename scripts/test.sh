@@ -11,6 +11,7 @@
 #   ./scripts/test.sh triage     # Failure triage grouped by purpose/threat-tag
 #   ./scripts/test.sh equivalence-new # New equivalence comparison stack (auth/race/escalation/accounting)
 #   ./scripts/test.sh monte-carlo # Representative Monte Carlo phase sweep (4 domains)
+#   ./scripts/test.sh long-horizon # Extended horizon scenarios (100/200/500/1000 epochs)
 #
 # Exit code: 0 = all passed, 1 = any failure.
 
@@ -185,6 +186,54 @@ if bad:
     sys.exit(1)
 
 print("Scenario naming/ID convention checks passed")
+PY
+
+  # P1: Fixture/claim alignment checks for collusion assertions
+  python - <<'PY'
+import json
+from pathlib import Path
+
+root = Path('data/fixtures/traces')
+errors = []
+
+for p in sorted(root.glob('*.trace.json')):
+    try:
+        obj = json.loads(p.read_text())
+    except Exception:
+        continue
+
+    theory = obj.get('theory') or {}
+    mech = theory.get('mechanism-properties') or []
+    claim = str(theory.get('claim', '')).lower()
+    tags = [str(t).lower() for t in (obj.get('threat-tags') or [])]
+    needs_collusion_alignment = (
+        ('collusion-resistance' in mech)
+        or ('collusion' in claim)
+        or any('collusion' in t for t in tags)
+    )
+    if not needs_collusion_alignment:
+        continue
+
+    agents = obj.get('agents') or []
+    has_explicit_collusive_actor = any(
+        str(a.get('type', '')).lower() == 'collusive' for a in agents if isinstance(a, dict)
+    )
+
+    # Allow dedicated inconclusive fixture by id/title to remain actor-agnostic.
+    sid = str(obj.get('scenario-id', ''))
+    title = str(obj.get('title', '')).lower()
+    inconclusive_fixture = ('collusion-resistance-inconclusive' in sid) or ('inconclusive' in title)
+
+    if (not has_explicit_collusive_actor) and (not inconclusive_fixture):
+        errors.append(f"collusion-alignment-missing:{p}:expected at least one agent.type='collusive'")
+
+if errors:
+    print('Collusion fixture/claim alignment checks failed:')
+    for e in errors:
+        print(' -', e)
+    raise SystemExit(1)
+
+print('Collusion fixture/claim alignment checks passed')
 PY
 
   return $?
@@ -537,6 +586,69 @@ run_monte_carlo() {
   return $mc_fail
 }
 
+run_long_horizon() {
+  require_clojure || return $?
+  echo "Running long-horizon coverage suite (extended epoch scenarios)..."
+
+  local lh_fail=0
+  local lh_risk_lines="$ARTIFACT_DIR/.risk-${RUN_ID}.lines"
+  local lh_meta_file="$ARTIFACT_DIR/.long-horizon-${RUN_ID}.meta"
+  : > "$lh_risk_lines"
+  : > "$lh_meta_file"
+
+  echo "── Phase T: Governance capture (100 epochs) ───────────────────────────────"
+  clojure -M:run -- -H -p data/params/phase-t-governance-capture.edn || lh_fail=$((lh_fail + 1))
+  echo ""
+
+  echo "── Phase AH: Trajectory sweep (100/500/1000 epochs, runtime-safe profile) ─"
+  clojure -M:run -- -U -p data/params/phase-ah-trajectory-sweep-long-horizon.edn || lh_fail=$((lh_fail + 1))
+  echo ""
+
+  echo "── Phase AI: Escalation trap (200 epochs) ─────────────────────────────────"
+  local ai_log
+  ai_log="$(mktemp)"
+  clojure -M:run -- -V -p data/params/phase-ai-escalation-trap.edn >"$ai_log" 2>&1 || lh_fail=$((lh_fail + 1))
+  cat "$ai_log"
+  if grep -Eq "Status: ❌ FAIL|✗ FAIL" "$ai_log"; then
+    echo "HARD GATE: Phase AI reported critical failure; marking long-horizon as failed."
+    echo "critical|phase-ai|AI_CRITICAL_FAILURE|Phase AI escalation trap indicates critical vulnerability" >> "$lh_risk_lines"
+    lh_fail=$((lh_fail + 1))
+  else
+    echo "info|phase-ai|AI_PASS|Phase AI did not report critical failure markers" >> "$lh_risk_lines"
+  fi
+  rm -f "$ai_log"
+  echo ""
+
+  echo "── Phase Z: Legitimacy loop (100 epochs) ──────────────────────────────────"
+  local z_log
+  z_log="$(mktemp)"
+  clojure -M:run -- -Z -p data/params/phase-z-legitimacy.edn >"$z_log" 2>&1 || lh_fail=$((lh_fail + 1))
+  cat "$z_log"
+  if grep -Eq "Hypothesis holds\? ❌ NO|DEATH SPIRAL" "$z_log"; then
+    echo "HARD GATE: Phase Z reported legitimacy instability; marking long-horizon as failed."
+    echo "critical|phase-z|Z_LEGITIMACY_FAILURE|Phase Z reports legitimacy instability or death spiral" >> "$lh_risk_lines"
+    lh_fail=$((lh_fail + 1))
+  else
+    echo "info|phase-z|Z_PASS|Phase Z did not report legitimacy failure markers" >> "$lh_risk_lines"
+  fi
+  rm -f "$z_log"
+  echo ""
+
+  echo "── Phase J: Baseline stable (100 epochs) ──────────────────────────────────"
+  clojure -M:run -- -m -p data/params/phase-j-baseline-stable.edn || lh_fail=$((lh_fail + 1))
+  echo ""
+
+  if [ "$lh_fail" -eq 0 ]; then
+    echo "Long-horizon suite: all extended-horizon scenarios PASSED"
+  else
+    echo "Long-horizon suite: $lh_fail scenario(s) FAILED"
+  fi
+
+  echo "internal_failures=$lh_fail" > "$lh_meta_file"
+
+  return $lh_fail
+}
+
 case "$MODE" in
   unit)
     run_unit || FAILURES=$((FAILURES + 1))
@@ -574,6 +686,9 @@ case "$MODE" in
   monte-carlo)
     run_target monte-carlo run_monte_carlo || FAILURES=$((FAILURES + 1))
     ;;
+  long-horizon)
+    run_target long-horizon run_long_horizon || FAILURES=$((FAILURES + 1))
+    ;;
   all)
     : > "$ARTIFACT_DIR/.targets-${RUN_ID}.csv"
     run_target unit run_unit || FAILURES=$((FAILURES + 1))
@@ -592,7 +707,7 @@ case "$MODE" in
     ;;
   *)
     echo "Unknown mode: $MODE"
-    echo "Usage: $0 [unit|generators|contracts|invariants|suites|equivalence-new|comparison-lint|coverage|adversarial-sweep|adversarial-gates|triage|monte-carlo|all]"
+    echo "Usage: $0 [unit|generators|contracts|invariants|suites|equivalence-new|comparison-lint|coverage|adversarial-sweep|adversarial-gates|triage|monte-carlo|long-horizon|all]"
     exit 1
     ;;
 esac
@@ -601,6 +716,9 @@ if [ -f "$ARTIFACT_DIR/.targets-${RUN_ID}.csv" ]; then
   python - <<PY
 import csv, json, pathlib
 csv_path = pathlib.Path("$ARTIFACT_DIR/.targets-${RUN_ID}.csv")
+risk_path = pathlib.Path("$ARTIFACT_DIR/.risk-${RUN_ID}.lines")
+lh_meta_path = pathlib.Path("$ARTIFACT_DIR/.long-horizon-${RUN_ID}.meta")
+force_refund_trace = pathlib.Path("data/fixtures/traces/s64-force-refund-then-illegal-release-attempt.trace.json")
 rows = []
 for r in csv.reader(csv_path.read_text().splitlines()):
     if len(r) != 5:
@@ -612,13 +730,152 @@ for r in csv.reader(csv_path.read_text().splitlines()):
         "duration_ms": int(r[3]),
         "log_file": r[4]
     })
+
+risk_digest = {
+  "critical_findings": [],
+  "warnings": [],
+  "infos": [],
+  "gates_failed": [],
+  "gates_passed": []
+}
+if risk_path.exists():
+    for line in risk_path.read_text().splitlines():
+        # Expected format: severity|phase|code|message
+        # Use maxsplit=3 so free-form message text is preserved.
+        parts = line.split("|", 3)
+        if len(parts) != 4:
+            continue
+        severity, phase, code, message = parts[0], parts[1], parts[2], parts[3]
+        item = {"phase": phase, "code": code, "message": message}
+        if severity == "critical":
+            risk_digest["critical_findings"].append(item)
+            risk_digest["gates_failed"].append(code)
+        elif severity == "warning":
+            risk_digest["warnings"].append(item)
+        else:
+            risk_digest["infos"].append(item)
+            risk_digest["gates_passed"].append(code)
+
+# P1 clarity: enrich risk digest from target logs (OOM/kill signals, etc.)
+for t in rows:
+    lp = pathlib.Path(t.get("log_file", ""))
+    if not lp.exists():
+        continue
+    txt = lp.read_text(errors="ignore")
+    if "Killed                  clojure -M:run -- -U" in txt or " Killed                  clojure -M:run -- -U" in txt:
+        risk_digest["warnings"].append({
+            "phase": "phase-ah",
+            "code": "AH_RUNTIME_KILLED",
+            "message": "Phase AH process was killed (likely resource exhaustion); interpret downstream results with caution"
+        })
+
+overall = "pass" if $FAILURES == 0 else "fail"
+if risk_digest["critical_findings"]:
+    decision = "REJECTED_CRITICAL"
+elif overall == "pass" and risk_digest["warnings"]:
+    decision = "ACCEPTED_WITH_WARNINGS"
+elif overall == "pass":
+    decision = "PASS_CLEAN"
+else:
+    decision = "REJECTED"
+
 out = {
   "run_id": "$RUN_ID",
   "mode": "$MODE",
-  "overall_status": "pass" if $FAILURES == 0 else "fail",
+  "overall_status": overall,
+  "acceptance_decision": decision,
   "failure_count": $FAILURES,
+  "risk_digest": risk_digest,
   "targets": rows,
 }
+
+# P2: per-phase failure counters for dashboard-friendly aggregation
+phase_failures = {
+    "phase_ai": 0,
+    "phase_z": 0,
+    "phase_ah": 0,
+    "contracts": 0,
+    "other": 0
+}
+
+# Count known hard-gate failures from structured risk digest
+for item in risk_digest.get("critical_findings", []):
+    code = str(item.get("code", ""))
+    if code == "AI_CRITICAL_FAILURE":
+        phase_failures["phase_ai"] += 1
+    elif code == "Z_LEGITIMACY_FAILURE":
+        phase_failures["phase_z"] += 1
+    else:
+        phase_failures["other"] += 1
+
+# Enrich counters from log signatures (captures non-critical failures too)
+for t in rows:
+    target = str(t.get("target", ""))
+    status = str(t.get("status", ""))
+    lp = pathlib.Path(t.get("log_file", ""))
+    txt = lp.read_text(errors="ignore") if lp.exists() else ""
+
+    if target == "contracts" and status == "fail":
+        phase_failures["contracts"] += 1
+
+    if "Killed                  clojure -M:run -- -U" in txt or " Killed                  clojure -M:run -- -U" in txt:
+        phase_failures["phase_ah"] += 1
+
+out["phase_failures"] = phase_failures
+
+if lh_meta_path.exists():
+    meta = {}
+    for line in lh_meta_path.read_text().splitlines():
+        if "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        meta[k.strip()] = v.strip()
+    if "internal_failures" in meta:
+        try:
+            out["long_horizon_internal_failures"] = int(meta["internal_failures"])
+        except ValueError:
+            out["long_horizon_internal_failures"] = meta["internal_failures"]
+
+# P1 force-refund forward-only fixture signal
+force_refund_signal = {
+    "checked": False,
+    "status": "inconclusive",
+    "offending_workflows": [],
+    "note": "fixture not found"
+}
+if force_refund_trace.exists():
+    force_refund_signal["checked"] = True
+    try:
+        obj = json.loads(force_refund_trace.read_text())
+        events = obj.get("events", [])
+        # Heuristic fixture-level check: after buyer-winning execute_resolution,
+        # a seller release attempt must exist (forward-only guard regression pattern).
+        has_buyer_win = any(
+            e.get("action") == "execute_resolution" and
+            str(e.get("params", {}).get("winner", "")).lower() == "buyer"
+            for e in events
+        )
+        has_seller_release_attempt = any(
+            e.get("action") == "release" and str(e.get("agent", "")).lower() == "seller"
+            for e in events
+        )
+        if has_buyer_win and has_seller_release_attempt:
+            force_refund_signal.update({
+                "status": "pass",
+                "note": "force-refund forward-only regression pattern is present in fixture"
+            })
+        else:
+            force_refund_signal.update({
+                "status": "fail",
+                "note": "expected force-refund forward-only regression pattern missing in fixture"
+            })
+    except Exception as e:
+        force_refund_signal.update({
+            "status": "inconclusive",
+            "note": f"unable to parse force-refund fixture: {e}"
+        })
+out["force_refund_forward_only"] = force_refund_signal
+
 pathlib.Path("$ARTIFACT_FILE").write_text(json.dumps(out, indent=2))
 print(f"Wrote machine-readable summary: $ARTIFACT_FILE")
 PY
