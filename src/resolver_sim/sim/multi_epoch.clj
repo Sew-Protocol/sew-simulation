@@ -28,6 +28,7 @@
             [resolver-sim.sim.reputation    :as rep]
             [resolver-sim.sim.trial-router  :as router]
             [resolver-sim.sim.trajectory    :as trajectory]
+            [resolver-sim.sim.defection     :as defection]
             [resolver-sim.stochastic.rng    :as rng]
             [clojure.set]))
 
@@ -148,9 +149,10 @@
          kv-samples     (:kernel-validation-sample-size params 0)
 
          ;; Split RNG into independent streams for each use
-         [rng-ab rng-cd] (rng/split-rng rng)
-         [rng-h  rng-m]  (rng/split-rng rng-ab)
-         [rng-route rng-decay] (rng/split-rng rng-cd)
+         [rng-ab rng-cd]    (rng/split-rng rng)
+         [rng-h  rng-m]     (rng/split-rng rng-ab)
+         [rng-route rng-cd2] (rng/split-rng rng-cd)
+         [rng-decay rng-def] (rng/split-rng rng-cd2)
          rng-kv   (when (pos? kv-samples) (first (rng/split-rng rng-h)))
 
          honest-ids    (vec (keep (fn [[id r]] (when (= :honest (:strategy r)) id))
@@ -242,17 +244,28 @@
                       epoch
                       :trials    (:trials attr 0)
                       :appealed  (:appealed attr 0)
-                      :escalated (:escalated attr 0)))))
+                       :escalated (:escalated attr 0)))))
           {}
           resolver-histories)]
 
-     ;; Apply population decay with seeded RNG; thread next-id to avoid ID collisions
-     (let [{:keys [histories next-id]}
-           (rep/apply-epoch-decay updated-histories epoch params rng-decay
-                                  (:_next-resolver-id params 10000))]
-       {:epoch-summary     epoch-summary
-        :updated-histories histories
-        :next-resolver-id  next-id}))))
+     ;; ── Optional strategy defection ──────────────────────────────────────
+     ;; Resolvers with ≥1 trial may switch strategy based on payoff differential.
+     ;; Only fires when :defection-rate > 0 (default 0 = disabled for backward compat).
+     (let [{:keys [updated-histories defection-events]}
+           (defection/apply-strategy-defection rng-def updated-histories epoch params)
+
+           epoch-summary
+           (cond-> epoch-summary
+             (seq defection-events)
+             (assoc :defection (defection/defection-summary defection-events)))]
+
+       ;; Apply population decay with seeded RNG; thread next-id to avoid ID collisions
+       (let [{:keys [histories next-id]}
+             (rep/apply-epoch-decay updated-histories epoch params rng-decay
+                                    (:_next-resolver-id params 10000))]
+         {:epoch-summary     epoch-summary
+          :updated-histories histories
+          :next-resolver-id  next-id})))))
 
 (defn run-multi-epoch
   "Run N epochs with reputation tracking.

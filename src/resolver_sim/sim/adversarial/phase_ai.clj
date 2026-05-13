@@ -22,6 +22,7 @@
    Parameters: data/params/phase-ai-escalation-trap.edn
    Entry point: (run-phase-ai params)"
   (:require [resolver-sim.sim.trajectory :as trajectory]
+            [resolver-sim.sim.adversarial.ring-model :as ring-model]
             [resolver-sim.stochastic.rng :as rng]))
 
 (def phase-metadata
@@ -33,8 +34,56 @@
 ;; Escalation trap epoch model
 ;; ---------------------------------------------------------------------------
 
+(defn- run-escalation-epoch-ring-model
+  "Run one epoch using the per-member ring model (`:use-ring-model? true`).
+
+   Delegates ring evolution to `ring-model/evolve-ring-epoch` for per-member
+   stochastic detection, cascade signalling, and entry dynamics.
+
+   Returns {:honest-capitals updated-map
+            :honest-active   int
+            :ring-active     int
+            :ring            updated-ring
+            :ring-events     {:exits [...] :entries [...] :lay-low? bool}
+            :epoch           int}"
+  [rng epoch honest-capitals ring params]
+  (let [{:keys [ring exits entries lay-low? active-count]}
+        (ring-model/evolve-ring-epoch rng ring params epoch)
+
+        ring-active     active-count
+        n-trials        (:n-trials-per-epoch params 100)
+        escrow-size     (:escrow-size params 10000)
+        fee-bps         (:resolver-fee-bps params 150)
+        escalation-rate (:escalation-rate params 1.0)
+        bond-cost       (:escalation-cost-per-dispute params 1000)
+
+        total-resolvers (+ (count honest-capitals) ring-active)
+        ring-fraction   (if (pos? total-resolvers)
+                          (double (/ ring-active total-resolvers))
+                          0.0)
+        disputes-per-honest (* ring-fraction n-trials escalation-rate)
+        capital-drain       (* disputes-per-honest bond-cost)
+
+        fee-per-dispute     (* escrow-size (/ fee-bps 10000.0))
+        honest-income       (* (- 1.0 ring-fraction) n-trials fee-per-dispute
+                               (/ 1.0 (max 1 (count honest-capitals))))
+
+        updated-caps
+        (reduce-kv (fn [m id cap]
+                     (let [new-cap (+ cap honest-income (- capital-drain))]
+                       (if (> new-cap 0) (assoc m id new-cap) m)))
+                   {}
+                   honest-capitals)]
+
+    {:honest-capitals updated-caps
+     :honest-active   (count updated-caps)
+     :ring-active     ring-active
+     :ring            ring
+     :ring-events     {:exits exits :entries entries :lay-low? lay-low?}
+     :epoch           epoch}))
+
 (defn- run-escalation-epoch
-  "Run one epoch of the escalation trap model.
+  "Run one epoch of the escalation trap model (aggregate path).
 
    honest-capitals — {resolver-id → remaining-capital}
    ring-active     — current number of ring members still active
@@ -114,31 +163,57 @@
         ring-size             (:ring-size params 5)
         honest-capital        (:honest-capital params 5000)
         displacement-threshold (:displacement-threshold params 0.50)
+        use-ring-model?       (:use-ring-model? params false)
+        seed                  (:seed params 42)
 
         ; Initialise honest resolver capitals.
         honest-ids     (map #(str "honest-" %) (range n-resolvers))
         init-capitals  (zipmap honest-ids (repeat (double honest-capital)))
 
         _ (println (format "   Honest resolvers: %d (capital=%d each)" n-resolvers honest-capital))
-        _ (println (format "   Ring size: %d  Epochs: %d  Threshold: %.0f%%\n"
-                           ring-size n-epochs (* 100 displacement-threshold)))
+        _ (println (format "   Ring size: %d  Epochs: %d  Threshold: %.0f%%  Mode: %s\n"
+                           ring-size n-epochs (* 100 displacement-threshold)
+                           (if use-ring-model? "per-member" "aggregate")))
 
         ; Run epoch loop.
         {:keys [epoch-counts final-capitals]}
-        (loop [epoch    1
-               capitals init-capitals
-               ring-act ring-size
-               counts   []]
-          (if (> epoch n-epochs)
-            {:epoch-counts (vec counts) :final-capitals capitals}
-            (let [{:keys [honest-capitals honest-active ring-active]}
-                  (run-escalation-epoch epoch capitals ring-act params)
-                  entry {:epoch epoch :honest-active honest-active :ring-active ring-active}]
-              (when (zero? (mod epoch 20))
-                (println (format "   Epoch %3d: honest-active=%d  ring-active=%d  honest-share=%.0f%%"
-                                 epoch honest-active ring-active
-                                 (* 100.0 (/ honest-active (+ honest-active ring-active))))))
-              (recur (inc epoch) honest-capitals ring-active (conj counts entry)))))
+        (if use-ring-model?
+          ;; ── Per-member ring model path ───────────────────────────────────
+          (let [init-ring (ring-model/make-ring ring-size 1)
+                rng       (java.util.SplittableRandom. (long seed))]
+            (loop [epoch    1
+                   capitals init-capitals
+                   ring     init-ring
+                   counts   []]
+              (if (> epoch n-epochs)
+                {:epoch-counts (vec counts) :final-capitals capitals}
+                (let [[rng-e _] (rng/split-rng rng)
+                      {:keys [honest-capitals honest-active ring-active ring ring-events]}
+                      (run-escalation-epoch-ring-model rng-e epoch capitals ring params)
+                      entry {:epoch epoch :honest-active honest-active :ring-active ring-active
+                             :ring-events ring-events}]
+                  (when (zero? (mod epoch 20))
+                    (println (format "   Epoch %3d: honest-active=%d  ring-active=%d  exits=%d  entries=%d  honest-share=%.0f%%"
+                                     epoch honest-active ring-active
+                                     (count (:exits ring-events))
+                                     (count (or (:entries ring-events) []))
+                                     (* 100.0 (/ honest-active (max 1 (+ honest-active ring-active)))))))
+                  (recur (inc epoch) honest-capitals ring (conj counts entry))))))
+          ;; ── Aggregate path (original behaviour) ──────────────────────────
+          (loop [epoch    1
+                 capitals init-capitals
+                 ring-act ring-size
+                 counts   []]
+            (if (> epoch n-epochs)
+              {:epoch-counts (vec counts) :final-capitals capitals}
+              (let [{:keys [honest-capitals honest-active ring-active]}
+                    (run-escalation-epoch epoch capitals ring-act params)
+                    entry {:epoch epoch :honest-active honest-active :ring-active ring-active}]
+                (when (zero? (mod epoch 20))
+                  (println (format "   Epoch %3d: honest-active=%d  ring-active=%d  honest-share=%.0f%%"
+                                   epoch honest-active ring-active
+                                   (* 100.0 (/ honest-active (+ honest-active ring-active))))))
+                (recur (inc epoch) honest-capitals ring-active (conj counts entry))))))
 
         disp-traj       (trajectory/displacement-trajectory epoch-counts)
         final-honest    (:honest-active (last epoch-counts) n-resolvers)
@@ -200,4 +275,5 @@
      :final-honest-active final-honest
      :initial-honest-count n-resolvers
      :ring-size          ring-size
-     :n-epochs           n-epochs}))
+     :n-epochs           n-epochs
+     :ring-model         (if use-ring-model? :per-member :aggregate)}))

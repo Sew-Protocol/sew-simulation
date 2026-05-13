@@ -568,3 +568,47 @@ Two scenario types are validated: honest resolution (always) and fraud-slash lif
 - **Monitoring template**: (TBD - should create for ops team)
 - **Phase J specification**: (TBD - if proceeding with multi-epoch)
 
+
+---
+
+## Phase 4 Audit (Ring Coordination + Strategy Defection)
+
+### Changes implemented
+
+**Ring coordination model** (`sim/adversarial/ring_model.clj`)
+
+Replaced the aggregate-floor ring exit model in `phase_ai.clj` with per-member stochastic dynamics. Previously: `new-ring-active = max(0, floor(ring-active × base-detection / ring-size))` — a deterministic formula that always returns 0 exits at default params (`floor(5 × 0.01) = 0`).
+
+New `ring-model/evolve-ring-epoch`:
+- Each active ring member independently rolls `Bernoulli(eff-det)` per epoch (seeded RNG).
+- Detected members exit individually — no floor-division approximation.
+- **Cascade signal**: if ≥2 members detected in one epoch, remaining active members "lay low" (50% reduced activity and detection risk for one epoch).
+- **Entry dynamics**: new members join when `expected-fee > expected-slash-cost` and ring is below `ring-max-size`. Throttled to 1 new member per epoch.
+- Enable via `:use-ring-model? true` in `phase_ai` params. Default: off (backward compat).
+
+Impact on Phase AI claim: At default params (fraud-detection=0.05, ring-size=5), per-member detection still yields low expected exits (~0.05 per epoch per member), but variance is now real. Very small rings (size 1–2) can now exit in a single epoch. The aggregate claim "ring ≥ ring-size displaces >50% honest resolvers" is unchanged, but the *mechanics* are now correct.
+
+**Strategy defection model** (`sim/defection.clj`)
+
+Resolvers previously had fixed strategies that never changed across epochs. The new model:
+- Each epoch, each resolver with ≥1 trial compares their own epoch profit to the mean profit of the **other** strategy group.
+- If the other strategy earned more: defect with probability `p = defection-rate × (payoff-diff / max(1, |own-profit|))`, clamped to [0, 0.8].
+- Honest → malicious: inhibited by slashing risk: `p *= (1 - slash-risk-inhibition × slashing-detection-probability)`.
+- Malicious → honest: uninhibited (rational exit from unprofitable strategy).
+- Enable via `:defection-rate <positive-value>` in multi-epoch params. Default: 0 (disabled).
+
+Impact on Phase J claims: With defection enabled, multi-epoch dynamics become genuine strategy equilibrium tests. A dominant honest strategy should survive even under repeated defection pressure (malicious mean stays negative after slashing). The previous claim "malice cannot dominate" was untestable with fixed strategies; it is now falsifiable.
+
+### Updated claim status
+
+| Phase | Previous Status | After Phase 4 |
+|---|---|---|
+| **Phase AI** | Ring exit buggy (floor=0) → displacement overstated | Ring mechanics correct with `:use-ring-model? true`. Aggregate path preserved for backward compat. |
+| **Phase J (multi-epoch)** | Fixed strategies, not falsifiable equilibrium | Strategy defection enabled via `:defection-rate`. Equilibrium claim now falsifiable. |
+
+### Remaining limitations
+
+- Ring coordination model does not model inter-ring signalling (members watching each other's detection events — this would require shared state between members).
+- Defection model uses a simple proportional probability; does not model multi-period rationality (resolvers don't discount future slashing risk across epochs).
+- Full kernel-backed trial generation (replace stochastic probability model entirely) still not implemented.
+- Malicious-path kernel scenarios (fraud detection + appeal cascades via replay kernel) still not implemented.
