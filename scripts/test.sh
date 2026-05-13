@@ -557,6 +557,7 @@ run_monte_carlo() {
   echo "  Phase P  — Adversarial: appeals falsification (difficulty/evidence/herding)"
   echo "  Phase AA — Governance:  governance-as-adversary (selective enforcement gaming)"
   echo "  Phase AD — Governance:  bandwidth floor safeguard (AA remediation)"
+  echo "  Phase F  — Adversarial: collusion ring deterrence (waterfall slashing)"
   echo ""
 
   local mc_fail=0
@@ -577,8 +578,12 @@ run_monte_carlo() {
   clojure -M:run -- -D -p data/params/phase-ad-governance-floor.edn || mc_fail=$((mc_fail + 1))
   echo ""
 
+  echo "── Phase F: Collusion Ring Deterrence ────────────────────────────────────"
+  clojure -M:run -- -W -p data/params/phase-f-baseline.edn || mc_fail=$((mc_fail + 1))
+  echo ""
+
   if [ "$mc_fail" -eq 0 ]; then
-    echo "Monte Carlo sweep: all 4 phases PASSED"
+    echo "Monte Carlo sweep: all 5 phases PASSED"
   else
     echo "Monte Carlo sweep: $mc_fail phase(s) FAILED"
   fi

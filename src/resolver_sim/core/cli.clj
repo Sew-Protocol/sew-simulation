@@ -29,6 +29,7 @@
    ["-T" "--phase-ag" "Run Phase AG: EMA convergence (BM-05) — quality signal and cold-start gap"]
    ["-U" "--phase-ah" "Run Phase AH: equity divergence sweep (honest vs strategic)"]
    ["-V" "--phase-ai" "Run Phase AI: escalation trap — sybil ring forces honest resolver displacement"]
+   ["-W" "--phase-f"  "Run Phase F: multi-resolver collusion ring deterrence (waterfall slashing)"]
    ["-I" "--phase-p-revised"   "Run Phase P Revised: sequential appeal falsification"]
    ["-J" "--phase-q"           "Run Phase Q: advanced vulnerability (bribery, evidence spoofing, correlated failures)"]
    ["-K" "--phase-r"           "Run Phase R: liveness & participation failure"]

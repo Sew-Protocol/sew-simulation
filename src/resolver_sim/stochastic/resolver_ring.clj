@@ -131,5 +131,7 @@
      :num-disputes num-disputes
      :member-states member-states
      :viable? viable?
+     :ring-profitable? (pos? total-profit)
+     :ring-solvent? viable?
      :senior-exhausted? (let [senior (get (:registry ring) (:senior-id ring))]
                           (<= (:bond senior) 0))}))

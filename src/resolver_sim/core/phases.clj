@@ -30,6 +30,7 @@
             [resolver-sim.sim.adversarial.phase-ag      :as phase-ag]
             [resolver-sim.sim.adversarial.phase-ah      :as phase-ah]
             [resolver-sim.sim.adversarial.phase-ai      :as phase-ai]
+            [resolver-sim.sim.adversarial.phase-f       :as phase-f]
             [resolver-sim.sim.governance.phase-t        :as phase-t]
             [resolver-sim.sim.adversarial.phase-p-revised :as phase-p-revised]
             [resolver-sim.sim.adversarial.phase-q       :as phase-q]
@@ -319,6 +320,7 @@
    :phase-ag        [nil (fn [p _] (phase-ag/run-phase-ag p))]
    :phase-ah        [nil (fn [p _] (phase-ah/run-phase-ah p))]
    :phase-ai        [nil (fn [p _] (phase-ai/run-phase-ai p))]
+   :phase-f         [nil (fn [p _] (phase-f/run-phase-f p))]
    :phase-ac-sweep  ["\n🔬 Running Phase AC Threshold Search"
                      (fn [p _] (phase-ac/run-phase-ac-threshold-sweep p))]
    :phase-ad-sweep  ["\n🔬 Running Phase AD Threshold Search"
