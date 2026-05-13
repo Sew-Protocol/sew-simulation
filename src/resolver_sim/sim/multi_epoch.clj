@@ -261,9 +261,16 @@
              (assoc :defection (defection/defection-summary defection-events)))]
 
        ;; Apply population decay with seeded RNG; thread next-id to avoid ID collisions
-       (let [{:keys [histories next-id]}
+       (let [{:keys [histories next-id slashed-exits natural-exits]}
              (rep/apply-epoch-decay updated-histories epoch params rng-decay
-                                    (:_next-resolver-id params 10000))]
+                                    (:_next-resolver-id params 10000))
+
+             epoch-summary
+             (cond-> epoch-summary
+               (pos? (+ slashed-exits natural-exits))
+               (assoc :slashed-exits slashed-exits
+                      :natural-exits natural-exits))]
+
          {:epoch-summary     epoch-summary
           :updated-histories histories
           :next-resolver-id  next-id})))))
@@ -355,19 +362,24 @@
                 m-wr      (map #(rep/win-rate (val %)) malice-rs)
                 exits     (count (clojure.set/difference
                                   (set (keys initial-histories))
-                                  (set (keys final-histories))))]
-            {:final-resolver-count     (count final-histories)
-             :total-resolver-exits     exits
-             :honest-final-count       (count honest-rs)
-             :malice-final-count       (count malice-rs)
-             :honest-cumulative-profit (if (seq h-profits) (double (apply + h-profits)) 0.0)
-             :malice-cumulative-profit (if (seq m-profits) (double (apply + m-profits)) 0.0)
-             :honest-avg-win-rate      (if (seq h-wr) (double (/ (apply + h-wr) (count h-wr))) 0.0)
-             :malice-avg-win-rate      (if (seq m-wr) (double (/ (apply + m-wr) (count m-wr))) 0.0)
-             :honest-exit-rate         (double (/ exits (max 1 n-resolvers)))
-             :malice-survival-rate     (double (/ (count malice-rs)
-                                                  (max 1 (count (filter #(not= :honest (:strategy (val %)))
-                                                                         initial-histories)))))})
+                                  (set (keys final-histories))))
+                ;; Sum slashed-exits and natural-exits across all epoch-results
+                total-slashed-exits (reduce #(+ %1 (:slashed-exits %2 0)) 0 epoch-results)
+                total-natural-exits (reduce #(+ %1 (:natural-exits %2 0)) 0 epoch-results)]
+            {:final-resolver-count       (count final-histories)
+             :total-resolver-exits       exits
+             :total-slashed-exits        total-slashed-exits
+             :total-natural-exits        total-natural-exits
+             :honest-final-count         (count honest-rs)
+             :malice-final-count         (count malice-rs)
+             :honest-cumulative-profit   (if (seq h-profits) (double (apply + h-profits)) 0.0)
+             :malice-cumulative-profit   (if (seq m-profits) (double (apply + m-profits)) 0.0)
+             :honest-avg-win-rate        (if (seq h-wr) (double (/ (apply + h-wr) (count h-wr))) 0.0)
+             :malice-avg-win-rate        (if (seq m-wr) (double (/ (apply + m-wr) (count m-wr))) 0.0)
+             :honest-exit-rate           (double (/ exits (max 1 n-resolvers)))
+             :malice-survival-rate       (double (/ (count malice-rs)
+                                                    (max 1 (count (filter #(not= :honest (:strategy (val %)))
+                                                                           initial-histories)))))})
 
           ;; Legacy equity-only trajectories (backward compat)
           profit-snapshots (mapv (fn [s] (reduce-kv (fn [m id v] (assoc m id (:profit v))) {} s))
@@ -400,7 +412,10 @@
           eq-report (stoch-eq/evaluate-stochastic-equilibrium result)]
 
       (println (format "\n✓ Phase J complete. Final state:"))
-      (println (format "   Resolvers exited: %d" (:total-resolver-exits final-stats)))
+      (println (format "   Resolvers exited: %d (%d slashed, %d natural)"
+                       (:total-resolver-exits final-stats)
+                       (:total-slashed-exits final-stats 0)
+                       (:total-natural-exits final-stats 0)))
       (println (format "   Honest cumulative: %.0f" (:honest-cumulative-profit final-stats)))
       (println (format "   Malice cumulative: %.0f" (:malice-cumulative-profit final-stats)))
       (println (format "   Win rate - honest: %.1f%%" (* 100 (:honest-avg-win-rate final-stats))))
