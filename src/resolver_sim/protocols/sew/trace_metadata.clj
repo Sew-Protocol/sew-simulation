@@ -434,7 +434,7 @@
       (and expected (= :fail outcome))   :expected-violation
       (and (= :pass outcome) (zero? violations)) :normal-completion
       (= halt :invariant-violation)      :invariant-failure
-      (= halt :open-disputes-at-end)     :liveness-failure
+      (#{:open-entities-at-end :open-disputes-at-end} halt) :liveness-failure
       (= outcome :fail)                  :invariant-failure
       :else                              :normal-completion)))
 

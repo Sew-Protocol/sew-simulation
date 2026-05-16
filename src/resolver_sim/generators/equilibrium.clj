@@ -13,7 +13,7 @@
   [{:keys [outcome halt-reason metrics]}]
   (cond
     (= :fail outcome) :invariant-failed
-    (= :open-disputes-at-end halt-reason) :stuck
+    (#{:open-entities-at-end :open-disputes-at-end} halt-reason) :stuck
     (pos? (get metrics :attack-successes 0)) :attack-success
     (pos? (get metrics :invariant-violations 0)) :invariant-failed
     (nil? halt-reason) :terminal

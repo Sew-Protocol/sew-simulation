@@ -7,6 +7,8 @@
    on a nil datasource."
   (:require [clojure.test :refer [deftest testing is are]]
             [resolver-sim.protocols.sew.runner    :as runner]
+            [resolver-sim.protocols.sew           :as sew]
+            [resolver-sim.protocols.sew.db        :as sew-db]
             [resolver-sim.db.telemetry :as tel]
             [resolver-sim.db.store     :as ss]))
 
@@ -38,17 +40,17 @@
 (deftest test-outcome-record-field-mapping
   (testing "strategy field is in :metrics blob"
     (let [result  (run-one :honest)
-          record  (tel/trial->outcome-record "t1" :batch-a base-params result)]
+          record  (tel/trial->outcome-record sew/protocol "t1" :batch-a base-params result)]
       (is (= :honest (get-in record [:metrics :strategy])))))
 
   (testing "malicious strategy propagates"
     (let [result (run-one :malicious)
-          record (tel/trial->outcome-record "t2" :batch-a
+          record (tel/trial->outcome-record sew/protocol "t2" :batch-a
                    (assoc base-params :strategy :malicious) result)]
       (is (= :malicious (get-in record [:metrics :strategy])))))
 
   (testing "numeric fields in :metrics are longs"
-    (let [record (tel/trial->outcome-record "t3" :batch-a base-params (run-one :honest))]
+    (let [record (tel/trial->outcome-record sew/protocol "t3" :batch-a base-params (run-one :honest))]
       (is (int? (get-in record [:metrics :profit-honest])))
       (is (int? (get-in record [:metrics :profit-malice])))
       (is (int? (get-in record [:metrics :cm-fee])))
@@ -56,29 +58,29 @@
 
   (testing "cm-afa reflects escrow amount minus fee"
     (let [result (run-one :honest)
-          record (tel/trial->outcome-record "t4" :batch-a base-params result)]
+          record (tel/trial->outcome-record sew/protocol "t4" :batch-a base-params result)]
       ;; fee = 10000 * 50 / 10000 = 50; afa = 9950
       (is (= 50   (get-in record [:metrics :cm-fee])))
       (is (= 9950 (get-in record [:metrics :cm-afa])))))
 
   (testing "terminal outcome is at :outcome (generic key)"
-    (let [record (tel/trial->outcome-record "t5" :batch-a base-params (run-one :honest))]
+    (let [record (tel/trial->outcome-record sew/protocol "t5" :batch-a base-params (run-one :honest))]
       (is (keyword? (:outcome record)))))
 
   (testing "protocol-id is sew-v1"
-    (let [record (tel/trial->outcome-record "t5b" :batch-a base-params (run-one :honest))]
+    (let [record (tel/trial->outcome-record sew/protocol "t5b" :batch-a base-params (run-one :honest))]
       (is (= "sew-v1" (:protocol-id record)))))
 
   (testing "valid-from is a java.util.Date"
-    (let [record (tel/trial->outcome-record "t6" :batch-a base-params (run-one :honest))]
+    (let [record (tel/trial->outcome-record sew/protocol "t6" :batch-a base-params (run-one :honest))]
       (is (instance? java.util.Date (:valid-from record)))))
 
   (testing "batch-id preserved"
-    (let [record (tel/trial->outcome-record "t7" :my-batch base-params (run-one :honest))]
+    (let [record (tel/trial->outcome-record sew/protocol "t7" :my-batch base-params (run-one :honest))]
       (is (= :my-batch (:batch-id record)))))
 
   (testing "params stored on record"
-    (let [record (tel/trial->outcome-record "t8" :batch-a base-params (run-one :honest))]
+    (let [record (tel/trial->outcome-record sew/protocol "t8" :batch-a base-params (run-one :honest))]
       (is (= (:escrow-size base-params) (get-in record [:params :escrow-size]))))))
 
 (deftest test-outcome-record-divergence-fields
@@ -88,7 +90,7 @@
                               :slashed? false :dispute-correct? true
                               :appeal-triggered? false}
                   :divergence {:divergence? false :diffs []}}
-          record  (tel/trial->outcome-record "t9" :batch-a base-params result)]
+          record  (tel/trial->outcome-record sew/protocol "t9" :batch-a base-params result)]
       (is (false? (:divergence? record)))
       (is (= [] (get-in record [:metrics :diffs])))))
 
@@ -98,7 +100,7 @@
           result   {:contract  (run-one :malicious)
                     :idealized {}
                     :divergence fake-div}
-          record   (tel/trial->outcome-record "t10" :batch-a
+          record   (tel/trial->outcome-record sew/protocol "t10" :batch-a
                      (assoc base-params :strategy :malicious) result)]
       (is (true? (:divergence? record)))
       (is (= 1 (count (get-in record [:metrics :diffs])))))))
@@ -109,7 +111,7 @@
 
 (deftest test-event-records-shape
   (let [result (run-one :honest)
-        events (tel/trial->event-records "t-ev" base-params result)]
+        events (tel/trial->event-records sew/protocol "t-ev" base-params result)]
     (testing "returns exactly 3 events"
       (is (= 3 (count events))))
 
@@ -142,14 +144,14 @@
 (deftest test-record-trial-nil-ds
   (testing "record-trial! with nil ds returns outcome map"
     (let [result  (run-one :honest)
-          outcome (tel/record-trial! nil :batch-a "trial-nil" base-params result)]
+          outcome (tel/record-trial! nil sew/protocol :batch-a "trial-nil" base-params result)]
       (is (map? outcome))
       (is (= "trial-nil" (:id outcome)))))
 
   (testing "record-batch! with nil ds returns vector of outcomes"
     (let [trials [{:trial-id "b1" :params base-params :result (run-one :honest)}
                   {:trial-id "b2" :params base-params :result (run-one :malicious)}]
-          results (tel/record-batch! nil :batch-x trials)]
+          results (tel/record-batch! nil sew/protocol :batch-x trials)]
       (is (= 2 (count results)))
       (is (every? map? results)))))
 
@@ -198,13 +200,13 @@
 
 (deftest test-store-nil-ds-reads
   (testing "sew-trial-outcomes with nil ds returns []"
-    (is (= [] (ss/sew-trial-outcomes nil))))
+    (is (= [] (sew-db/sew-trial-outcomes nil))))
 
   (testing "sew-trial-outcomes-at with nil ds returns []"
-    (is (= [] (ss/sew-trial-outcomes-at nil (java.util.Date.)))))
+    (is (= [] (sew-db/sew-trial-outcomes-at nil (java.util.Date.)))))
 
   (testing "sew-escrow-events-for-trial with nil ds returns []"
-    (is (= [] (ss/sew-escrow-events-for-trial nil "any-id"))))
+    (is (= [] (sew-db/sew-escrow-events-for-trial nil "any-id"))))
 
   (testing "batch-summary with nil ds returns {}"
     (is (= {} (tel/batch-summary nil :any-batch)))))

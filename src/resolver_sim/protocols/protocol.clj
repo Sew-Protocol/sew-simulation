@@ -65,11 +65,10 @@
     "Return a :trace-metadata map for a completed transition, or nil.
      action     — the action string that was dispatched
      result-kw  — :ok, :rejected, or :invariant-violated
-     Specific fields produced by SEWProtocol:
-       :transition/type  — semantic action category (see trace-metadata/transition-types)
-       :resolution/path  — resolution route, or :resolution/none
-     Note: :effect/type is intentionally absent — accounting effects depend on
-     world state at resolution time and cannot be derived from action name alone.
+     The shape of the returned map is protocol-defined. A protocol may include
+     any metadata fields appropriate to its transition model (e.g. action category,
+     resolution path, effect type). Fields that cannot be derived from the action
+     name alone (such as accounting effects) should be omitted.
      Return nil for protocols that do not produce transition metadata.")
 
   (resolve-id-alias [protocol event id-alias-map]
@@ -97,8 +96,8 @@
 
   (open-entities [protocol world]
     "Return a seq of entity IDs that are still open/unresolved at end of scenario.
-     The replay engine calls this after the event loop when :allow-open-disputes?
-     is not set, to detect incomplete runs.
+     The replay engine calls this after the event loop when :allow-open-entities?
+     is not set in the scenario map, to detect incomplete runs.
      Return empty seq (or nil) when all entities have reached a terminal state.")
 
   (classify-event [protocol event result-kw error-kw]

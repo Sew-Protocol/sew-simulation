@@ -71,7 +71,7 @@
 ;;
 ;; Those belong in a separate future registry, e.g.:
 ;;
-;;   resolver-sim.sim.multi-epoch/known-metrics   (stochastic, multi-epoch)
+;;   resolver-sim.sim.multi-epoch/known-metrics   (stochastic, multi-epoch; SEW-specific)
 ;;
 ;; Do NOT add population/batch metrics here. Blending the two worlds would
 ;; cause validate-scenario to accept :theory/falsifies-if conditions that
@@ -91,35 +91,15 @@
      :rejected-attacks     adversarial events that were rejected
      :reverts              all rejected events (blunt aggregate)
      :invariant-violations aggregate count of invariant failures
-     :funds-lost           decrease in total-held from accepted adversarial events"
+
+   NOTE: :funds-lost is NOT a base metric — it is protocol-specific (financial
+   protocols declare it via metric-vocabulary). Non-financial protocols (e.g.
+   governance, identity) would never populate it."
   #{:attack-attempts
     :attack-successes
     :rejected-attacks
     :reverts
-    :invariant-violations
-    :funds-lost})
-
-(def known-metrics
-  "Full metric set for the SEW Protocol reference implementation.
-
-   Kept for backward compatibility with existing SEW scenarios and tests.
-   New protocol implementations should declare their vocabulary via
-   DisputeProtocol/metric-vocabulary rather than extending this set.
-
-   = base-metrics ∪ SEW-specific metrics.
-
-   NON-NUMERIC internal key (not in this set, not checkable via evaluate-metric-op):
-     :invariant-results  — map {inv-kw :fail}; used only by evaluate-invariants."
-  (into base-metrics
-        #{:total-escrows
-          :total-volume
-          :disputes-triggered
-          :resolutions-executed
-          :pending-settlements-executed
-          :double-settlements
-          :invalid-state-transitions
-          :negative-payoff-count
-          :coalition-net-profit}))
+    :invariant-violations})
 
 (defn- metric-key
   "Coerce a metric name (string or keyword) to a keyword, stripping any
@@ -251,7 +231,6 @@
               :rejected-attacks     0
               :reverts              0
               :invariant-violations 0
-              :funds-lost           0
               ;; Per-invariant failure map: {inv-kw :fail} for any invariant that
               ;; violated at least once during the run.  Invariants NOT in this map
               ;; either passed throughout or were never exercised.  Used exclusively
@@ -393,10 +372,11 @@
         (log/info :scenario/start {:id scenario-id})
         (loop [world world0 events events trace [] metrics (zero-metrics protocol) id-alias-map {}]
           (if (empty? events)
-            (let [open (when-not (:allow-open-disputes? scenario)
+            (let [open (when-not (or (:allow-open-entities? scenario)
+                                     (:allow-open-disputes? scenario))  ; backward-compat alias
                          (seq (engine/open-entities protocol world)))]
               (if open
-                {:outcome :fail :scenario-id scenario-id :events-processed (count trace) :halt-reason :open-disputes-at-end :detail {:open-disputes (vec open)} :trace trace :metrics metrics :agents agents :protocol protocol}
+                {:outcome :fail :scenario-id scenario-id :events-processed (count trace) :halt-reason :open-entities-at-end :detail {:open-entities (vec open)} :trace trace :metrics metrics :agents agents :protocol protocol}
                 (do
                   (log/info :scenario/end {:id scenario-id :outcome :pass})
                   {:outcome :pass :scenario-id scenario-id :events-processed (count trace) :trace trace :metrics metrics :agents agents :protocol protocol})))

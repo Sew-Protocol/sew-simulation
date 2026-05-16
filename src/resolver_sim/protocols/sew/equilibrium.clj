@@ -521,7 +521,7 @@
   (let [halt     (:halt-reason trace-summary)
         terminal (:terminal? terminal-world)]
     (cond
-      (= halt :open-disputes-at-end)
+      (#{:open-entities-at-end :open-disputes-at-end} halt)
       (not-applicable :budget-balance "scenario allows open disputes at end")
 
       (not terminal)

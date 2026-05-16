@@ -4,9 +4,9 @@
    Converts run-trial / run-with-divergence-check output into the generic record
    format expected by resolver-sim.db.store and writes it to XTDB.
 
-   Records are stored in the protocol-agnostic sim_trial_results table; all
-   SEW-specific fields (strategy, profits, appeal flags, etc.) are serialised
-   as a metrics_edn blob alongside the generic header fields.
+   Records are stored in the protocol-agnostic sim_trial_results table.
+   Protocol-specific fields are serialised as a metrics_edn blob, populated via
+   DisputeProtocol/io-projection with the :telemetry-record target.
 
    All write functions accept a datasource as their first argument.
    Passing nil is safe: writes become no-ops, enabling offline simulation
@@ -16,11 +16,13 @@
 
      ;; With XTDB running:
      (def ds (evaluation.store/->datasource))
-     (telemetry/record-trial! ds batch-id trial-id params result)
+     (telemetry/record-trial! ds protocol batch-id trial-id params result)
 
      ;; Without XTDB (default, tests):
-     (telemetry/record-trial! nil batch-id trial-id params result)"
-  (:require [resolver-sim.db.store :as ss])
+     (telemetry/record-trial! nil protocol batch-id trial-id params result)"
+  (:require [resolver-sim.db.store               :as ss]
+            [resolver-sim.protocols.protocol      :as engine]
+            [resolver-sim.protocols.sew.db        :as sew-db])
   (:import [java.util Date UUID]))
 
 ;; ---------------------------------------------------------------------------
@@ -40,6 +42,7 @@
    expected by resolver-sim.db.store/insert-trial-result!.
 
    Arguments:
+     protocol   — a DisputeProtocol instance (used for protocol-id and metrics blob)
      trial-id   — unique string identifier for this trial
      batch-id   — string or keyword identifying the simulation batch
      params     — the params map passed to run-trial
@@ -48,33 +51,24 @@
    The returned map has:
      Top-level generic fields: :id, :batch-id, :protocol-id, :outcome,
        :invariants-ok?, :divergence?, :params, :violations, :valid-from
-     :metrics blob: all SEW-specific fields (strategy, profits, appeal flags,
-       dispute-correct?, slashed?, cm-fee, cm-afa, diffs).
+     :metrics blob: protocol-specific fields from io-projection :telemetry-record.
 
    When result is a run-with-divergence-check map (contains :contract),
    the :contract sub-map is used for trial fields and :divergence for diffs."
-  [trial-id batch-id params result]
+  [protocol trial-id batch-id params result]
   (let [cm    (if (contains? result :contract) (:contract result) result)
         div   (get result :divergence {})
         btime (get params :block-time 1000)]
-    {:id          trial-id
-     :batch-id    batch-id
-     :protocol-id "sew-v1"
-     :outcome     (get cm :cm/final-state)
+    {:id             trial-id
+     :batch-id       batch-id
+     :protocol-id    (engine/protocol-id protocol)
+     :outcome        (get cm :cm/final-state)
      :invariants-ok? (boolean (get cm :cm/invariants-ok? true))
      :divergence?    (boolean (get div :divergence?))
-     :params      params
-     :metrics     {:strategy          (get cm :strategy (get params :strategy :honest))
-                   :dispute-correct?  (boolean (get cm :dispute-correct?))
-                   :appeal-triggered? (boolean (get cm :appeal-triggered?))
-                   :slashed?          (boolean (get cm :slashed?))
-                   :profit-honest     (long (get cm :profit-honest 0))
-                   :profit-malice     (long (get cm :profit-malice 0))
-                   :cm-fee            (long (get cm :cm/fee 0))
-                   :cm-afa            (long (get cm :cm/afa 0))
-                   :diffs             (get div :diffs)}
-     :violations  (get cm :cm/inv-violations)
-     :valid-from  (sim-date btime)}))
+     :params         params
+     :metrics        (engine/io-projection protocol result :telemetry-record)
+     :violations     (get cm :cm/inv-violations)
+     :valid-from     (sim-date btime)}))
 
 (defn trial->event-records
   "Derive a sequence of sim_entity_events records from a run-trial result.
@@ -82,11 +76,15 @@
    Reconstructs the state timeline from the outcome fields. Each record
    has a unique :id derived from trial-id and the event step.
 
-   Currently emits up to 3 events per trial:
-     :sew/escrow-created  — always
-     :sew/dispute-raised  — always (all adversarial trials raise a dispute)
-     :sew/escrow-finalized — final state (released/refunded/resolved)"
-  [trial-id params result]
+   Currently emits up to 3 events per trial (SEW lifecycle):
+     :sew/escrow-created   — always
+     :sew/dispute-raised   — always (all adversarial trials raise a dispute)
+     :sew/escrow-finalized — final state (released/refunded/resolved)
+
+   NOTE: This function is SEW-specific by necessity — it reconstructs a synthetic
+   event timeline from run-trial outcome fields. A fully generic implementation
+   would require the protocol to provide an event-log via io-projection."
+  [_protocol trial-id params result]
   (let [cm     (if (contains? result :contract) (:contract result) result)
         btime  (long (get params :block-time 1000))
         fstate (get cm :cm/final-state :pending)
@@ -111,9 +109,9 @@
 
    All writes are skipped when ds is nil.
    Returns the outcome record map (useful for chaining / inspection)."
-  [ds batch-id trial-id params result]
-  (let [outcome (trial->outcome-record trial-id batch-id params result)
-        events  (trial->event-records  trial-id params result)]
+  [ds protocol batch-id trial-id params result]
+  (let [outcome (trial->outcome-record protocol trial-id batch-id params result)
+        events  (trial->event-records  protocol trial-id params result)]
     (ss/insert-trial-result! ds outcome)
     (doseq [ev events]
       (ss/insert-entity-event! ds ev))
@@ -129,10 +127,10 @@
 
    Returns a vector of outcome record maps.
    All writes are skipped when ds is nil."
-  [ds batch-id trials]
+  [ds protocol batch-id trials]
   (mapv (fn [{:keys [trial-id params result]}]
           (let [tid (or trial-id (str (UUID/randomUUID)))]
-            (record-trial! ds batch-id tid params result)))
+            (record-trial! ds protocol batch-id tid params result)))
         trials))
 
 ;; ---------------------------------------------------------------------------
@@ -149,5 +147,5 @@
   [ds batch-id]
   (if (nil? ds)
     {}
-    (-> (ss/sew-trial-outcomes ds {:batch-id batch-id})
+    (-> (sew-db/sew-trial-outcomes ds {:batch-id batch-id})
         ss/summarise-batch)))

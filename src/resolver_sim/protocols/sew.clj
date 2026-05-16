@@ -579,7 +579,10 @@
       :double-settlements
       :invalid-state-transitions
       :negative-payoff-count
-      :coalition-net-profit})
+      :coalition-net-profit
+      ;; Financial metric: decrease in total-held from accepted adversarial events.
+      ;; Declared here (not in base-metrics) because non-financial protocols don't track it.
+      :funds-lost})
 
   (adversarial-event? [_ event agent]
     ;; Per-event :adversarial? flag takes precedence over agent role/strategy/type
@@ -645,11 +648,28 @@
       {:block-time    (:block-time data)
        :entity-count  (count (:escrow-transfers data {}))
        :pending-count (count (filter #(:exists (val %)) (:pending-settlements data {})))}
-      ;; :forge-trace and :telemetry-record are produced by their respective
-      ;; subsystems (io/trace-export and db/telemetry) which have full access to
-      ;; the supporting namespaces.  Return nil here; callers fall back to the
-      ;; dedicated export functions for those targets.
-      nil)))
+
+      :telemetry-record
+      ;; data is a run-trial or run-with-divergence-check result map.
+      ;; Returns the SEW-specific metrics blob for db/telemetry/insert-trial-result!.
+      (let [cm  (if (contains? data :contract) (:contract data) data)
+            div (get data :divergence {})]
+        {:strategy          (get cm :strategy :honest)
+         :dispute-correct?  (boolean (get cm :dispute-correct?))
+         :appeal-triggered? (boolean (get cm :appeal-triggered?))
+         :slashed?          (boolean (get cm :slashed?))
+         :profit-honest     (long (get cm :profit-honest 0))
+         :profit-malice     (long (get cm :profit-malice 0))
+         :cm-fee            (long (get cm :cm/fee 0))
+         :cm-afa            (long (get cm :cm/afa 0))
+         :diffs             (get div :diffs)})
+
+      ;; :forge-trace is produced by io/trace-export which has full access to
+      ;; the supporting subsystem namespaces.  Return nil; callers fall back to
+      ;; the dedicated export functions.
+      nil))
+
+) ; end SEWProtocol deftype
 
 (def protocol (SEWProtocol.))
 

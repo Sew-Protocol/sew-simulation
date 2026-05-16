@@ -10,7 +10,9 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [evaluation.store     :as store]
             [resolver-sim.db.store :as ss]
+            [resolver-sim.protocols.sew           :as sew]
             [resolver-sim.protocols.sew.runner    :as runner]
+            [resolver-sim.protocols.sew.db        :as sew-db]
             [resolver-sim.db.telemetry :as tel])
   (:import [java.util Date UUID]))
 
@@ -55,7 +57,7 @@
                        :appeal-probability-if-wrong      0.0
                        :slashing-detection-probability   0.0}
              result   (runner/run-trial rng-fn params)]
-         (tel/record-trial! *ds* *batch-id* trial-id params result))))))
+         (tel/record-trial! *ds* sew/protocol *batch-id* trial-id params result))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Tests
@@ -64,7 +66,7 @@
 (deftest test-write-and-read-batch
   (testing "Writing 5 honest trials and reading them back"
     (let [outcomes (run-n-trials 5 :honest)
-          stored   (ss/sew-trial-outcomes *ds* {:batch-id *batch-id*})]
+          stored   (sew-db/sew-trial-outcomes *ds* {:batch-id *batch-id*})]
       (is (= 5 (count stored)) "5 rows written")
       (is (every? #(= :honest (:trial/strategy %)) stored) "all strategy=honest")
       (is (every? #(= :released (:trial/final-state %)) stored)
@@ -83,7 +85,7 @@
                               :appeal-probability-if-wrong   0.0
                               :slashing-detection-probability 0.0}
                      res    (runner/run-trial (fn [] 0.9) params)]
-                 (tel/record-trial! *ds* batch2 tid params res)))
+                 (tel/record-trial! *ds* sew/protocol batch2 tid params res)))
           _m (dotimes [i 2]
                (let [tid    (str batch2 "-m-" i)
                      params {:block-time 3000 :escrow-size 50000
@@ -92,17 +94,17 @@
                               :appeal-probability-if-wrong   0.0
                               :slashing-detection-probability 0.0}
                      res    (runner/run-trial (fn [] 0.9) params)]
-                 (tel/record-trial! *ds* batch2 tid params res)))
-          all    (ss/sew-trial-outcomes *ds* {:batch-id batch2})
-          honest (ss/sew-trial-outcomes *ds* {:batch-id batch2 :strategy :honest})]
+                 (tel/record-trial! *ds* sew/protocol batch2 tid params res)))
+          all    (sew-db/sew-trial-outcomes *ds* {:batch-id batch2})
+          honest (sew-db/sew-trial-outcomes *ds* {:batch-id batch2 :strategy :honest})]
       (is (= 5 (count all)) "5 total rows for mixed batch")
       (is (= 3 (count honest)) "3 honest rows found by strategy filter"))))
 
 (deftest test-escrow-events-written
   (testing "Escrow event timeline is written for each trial"
-    (let [stored-outcomes (ss/sew-trial-outcomes *ds* {:batch-id *batch-id*})
+    (let [stored-outcomes (sew-db/sew-trial-outcomes *ds* {:batch-id *batch-id*})
           first-trial-id  (:trial/id (first stored-outcomes))
-          events          (ss/sew-escrow-events-for-trial *ds* first-trial-id)]
+          events          (sew-db/sew-escrow-events-for-trial *ds* first-trial-id)]
       (is (= 3 (count events)) "3 events per trial: created / dispute-raised / finalized")
       (is (= :sew/escrow-created   (:event/type (nth events 0))) "first event is creation")
       (is (= :sew/dispute-raised   (:event/type (nth events 1))) "second event is dispute")
@@ -116,8 +118,8 @@
     ;; Querying AS OF epoch should see nothing for our batch (valid_from > epoch).
     ;; Querying far in the future should see all our rows.
     (let [our-kw     (keyword *batch-id*)   ; row->trial-outcome does (keyword batch_id)
-          before-all (ss/sew-trial-outcomes-at *ds* (Date. 0))
-          after-all  (ss/sew-trial-outcomes-at *ds* (Date. (* 999999 1000)))]
+          before-all (sew-db/sew-trial-outcomes-at *ds* (Date. 0))
+          after-all  (sew-db/sew-trial-outcomes-at *ds* (Date. (* 999999 1000)))]
       (let [our-before (filter #(= our-kw (:trial/batch-id %)) before-all)]
         (is (empty? our-before) "no rows visible before their valid-from time"))
       (let [our-after (filter #(= our-kw (:trial/batch-id %)) after-all)]
@@ -136,7 +138,7 @@
 
 (deftest test-params-edn-roundtrip
   (testing "params map survives EDN serialization through XTDB and back"
-    (let [stored   (ss/sew-trial-outcomes *ds* {:batch-id *batch-id* :limit 1})
+    (let [stored   (sew-db/sew-trial-outcomes *ds* {:batch-id *batch-id* :limit 1})
           row      (first stored)
           params   (:trial/params row)]
       (is (map? params) "params deserialized as map")
