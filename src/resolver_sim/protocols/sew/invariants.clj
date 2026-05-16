@@ -53,6 +53,14 @@
                                             acc))
                                         0
                                         (:escrow-transfers world))
+                     ;; Yield sum: yield accrued to live escrows is part of held.
+                     yield-sum  (reduce (fn [acc [_ et]]
+                                          (if (and (= (:token et) token)
+                                                   (contains? live-states (:escrow-state et)))
+                                            (+ acc (:accumulated-yield et 0))
+                                            acc))
+                                        0
+                                        (:escrow-transfers world))
                      ;; Sum of all active appeal bonds for this token.
                      ;; These are part of :total-held.
                      bond-sum (reduce + 0 (for [[wf agents] (:bond-balances world)
@@ -60,7 +68,7 @@
                                                 :let [et (get-in world [:escrow-transfers wf])]
                                                 :when (= (:token et) token)]
                                             amt))
-                     live-sum (+ escrow-sum bond-sum)
+                     live-sum (+ escrow-sum yield-sum bond-sum)
                      ext-bal  (when token-balances (get token-balances token 0))
                      ;; Internal: total-held must EXACTLY match live (escrow + bond) sum
                      internal-ok? (= live-sum held)
@@ -649,6 +657,44 @@
            :accounted accounted :deposited total-deposited})]
     {:holds?     (empty? violations)
      :violations (vec violations)}))
+
+;; ---------------------------------------------------------------------------
+;; New Invariant: Solvency KPI helper
+;; ---------------------------------------------------------------------------
+
+(defn calculate-solvency-ratio
+  "Returns the robust solvency ratio: Total-Assets / Total-Inflows.
+   
+   Total-Assets includes:
+     - Current balances (held, claimable, fees, bond-balances, bond-fees)
+     - Slashed distributions (insurance, protocol, retained reserves)
+     - Cumulative outflows (total-withdrawn)
+   
+   Total-Inflows includes:
+     - Initial-Principal-Deposits (escrows + bonds)
+     - Total-Yield-Generated (as an internal inflow)
+   
+   A ratio >= 1.0 indicates perfect value conservation."
+  [world]
+  (let [held      (reduce + 0 (vals (:total-held world {})))
+        claimable (reduce + 0 (for [m (vals (:claimable world {}))] (reduce + 0 (vals m))))
+        fees      (reduce + 0 (vals (:total-fees world {})))
+        withdrawn (reduce + 0 (vals (:total-withdrawn world {})))
+        
+        ;; Bond assets
+        bond-bal  (reduce + 0 (for [m (vals (:bond-balances world {}))] (reduce + 0 (vals m))))
+        bond-fees (reduce + 0 (vals (:bond-fees world {})))
+        bond-dist (reduce + 0 (vals (:bond-distribution world {:insurance 0 :protocol 0 :burned 0})))
+        retained  (:retained-slash-reserves world 0)
+        
+        ;; Total assets (Current + Historical Outflows)
+        total-assets (+ held claimable fees withdrawn bond-bal bond-fees bond-dist retained)
+        
+        ;; Total Inflows
+        principal (reduce + 0 (vals (:total-principal-deposited world {})))
+        yield     (reduce + 0 (vals (:total-yield-generated world {})))
+        inflow    (+ principal yield)]
+    (if (zero? inflow) 1.0 (/ (double total-assets) inflow))))
 
 ;; ---------------------------------------------------------------------------
 ;; Cross-world: Fee Monotonicity

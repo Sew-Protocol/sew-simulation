@@ -56,6 +56,7 @@
         fot-bps (get-in world [:token-fot-bps token] 0)
         net-amt (- amt (t/compute-fee amt fot-bps))]
     (-> world
+        (acct/distribute-yield workflow-id)
         (acct/sub-held token amt)
         (acct/record-released token net-amt)
         (acct/record-claimable workflow-id (:to et) net-amt)
@@ -73,6 +74,7 @@
         fot-bps (get-in world [:token-fot-bps token] 0)
         net-amt (- amt (t/compute-fee amt fot-bps))]
     (-> world
+        (acct/distribute-yield workflow-id)
         (acct/sub-held token amt)
         (acct/record-refunded token net-amt)
         (acct/record-claimable workflow-id (:from et) net-amt)
@@ -80,7 +82,37 @@
         (sm/apply-transition! workflow-id :refunded))))
 
 ;; ---------------------------------------------------------------------------
-;; create-escrow
+;; Yield Accrual
+;; ---------------------------------------------------------------------------
+
+(def ^:const seconds-per-year 31536000)
+
+(defn accrue-yield
+  "Calculate and update accrued yield for an escrow based on time delta.
+   Rate is looked up from world :yield-rates {token -> rate-bps}."
+  [world workflow-id]
+  (let [et      (t/get-transfer world workflow-id)
+        token   (:token et)
+        rate    (get-in world [:yield-rates token] 0)
+        now     (:block-time world)
+        last-ts (:last-accrual-time et now)
+        delta   (max 0 (- now last-ts))]
+    (if (or (zero? delta) (zero? rate))
+      world
+      (let [afa     (:amount-after-fee et)
+            ;; yield = (principal * rate-bps * delta) / (10000 * seconds-per-year)
+            ;; Using BigInt for intermediate calculation to avoid overflow
+            num     (* (bigint afa) (bigint rate) (bigint delta))
+            den     (* 10000 (bigint seconds-per-year))
+            yield   (long (quot num den))]
+        (if (pos? yield)
+          (-> world
+              (update-in [:escrow-transfers workflow-id :accumulated-yield] + yield)
+              (assoc-in  [:escrow-transfers workflow-id :last-accrual-time] now)
+              (update-in [:total-yield-generated token] (fnil + 0) yield)
+              (acct/add-held token yield))
+          ;; If yield < 1 wei, still update timestamp to avoid re-calculating delta
+          (assoc-in world [:escrow-transfers workflow-id :last-accrual-time] now))))))
 ;;
 ;; Mirrors: BaseEscrow.createEscrow
 ;;
@@ -166,12 +198,14 @@
                               :dispute-resolver  resolver
                               :auto-release-time auto-rel
                               :auto-cancel-time  auto-can
+                              :last-accrual-time (:block-time world)
                               :escrow-state      :pending})
               world'        (-> world
                                 (assoc-in [:escrow-transfers workflow-id] et)
                                 (assoc-in [:escrow-settings workflow-id]
                                           (t/make-escrow-settings settings))
                                 (assoc-in [:module-snapshots workflow-id] snapshot)
+                                (update-in [:total-principal-deposited token] (fnil + 0) amount)
                                 (add-held token afa)
                                 (add-fee token fee))]
           (assoc (t/ok world') :workflow-id workflow-id))))))

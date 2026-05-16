@@ -50,19 +50,39 @@
   (let [{:keys [ring exits entries lay-low? active-count]}
         (ring-model/evolve-ring-epoch rng ring params epoch)
 
+        ;; Track last escalation and total count for bond scaling
+        last-esc-epoch  (or (:last-esc-epoch ring) 0)
+        total-escalations (or (:total-escalations ring) 0)
+        delay-epochs    (:escalation-delay-epochs params 0)
+        bond-multiplier (:bond-multiplier params 1.0) ;; Multiplier for exponential bond scaling
+
+        ;; Allow escalation only if delay passed
+        can-escalate?   (>= (- epoch last-esc-epoch) delay-epochs)
+
         ring-active     active-count
         n-trials        (:n-trials-per-epoch params 100)
         escrow-size     (:escrow-size params 10000)
         fee-bps         (:resolver-fee-bps params 150)
-        escalation-rate (:escalation-rate params 1.0)
-        bond-cost       (:escalation-cost-per-dispute params 1000)
+
+        ;; If blocked, effective escalation rate drops to 0
+        effective-rate  (if can-escalate? (:escalation-rate params 1.0) 0.0)
+
+        ;; Dynamic bond cost: escalate exponentially
+        base-bond-cost  (:escalation-cost-per-dispute params 1000)
+        bond-cost       (* base-bond-cost (Math/pow bond-multiplier total-escalations))
 
         total-resolvers (+ (count honest-capitals) ring-active)
         ring-fraction   (if (pos? total-resolvers)
                           (double (/ ring-active total-resolvers))
                           0.0)
-        disputes-per-honest (* ring-fraction n-trials escalation-rate)
-        capital-drain       (* disputes-per-honest bond-cost)
+        
+        ;; Total escalations forced by the ring
+        total-escalations-forced (* ring-fraction n-trials effective-rate)
+        
+        ;; Drain per honest resolver: total cost / number of honest resolvers
+        capital-drain       (if (pos? (count honest-capitals))
+                              (/ (* total-escalations-forced bond-cost) (count honest-capitals))
+                              0.0)
 
         fee-per-dispute     (* escrow-size (/ fee-bps 10000.0))
         honest-income       (* (- 1.0 ring-fraction) n-trials fee-per-dispute
@@ -73,13 +93,21 @@
                      (let [new-cap (+ cap honest-income (- capital-drain))]
                        (if (> new-cap 0) (assoc m id new-cap) m)))
                    {}
-                   honest-capitals)]
+                   honest-capitals)
+
+        ;; Update last escalation epoch and total escalation count if successful
+        new-ring (if (and can-escalate? (pos? total-escalations-forced))
+                   (-> ring
+                       (assoc :last-esc-epoch epoch)
+                       (assoc :total-escalations (inc total-escalations)))
+                   ring)
+]
 
     {:honest-capitals updated-caps
      :honest-active   (count updated-caps)
      :ring-active     ring-active
-     :ring            ring
-     :ring-events     {:exits exits :entries entries :lay-low? lay-low?}
+     :ring            new-ring
+     :ring-events     {:exits exits :entries entries :lay-low? lay-low? :blocked? (not can-escalate?) :bond-cost bond-cost}
      :epoch           epoch}))
 
 (defn- run-escalation-epoch
@@ -100,18 +128,19 @@
         bond-cost      (:escalation-cost-per-dispute params 1000)
         ring-size      (:ring-size params 5)
 
-        ; Fraction of disputes the ring handles = ring-size / total-resolvers.
         ; Each honest resolver faces a bond cost whenever assigned to a ring-handled dispute.
         total-resolvers (+ (count honest-capitals) ring-active)
         ring-fraction   (if (pos? total-resolvers)
                           (double (/ ring-active total-resolvers))
                           0.0)
 
-        ; Expected bond costs per honest resolver per epoch:
-        ; = disputes they're called into * escalation-rate * bond-cost.
-        ; Simplified: each honest resolver is called into ring-fraction * n-trials disputes.
-        disputes-per-honest (* ring-fraction n-trials escalation-rate)
-        capital-drain       (* disputes-per-honest bond-cost)
+        ;; Total escalations forced by the ring
+        total-escalations-forced (* ring-fraction n-trials escalation-rate)
+
+        ;; Drain per honest resolver
+        capital-drain       (if (pos? (count honest-capitals))
+                              (/ (* total-escalations-forced bond-cost) (count honest-capitals))
+                              0.0)
 
         ; Honest fee income = (1 - ring-fraction) * n-trials * fee per dispute.
         fee-per-dispute   (* escrow-size (/ fee-bps 10000.0))
@@ -164,6 +193,7 @@
         honest-capital        (:honest-capital params 5000)
         displacement-threshold (:displacement-threshold params 0.50)
         use-ring-model?       (:use-ring-model? params false)
+        ring-detection-prob   (:ring-detection-prob params 0.0) ;; New detection parameter
         seed                  (:seed params 42)
 
         ; Initialise honest resolver capitals.
@@ -171,9 +201,10 @@
         init-capitals  (zipmap honest-ids (repeat (double honest-capital)))
 
         _ (println (format "   Honest resolvers: %d (capital=%d each)" n-resolvers honest-capital))
-        _ (println (format "   Ring size: %d  Epochs: %d  Threshold: %.0f%%  Mode: %s\n"
+        _ (println (format "   Ring size: %d  Epochs: %d  Threshold: %.0f%%  Mode: %s  Ring detection: %.1f%%\n"
                            ring-size n-epochs (* 100 displacement-threshold)
-                           (if use-ring-model? "per-member" "aggregate")))
+                           (if use-ring-model? "per-member" "aggregate")
+                           (* 100 ring-detection-prob)))
 
         ; Run epoch loop.
         {:keys [epoch-counts final-capitals]}
@@ -188,8 +219,11 @@
               (if (> epoch n-epochs)
                 {:epoch-counts (vec counts) :final-capitals capitals}
                 (let [[rng-e _] (rng/split-rng rng)
+                      ;; Apply ring detection modifier
+                      params-e (assoc params :fraud-detection-probability 
+                                      (+ (:fraud-detection-probability params 0.05) ring-detection-prob))
                       {:keys [honest-capitals honest-active ring-active ring ring-events]}
-                      (run-escalation-epoch-ring-model rng-e epoch capitals ring params)
+                      (run-escalation-epoch-ring-model rng-e epoch capitals ring params-e)
                       entry {:epoch epoch :honest-active honest-active :ring-active ring-active
                              :ring-events ring-events}]
                   (when (zero? (mod epoch 20))

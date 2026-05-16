@@ -72,7 +72,7 @@
      :recipient-status  — keyword, default :none"
   [{:keys [token to from amount-after-fee dispute-resolver
            auto-release-time auto-cancel-time
-           escrow-state sender-status recipient-status initial-fee]}]
+           escrow-state sender-status recipient-status initial-fee] :as args}]
   {:token             token
    :to                to
    :from              from
@@ -81,6 +81,8 @@
    :dispute-resolver  dispute-resolver
    :auto-release-time (or auto-release-time 0)
    :auto-cancel-time  (or auto-cancel-time 0)
+   :accumulated-yield 0                ; uint256 — total yield accrued to this escrow
+   :last-accrual-time (or (:last-accrual-time args) 0) ; uint64 — timestamp of last yield update
    :escrow-state      (or escrow-state :pending)
    :sender-status     (or sender-status :none)
    :recipient-status  (or recipient-status :none)})
@@ -184,6 +186,8 @@
     :total-fees          {}
     :total-released      {}   ; {token-addr nat-int} — cumulative AFAs finalized via release
     :total-refunded      {}   ; {token-addr nat-int} — cumulative AFAs finalized via refund
+    :total-withdrawn     {}   ; {token-addr nat-int} — cumulative withdrawals by users/resolvers
+    :total-principal-deposited {} ; {token-addr nat-int} — cumulative gross amount deposited
     :pending-settlements {}
     :module-snapshots    {}
     :dispute-timestamps  {}
@@ -197,6 +201,7 @@
     :challengers         {}   ; {wf-id {level challenger-addr}} — for Phase L Bounties
     :bond-balances       {}   ; {workflow-id {addr amount}}
     :bond-fees           {}   ; {token amount}
+    :total-bonds-posted  {}   ; {token amount} — cumulative bonds ever posted
     :bond-slashed        {}   ; {workflow-id amount}
     :bond-distribution   {:insurance 0 :protocol 0 :burned 0} ; 50/30/20 split
      :retained-slash-reserves 0 ; explicit accounting for retained slash residue
@@ -209,6 +214,11 @@
      :unavailability-stats {:total-resolvers 0 :unavailable-count 0 :last-update block-time}
      :circuit-breaker {:active? false :last-trigger 0 :cooldown 3600 :threshold-bps 3000}
     :token-fot-bps          {} ; {token-addr nat-int} — Fee-on-Transfer BPS per token (0 = normal ERC20)
+    :token-liquidity-crunch #{} ; #{token-addr} — currently insolvent yield pools
+    :last-escalation-block-time-per-addr {} ; {addr block-time} — Sybil mitigation Layer A
+    :escalation-counts-per-addr          {} ; {addr count} — Sybil mitigation Layer B
+    :yield-rates            {} ; {token-addr rate-bps} — Current annualized yield rate
+    :total-yield-generated  {} ; {token-addr nat-int} — All-time yield accrued
     :paused?                false
     :block-time          block-time}))
 

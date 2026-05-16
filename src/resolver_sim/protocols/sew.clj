@@ -272,8 +272,25 @@
       ar
       (let [p           (:params event)
             workflow-id (or (:workflow-id p) (wf-id event))]
-        (println "[DEBUG] dispatch withdraw_escrow. event=" event)
         (acct/withdraw-escrow world workflow-id (:address ar))))))
+
+(defmethod apply-action "execute-reentrant-withdraw"
+  [ctx world event]
+  (let [p        (:params event)
+        callback (:callback p)
+        ;; 1. Simulate the "External Call" gap by executing the callback action first.
+        ;; This models the control-flow handover to the attacker.
+        cb-res   (apply-action ctx world callback)]
+    (if-not (:ok cb-res)
+      cb-res
+      ;; 2. Execute the main withdrawal on the world returned by the callback.
+      ;; In a safe implementation (Checks-Effects-Interactions), the callback's
+      ;; state changes (zeroing the balance) will cause this second call to fail
+      ;; with :no-claimable-balance.
+      (let [final-res (apply-action ctx (:world cb-res) (assoc event :action "withdraw-escrow"))]
+        ;; We return the final world but we expect the specific result of the main call
+        ;; to be a failure if the reentrancy was successfully blocked.
+        final-res))))
 
 (defmethod apply-action "withdraw-fees"
   [{:keys [agent-index]} world event]
@@ -283,6 +300,22 @@
       (let [p     (:params event)
             token (:token p)]
         (acct/withdraw-fees world token)))))
+
+(defmethod apply-action "set-token-liquidity-crunch"
+  [{:keys [agent-index]} world event]
+  (let [ar (resolve-address agent-index (:agent event))]
+    (if-not (:ok ar)
+      ar
+      (let [agent (get agent-index (:agent event))]
+        ;; Only governance or a 'system' actor should be able to trigger this in a real simulation,
+        ;; but for deterministic scenarios we allow the caller to be anyone if they have the strategy.
+        (let [p       (:params event)
+              token   (:token p)
+              active? (get p :active? true)]
+          (t/ok (update world :token-liquidity-crunch
+                        (if active?
+                          #(conj (or % #{}) token)
+                          #(disj % token)))))))))
 
 (defmethod apply-action "set-paused"
   [{:keys [agent-index]} world event]

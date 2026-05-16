@@ -476,9 +476,9 @@
         _    (testing "level-0 verdict deferred"
                (is (= :ok (get-in s1 [:trace-entry :result])))
                (is (:exists (t/get-pending (:world s1) 0))))
-        ;; Escalate 0→1 — each escalation must be in a distinct block
+        ;; Escalate 0→1 — each escalation must be in a distinct block AND respect cooldown
         s2   (replay/process-step sew/protocol ctx (:world s1)
-                                  {:seq 3 :time 1001 :agent "alice" :action "escalate_dispute"
+                                  {:seq 3 :time 90001 :agent "alice" :action "escalate_dispute"
                                    :params {:workflow-id 0}})
         _    (testing "escalation 0→1"
                (is (= :ok (get-in s2 [:trace-entry :result])))
@@ -488,14 +488,14 @@
                    "pending cleared by escalation"))
         ;; Level 1: resolver1 submits verdict → still deferred (not yet final round)
         s3   (replay/process-step sew/protocol ctx (:world s2)
-                                  {:seq 4 :time 1001 :agent "resolver1" :action "execute_resolution"
+                                  {:seq 4 :time 90001 :agent "resolver1" :action "execute_resolution"
                                    :params {:workflow-id 0 :is-release true}})
         _    (testing "level-1 verdict deferred"
                (is (= :ok (get-in s3 [:trace-entry :result])))
                (is (:exists (t/get-pending (:world s3) 0))))
-        ;; Escalate 1→2 — must be in a different block than escalation 0→1 (time-lock-integrity)
+        ;; Escalate 1→2 — must respect cooldown vs alice's previous escalation
         s4   (replay/process-step sew/protocol ctx (:world s3)
-                                  {:seq 5 :time 1002 :agent "alice" :action "escalate_dispute"
+                                  {:seq 5 :time 180002 :agent "alice" :action "escalate_dispute"
                                    :params {:workflow-id 0}})
         _    (testing "escalation 1→2"
                (is (= :ok (get-in s4 [:trace-entry :result])))
@@ -504,7 +504,7 @@
                (is (nil? (get-in (:world s4) [:pending-settlements 0]))))
         ;; Level 2 (final round): resolver2 submits verdict → IMMEDIATE (no pending)
         s5   (replay/process-step sew/protocol ctx (:world s4)
-                                  {:seq 6 :time 1002 :agent "resolver2" :action "execute_resolution"
+                                  {:seq 6 :time 180002 :agent "resolver2" :action "execute_resolution"
                                    :params {:workflow-id 0 :is-release true}})]
     (testing "final-round verdict is immediate"
       (is (= :ok (get-in s5 [:trace-entry :result])))
@@ -529,22 +529,22 @@
                                  {:seq 2 :time 1000 :agent "resolver0" :action "execute_resolution"
                                   :params {:workflow-id 0 :is-release false}})
         _   (is (:exists (t/get-pending (:world s1) 0)) "pending exists before escalation")
-        ;; Escalate 0→1 — clears pending
+        ;; Escalate 0→1 — clears pending (must jump 1 day for cooldown)
         s2  (replay/process-step sew/protocol ctx (:world s1)
-                                 {:seq 3 :time 1001 :agent "alice" :action "escalate_dispute"
+                                 {:seq 3 :time 90001 :agent "alice" :action "escalate_dispute"
                                   :params {:workflow-id 0}})
         _   (testing "pending cleared"
               (is (= :ok (get-in s2 [:trace-entry :result])))
               (is (nil? (get-in (:world s2) [:pending-settlements 0]))))
         ;; Try to execute-pending-settlement after escalation → rejected
         s3  (replay/process-step sew/protocol ctx (:world s2)
-                                 {:seq 4 :time 1501 :agent "bob" :action "execute_pending_settlement"
+                                 {:seq 4 :time 90501 :agent "bob" :action "execute_pending_settlement"
                                   :params {:workflow-id 0}})
         _   (testing "stale execute-pending rejected"
               (is (= :rejected (get-in s3 [:trace-entry :result]))))
         ;; New resolver (level 1) successfully resolves
         s4  (replay/process-step sew/protocol ctx (:world s3)
-                                 {:seq 5 :time 1501 :agent "resolver1" :action "execute_resolution"
+                                 {:seq 5 :time 90501 :agent "resolver1" :action "execute_resolution"
                                   :params {:workflow-id 0 :is-release false}})]
     (testing "level-1 resolver succeeds"
       (is (= :ok (get-in s4 [:trace-entry :result]))))
@@ -594,29 +594,29 @@
                                  {:seq 2 :time 1000 :agent "resolver0" :action "execute_resolution"
                                   :params {:workflow-id 0 :is-release true}})
         s2  (replay/process-step sew/protocol ctx (:world s1)
-                                 {:seq 3 :time 1001 :agent "alice" :action "escalate_dispute"
+                                 {:seq 3 :time 90001 :agent "alice" :action "escalate_dispute"
                                   :params {:workflow-id 0}})
         _   (is (= 1 (t/dispute-level (:world s2) 0)))
         ;; Level 1: submit → deferred → escalate 1→2
         s3  (replay/process-step sew/protocol ctx (:world s2)
-                                 {:seq 4 :time 1001 :agent "resolver1" :action "execute_resolution"
+                                 {:seq 4 :time 90001 :agent "resolver1" :action "execute_resolution"
                                   :params {:workflow-id 0 :is-release true}})
         s4  (replay/process-step sew/protocol ctx (:world s3)
-                                 {:seq 5 :time 1002 :agent "alice" :action "escalate_dispute"
+                                 {:seq 5 :time 180002 :agent "alice" :action "escalate_dispute"
                                   :params {:workflow-id 0}})
         _   (testing "second escalation ok"
               (is (= :ok (get-in s4 [:trace-entry :result])))
               (is (= 2 (t/dispute-level (:world s4) 0))))
         ;; Level 2 is final: execute-resolution is immediate (no pending created)
         s5  (replay/process-step sew/protocol ctx (:world s4)
-                                 {:seq 6 :time 1002 :agent "resolver2" :action "execute_resolution"
+                                 {:seq 6 :time 180002 :agent "resolver2" :action "execute_resolution"
                                   :params {:workflow-id 0 :is-release true}})
         _   (testing "final-round verdict is immediate"
               (is (= :ok (get-in s5 [:trace-entry :result])))
               (is (= :released (t/escrow-state (:world s5) 0))))
         ;; After finalization, a third escalation is impossible (not :disputed)
         s6  (replay/process-step sew/protocol ctx (:world s5)
-                                 {:seq 7 :time 1002 :agent "alice" :action "escalate_dispute"
+                                 {:seq 7 :time 180002 :agent "alice" :action "escalate_dispute"
                                   :params {:workflow-id 0}})]
     (testing "escalation rejected after finalization"
       (is (= :rejected (get-in s6 [:trace-entry :result]))))

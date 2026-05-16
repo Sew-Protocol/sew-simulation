@@ -13,8 +13,52 @@
   (:require [resolver-sim.protocols.sew.types :as t]
             [resolver-sim.economics.payoffs :as payoffs]))
 
+(declare sub-held record-fee record-claimable)
+
 ;; ---------------------------------------------------------------------------
-;; total-held tracking
+;; Yield Distribution
+;; ---------------------------------------------------------------------------
+
+(defn distribute-yield
+  "Distribute accrued yield for an escrow.
+   Protocol takes yield-protocol-fee-bps.
+   Remainder is split based on yield-preset in EscrowSettings:
+     :off         -> No yield distributed (retained by protocol or burned)
+     :to-sender   -> All remainder to (:from et)
+     :to-recipient -> All remainder to (:to et)
+     :split-50-50 -> 50% to sender, 50% to recipient"
+  [world workflow-id]
+  (let [et      (get-in world [:escrow-transfers workflow-id])
+        yield   (:accumulated-yield et 0)
+        snap    (get-in world [:module-snapshots workflow-id])
+        settings (get-in world [:escrow-settings workflow-id])
+        token   (:token et)]
+    (if (zero? yield)
+      world
+      (let [fee-bps (or (:yield-protocol-fee-bps snap) 0)
+            fee     (payoffs/calculate-escrow-fee yield fee-bps)
+            net     (- yield fee)
+            preset  (:yield-preset settings :off)
+            
+            [sender-amt recipient-amt]
+            (case preset
+              :to-sender    [net 0]
+              :to-recipient [0 net]
+              :split-50-50  [(quot net 2) (- net (quot net 2))]
+              [0 0])]
+        (-> world
+            ;; Protocol fee
+            (record-fee token fee)
+            ;; Sender share
+            (cond-> (pos? sender-amt)
+              (record-claimable workflow-id (:from et) sender-amt))
+            ;; Recipient share
+            (cond-> (pos? recipient-amt)
+              (record-claimable workflow-id (:to et) recipient-amt))
+            ;; Live pool reduction
+            (sub-held token yield)
+            ;; Clear yield from escrow
+            (assoc-in [:escrow-transfers workflow-id :accumulated-yield] 0))))))
 ;; ---------------------------------------------------------------------------
 
 (defn add-held
@@ -52,12 +96,21 @@
    Sets total-fees[token] = 0 and returns {:ok true :world world' :amount amount}.
    Mirrors EscrowVault.withdrawFees.
 
-   Guard: amount must be > 0."
+   Guard: amount must be > 0.
+   Guard: token must not be in a liquidity-crunch."
   [world token]
   (let [amount (get-in world [:total-fees token] 0)]
-    (if (zero? amount)
+    (cond
+      (zero? amount)
       (t/fail :no-fees-to-withdraw)
-      (let [world' (assoc-in world [:total-fees token] 0)]
+
+      (contains? (:token-liquidity-crunch world #{}) token)
+      (t/fail :liquidity-insufficient)
+
+      :else
+      (let [world' (-> world
+                       (assoc-in [:total-fees token] 0)
+                       (update-in [:total-withdrawn token] (fnil + 0) amount))]
         (assoc (t/ok world') :amount amount)))))
 
 ;; ---------------------------------------------------------------------------
@@ -95,11 +148,12 @@
    Mirrors: BaseEscrow.withdrawEscrow.
 
    Guard: escrow must be in terminal state (:released/:refunded/:resolved).
-   Guard: claimable balance must be > 0."
+   Guard: claimable balance must be > 0.
+   Guard: token must not be in a liquidity-crunch."
   [world workflow-id addr]
   (if (nil? workflow-id)
     (t/fail :invalid-workflow-id)
-    (let [wf-id (if (string? workflow-id) workflow-id (str workflow-id))]
+    (let [wf-id (t/normalize-workflow-id workflow-id)]
       (cond
         (not (t/valid-workflow-id? world wf-id))
         (t/fail :invalid-workflow-id)
@@ -108,10 +162,20 @@
         (t/fail :transfer-not-finalized)
 
         :else
-        (let [amount (get-in world [:claimable wf-id addr] 0)]
-          (if (zero? amount)
+        (let [amount (get-in world [:claimable wf-id addr] 0)
+              et     (t/get-transfer world wf-id)
+              token  (:token et)]
+          (cond
+            (zero? amount)
             (t/fail :no-claimable-balance)
-            (let [world' (assoc-in world [:claimable wf-id addr] 0)]
+
+            (contains? (:token-liquidity-crunch world #{}) token)
+            (t/fail :liquidity-insufficient)
+
+            :else
+            (let [world' (-> world
+                             (assoc-in [:claimable wf-id addr] 0)
+                             (update-in [:total-withdrawn token] (fnil + 0) amount))]
               (assoc (t/ok world') :amount amount))))))))
 
 ;; ---------------------------------------------------------------------------
@@ -129,7 +193,8 @@
 (defn post-appeal-bond
   "Record an appeal bond posted by appellant for workflow-id.
    Deducts protocol fee into :bond-fees; records net in :bond-balances.
-   Also updates :total-held and :total-bonds-posted (cumulative)."
+   Also updates :total-held and :total-bonds-posted (cumulative).
+   Increments :total-principal-deposited to ensure solvency KPI accuracy."
   [world workflow-id appellant snap token amount]
   (let [fee-bps (or (:appeal-bond-protocol-fee-bps snap) 0)
         {:keys [fee net]} (payoffs/calculate-appeal-bond-fee amount fee-bps)]
@@ -137,7 +202,8 @@
         (update-in [:bond-balances workflow-id appellant] (fnil + 0) net)
         (update-in [:bond-fees token] (fnil + 0) fee)
         (update-in [:total-bonds-posted token] (fnil + 0) amount)
-        (add-held token amount))))
+        (update-in [:total-principal-deposited token] (fnil + 0) amount)
+        (add-held token net))))
 
 (defn distribute-slashed-funds
   "Internal: distribute slashed funds according to 50/30/20 split.
@@ -163,10 +229,13 @@
 
    Guard: bond balance must be > 0."
   [world workflow-id appellant]
-  (let [amount (get-in world [:bond-balances workflow-id appellant] 0)]
+  (let [amount (get-in world [:bond-balances workflow-id appellant] 0)
+        et     (t/get-transfer world workflow-id)
+        token  (:token et)]
     (if (zero? amount)
       (t/fail :no-bond-to-slash)
       (let [world' (-> world
+                       (sub-held token amount)
                        (assoc-in [:bond-balances workflow-id appellant] 0)
                        (update-in [:bond-slashed workflow-id] (fnil + 0) amount)
                        (distribute-slashed-funds amount))]
@@ -178,10 +247,13 @@
 
    Guard: bond balance must be > 0."
   [world workflow-id appellant]
-  (let [amount (get-in world [:bond-balances workflow-id appellant] 0)]
+  (let [amount (get-in world [:bond-balances workflow-id appellant] 0)
+        et     (t/get-transfer world workflow-id)
+        token  (:token et)]
     (if (zero? amount)
       (t/fail :no-bond-to-return)
       (let [world' (-> world
+                       (sub-held token amount)
                        (assoc-in [:bond-balances workflow-id appellant] 0)
                        (record-claimable workflow-id appellant amount))]
         (assoc (t/ok world') :returned amount)))))
