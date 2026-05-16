@@ -201,4 +201,31 @@
      Each validator-fn accepts a projection map (as returned by trace-projection)
      and returns a result map with :property :status :severity :basis etc.
 
-     Return {} for protocols that add no equilibrium-concept validators.") )
+     Return {} for protocols that add no equilibrium-concept validators.")
+
+  (protocol-id [protocol]
+    "Return a stable string identifier for this protocol implementation.
+     Used as a discriminator key in generic persistence (e.g. the protocol_id
+     column in sim_trial_results) and for I/O routing.
+
+     Convention: lowercase, hyphenated, version-tagged.
+     Examples: \"sew-v1\", \"dummy\", \"my-protocol-v2\".")
+
+  (io-projection [protocol data target-type]
+    "Return a protocol-specific I/O projection of `data` for the given target.
+
+     data        — context-dependent input:
+                     :world-view       → a world state map
+                     :forge-trace      → a replay result map (as from replay-with-protocol)
+                     :telemetry-record → a replay result map
+     target-type — one of:
+       :world-view       — lean snapshot of world state for gRPC client responses.
+                           Returns a flat map, e.g. {:block-time n :entity-count n}.
+       :forge-trace      — Forge/Foundry-compatible trace fixture map.
+                           Returns a fixture map ready for JSON serialisation.
+       :telemetry-record — protocol-specific metrics map for DB persistence.
+                           Returns a flat map stored as a blob alongside generic
+                           header fields in sim_trial_results.
+
+     Protocols may return nil for target types they do not support.
+     Protocols that produce no I/O projections should always return nil.") )

@@ -634,7 +634,22 @@
     sew-eq/mechanism-property-validators)
 
   (equilibrium-concept-validators [_]
-    sew-eq/equilibrium-concept-validators))
+    sew-eq/equilibrium-concept-validators)
+
+  (protocol-id [_]
+    "sew-v1")
+
+  (io-projection [_ data target-type]
+    (case target-type
+      :world-view
+      {:block-time    (:block-time data)
+       :entity-count  (count (:escrow-transfers data {}))
+       :pending-count (count (filter #(:exists (val %)) (:pending-settlements data {})))}
+      ;; :forge-trace and :telemetry-record are produced by their respective
+      ;; subsystems (io/trace-export and db/telemetry) which have full access to
+      ;; the supporting namespaces.  Return nil here; callers fall back to the
+      ;; dedicated export functions for those targets.
+      nil)))
 
 (def protocol (SEWProtocol.))
 

@@ -1,8 +1,12 @@
 (ns resolver-sim.db.telemetry
   "Adapter between the contract-model runner and the eval-engine XTDB store.
 
-   Converts run-trial / run-with-divergence-check output into the record
+   Converts run-trial / run-with-divergence-check output into the generic record
    format expected by resolver-sim.db.store and writes it to XTDB.
+
+   Records are stored in the protocol-agnostic sim_trial_results table; all
+   SEW-specific fields (strategy, profits, appeal flags, etc.) are serialised
+   as a metrics_edn blob alongside the generic header fields.
 
    All write functions accept a datasource as their first argument.
    Passing nil is safe: writes become no-ops, enabling offline simulation
@@ -32,8 +36,8 @@
     (Date.)))
 
 (defn trial->outcome-record
-  "Convert a run-trial result (plus contextual metadata) into the map
-   expected by resolver-sim.db.store/insert-sew-trial-outcome!.
+  "Convert a run-trial result (plus contextual metadata) into the generic map
+   expected by resolver-sim.db.store/insert-trial-result!.
 
    Arguments:
      trial-id   — unique string identifier for this trial
@@ -41,32 +45,39 @@
      params     — the params map passed to run-trial
      result     — the map returned by run-trial or run-with-divergence-check
 
+   The returned map has:
+     Top-level generic fields: :id, :batch-id, :protocol-id, :outcome,
+       :invariants-ok?, :divergence?, :params, :violations, :valid-from
+     :metrics blob: all SEW-specific fields (strategy, profits, appeal flags,
+       dispute-correct?, slashed?, cm-fee, cm-afa, diffs).
+
    When result is a run-with-divergence-check map (contains :contract),
    the :contract sub-map is used for trial fields and :divergence for diffs."
   [trial-id batch-id params result]
-  (let [cm      (if (contains? result :contract) (:contract result) result)
-        div     (get result :divergence {})
-        btime   (get params :block-time 1000)]
-    {:id               trial-id
-     :batch-id         batch-id
-     :strategy         (get cm :strategy (get params :strategy :honest))
-     :final-state      (get cm :cm/final-state)
-     :dispute-correct? (boolean (get cm :dispute-correct?))
-     :appeal-triggered? (boolean (get cm :appeal-triggered?))
-     :slashed?          (boolean (get cm :slashed?))
-     :profit-honest     (long (get cm :profit-honest 0))
-     :profit-malice     (long (get cm :profit-malice 0))
-     :cm-fee            (long (get cm :cm/fee 0))
-     :cm-afa            (long (get cm :cm/afa 0))
-     :invariants-ok?    (boolean (get cm :cm/invariants-ok? true))
-     :divergence?       (boolean (get div :divergence?))
-     :params            params
-     :violations        (get cm :cm/inv-violations)
-     :diffs             (get div :diffs)
-     :valid-from        (sim-date btime)}))
+  (let [cm    (if (contains? result :contract) (:contract result) result)
+        div   (get result :divergence {})
+        btime (get params :block-time 1000)]
+    {:id          trial-id
+     :batch-id    batch-id
+     :protocol-id "sew-v1"
+     :outcome     (get cm :cm/final-state)
+     :invariants-ok? (boolean (get cm :cm/invariants-ok? true))
+     :divergence?    (boolean (get div :divergence?))
+     :params      params
+     :metrics     {:strategy          (get cm :strategy (get params :strategy :honest))
+                   :dispute-correct?  (boolean (get cm :dispute-correct?))
+                   :appeal-triggered? (boolean (get cm :appeal-triggered?))
+                   :slashed?          (boolean (get cm :slashed?))
+                   :profit-honest     (long (get cm :profit-honest 0))
+                   :profit-malice     (long (get cm :profit-malice 0))
+                   :cm-fee            (long (get cm :cm/fee 0))
+                   :cm-afa            (long (get cm :cm/afa 0))
+                   :diffs             (get div :diffs)}
+     :violations  (get cm :cm/inv-violations)
+     :valid-from  (sim-date btime)}))
 
 (defn trial->event-records
-  "Derive a sequence of sew_escrow_events records from a run-trial result.
+  "Derive a sequence of sim_entity_events records from a run-trial result.
 
    Reconstructs the state timeline from the outcome fields. Each record
    has a unique :id derived from trial-id and the event step.
@@ -82,9 +93,9 @@
         mk     (fn [step etype estate t]
                  {:id           (str trial-id "-" (name step))
                   :trial-id     trial-id
-                  :workflow-id  0
+                  :entity-id    "0"
                   :event-type   etype
-                  :escrow-state estate
+                  :entity-state estate
                   :block-time   t
                   :valid-from   (sim-date t)})]
     [(mk :created  :sew/escrow-created  :pending    btime)
@@ -96,16 +107,16 @@
 ;; ---------------------------------------------------------------------------
 
 (defn record-trial!
-  "Write one trial outcome and its escrow event sequence to XTDB.
+  "Write one trial outcome and its entity event sequence to XTDB.
 
    All writes are skipped when ds is nil.
    Returns the outcome record map (useful for chaining / inspection)."
   [ds batch-id trial-id params result]
   (let [outcome (trial->outcome-record trial-id batch-id params result)
         events  (trial->event-records  trial-id params result)]
-    (ss/insert-sew-trial-outcome! ds outcome)
+    (ss/insert-trial-result! ds outcome)
     (doseq [ev events]
-      (ss/insert-sew-escrow-event! ds ev))
+      (ss/insert-entity-event! ds ev))
     outcome))
 
 (defn record-batch!

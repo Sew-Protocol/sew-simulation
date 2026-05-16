@@ -36,34 +36,38 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-outcome-record-field-mapping
-  (testing "strategy field mapped from result"
+  (testing "strategy field is in :metrics blob"
     (let [result  (run-one :honest)
           record  (tel/trial->outcome-record "t1" :batch-a base-params result)]
-      (is (= :honest (:strategy record)))))
+      (is (= :honest (get-in record [:metrics :strategy])))))
 
   (testing "malicious strategy propagates"
     (let [result (run-one :malicious)
           record (tel/trial->outcome-record "t2" :batch-a
                    (assoc base-params :strategy :malicious) result)]
-      (is (= :malicious (:strategy record)))))
+      (is (= :malicious (get-in record [:metrics :strategy])))))
 
-  (testing "required numeric fields are longs"
+  (testing "numeric fields in :metrics are longs"
     (let [record (tel/trial->outcome-record "t3" :batch-a base-params (run-one :honest))]
-      (is (int? (:profit-honest record)))
-      (is (int? (:profit-malice record)))
-      (is (int? (:cm-fee record)))
-      (is (int? (:cm-afa record)))))
+      (is (int? (get-in record [:metrics :profit-honest])))
+      (is (int? (get-in record [:metrics :profit-malice])))
+      (is (int? (get-in record [:metrics :cm-fee])))
+      (is (int? (get-in record [:metrics :cm-afa])))))
 
   (testing "cm-afa reflects escrow amount minus fee"
     (let [result (run-one :honest)
           record (tel/trial->outcome-record "t4" :batch-a base-params result)]
       ;; fee = 10000 * 50 / 10000 = 50; afa = 9950
-      (is (= 50   (:cm-fee record)))
-      (is (= 9950 (:cm-afa record)))))
+      (is (= 50   (get-in record [:metrics :cm-fee])))
+      (is (= 9950 (get-in record [:metrics :cm-afa])))))
 
-  (testing "final-state is a keyword"
+  (testing "terminal outcome is at :outcome (generic key)"
     (let [record (tel/trial->outcome-record "t5" :batch-a base-params (run-one :honest))]
-      (is (keyword? (:final-state record)))))
+      (is (keyword? (:outcome record)))))
+
+  (testing "protocol-id is sew-v1"
+    (let [record (tel/trial->outcome-record "t5b" :batch-a base-params (run-one :honest))]
+      (is (= "sew-v1" (:protocol-id record)))))
 
   (testing "valid-from is a java.util.Date"
     (let [record (tel/trial->outcome-record "t6" :batch-a base-params (run-one :honest))]
@@ -86,7 +90,7 @@
                   :divergence {:divergence? false :diffs []}}
           record  (tel/trial->outcome-record "t9" :batch-a base-params result)]
       (is (false? (:divergence? record)))
-      (is (= [] (:diffs record)))))
+      (is (= [] (get-in record [:metrics :diffs])))))
 
   (testing "divergence? is true when diffs present"
     (let [fake-div {:divergence? true
@@ -97,7 +101,7 @@
           record   (tel/trial->outcome-record "t10" :batch-a
                      (assoc base-params :strategy :malicious) result)]
       (is (true? (:divergence? record)))
-      (is (= 1 (count (:diffs record)))))))
+      (is (= 1 (count (get-in record [:metrics :diffs])))))))
 
 ;; ---------------------------------------------------------------------------
 ;; trial->event-records
@@ -112,17 +116,17 @@
     (testing "first event is sew/escrow-created in :pending state"
       (let [e (first events)]
         (is (= :sew/escrow-created (:event-type e)))
-        (is (= :pending (:escrow-state e)))))
+        (is (= :pending (:entity-state e)))))
 
     (testing "second event is sew/dispute-raised in :disputed state"
       (let [e (second events)]
         (is (= :sew/dispute-raised (:event-type e)))
-        (is (= :disputed (:escrow-state e)))))
+        (is (= :disputed (:entity-state e)))))
 
     (testing "last event has a terminal state"
       (let [e (last events)]
         (is (= :sew/escrow-finalized (:event-type e)))
-        (is (#{:released :refunded :resolved} (:escrow-state e)))))
+        (is (#{:released :refunded :resolved} (:entity-state e)))))
 
     (testing "events share the same trial-id"
       (is (every? #(= "t-ev" (:trial-id %)) events)))

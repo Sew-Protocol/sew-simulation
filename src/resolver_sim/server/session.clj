@@ -190,15 +190,16 @@
     {:ok false :error :session-not-found :detail {:session-id session-id}}))
 
 (defn session-info
-  "Return a lean info map for a session: {:step-count :block-time :escrow-count}.
+  "Return a lean info map for a session: {:step-count :block-time :entity-count}.
    Returns nil if session not found."
   [session-id]
   (when-let [s (get @sessions session-id)]
-    ;; :escrow-transfers is SEW-specific world state; intentional here since
-    ;; session.clj is SEW-wired via sew/protocol.
-    {:step-count   (:step-count s)
-     :block-time   (get-in s [:world :block-time])
-     :escrow-count (count (get-in s [:world :escrow-transfers]))}))
+    (let [wv (engine/io-projection sew/protocol (:world s) :world-view)]
+      {:step-count   (:step-count s)
+       :block-time   (:block-time wv)
+       ;; :escrow-count retained for backward compatibility with existing callers
+       ;; and tests; source is now the protocol's io-projection :world-view.
+       :escrow-count (:entity-count wv)})))
 
 (defn suggest-actions
   "Return lightweight action suggestions for an actor without executing anything.

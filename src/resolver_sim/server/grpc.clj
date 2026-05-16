@@ -1,5 +1,5 @@
 (ns resolver-sim.server.grpc
-  "Phase 2 gRPC server for the SEW Simulation Engine.
+  "gRPC server for the generic Simulation Engine.
 
    Uses io.grpc with a custom JSON Marshaller — no protoc compilation required.
    All method descriptors are built programmatically at server start.
@@ -8,7 +8,7 @@
      - Python → Clojure: snake_case keys  (parse: snake_case → kebab-case keywords)
      - Clojure → Python: snake_case keys  (stream: kebab-case keywords → snake_case)
 
-   Service: sew.simulation.SimulationEngine
+   Service: simulation.engine.SimulationEngine
      rpc StartSession   (StartRequest)   → StartResponse
      rpc Step           (StepRequest)    → StepResponse
      rpc DestroySession (DestroyRequest) → DestroyResponse
@@ -70,7 +70,7 @@
   (let [m (json-marshaller)]
     (-> (MethodDescriptor/newBuilder m m)
         (.setType MethodDescriptor$MethodType/UNARY)
-        (.setFullMethodName (str "sew.simulation.SimulationEngine/" rpc-name))
+        (.setFullMethodName (str "simulation.engine.SimulationEngine/" rpc-name))
         (.build))))
 
 ;; ---------------------------------------------------------------------------
@@ -198,7 +198,7 @@
         signals-m (make-method "SessionSignals")
         payoff-m  (make-method "EvaluatePayoff")
         objective-m (make-method "EvaluateAttackObjective")
-        svc-desc  (-> (ServiceDescriptor/newBuilder "sew.simulation.SimulationEngine")
+        svc-desc  (-> (ServiceDescriptor/newBuilder "simulation.engine.SimulationEngine")
                       (.addMethod start-m)
                       (.addMethod step-m)
                       (.addMethod destroy-m)

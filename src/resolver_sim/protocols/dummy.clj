@@ -80,7 +80,13 @@
     {})
 
   (equilibrium-concept-validators [_]
-    {}))
+    {})
+
+  (protocol-id [_]
+    "dummy")
+
+  (io-projection [_ _data _target-type]
+    nil))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared singleton
