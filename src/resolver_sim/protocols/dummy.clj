@@ -65,7 +65,16 @@
     #{})
 
   (metric-vocabulary [_]
-    #{}))
+    #{})
+
+  (trace-projection [_ _result]
+    nil)
+
+  (mechanism-property-validators [_]
+    {})
+
+  (equilibrium-concept-validators [_]
+    {}))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared singleton

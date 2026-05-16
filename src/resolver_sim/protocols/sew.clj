@@ -1,17 +1,19 @@
 (ns resolver-sim.protocols.sew
   "SEWProtocol — implementation of DisputeProtocol for the SEW state machine."
-  (:require [clojure.string                         :as str]
+  (:require [clojure.string                              :as str]
             [resolver-sim.protocols.protocol             :as proto]
-            [resolver-sim.protocols.sew.types       :as t]
-            [resolver-sim.protocols.sew.diff        :as diff]
-            [resolver-sim.protocols.sew.state-machine  :as sm]
-            [resolver-sim.protocols.sew.lifecycle      :as lc]
-            [resolver-sim.protocols.sew.resolution     :as res]
-            [resolver-sim.protocols.sew.registry       :as reg]
-            [resolver-sim.protocols.sew.accounting     :as acct]
-            [resolver-sim.protocols.sew.authority      :as auth]
-            [resolver-sim.protocols.sew.trace-metadata :as meta]
-            [resolver-sim.protocols.sew.invariants     :as inv]))
+            [resolver-sim.protocols.sew.types            :as t]
+            [resolver-sim.protocols.sew.diff             :as diff]
+            [resolver-sim.protocols.sew.state-machine    :as sm]
+            [resolver-sim.protocols.sew.lifecycle        :as lc]
+            [resolver-sim.protocols.sew.resolution       :as res]
+            [resolver-sim.protocols.sew.registry         :as reg]
+            [resolver-sim.protocols.sew.accounting       :as acct]
+            [resolver-sim.protocols.sew.authority        :as auth]
+            [resolver-sim.protocols.sew.trace-metadata   :as meta]
+            [resolver-sim.protocols.sew.invariants       :as inv]
+            [resolver-sim.protocols.sew.projection       :as sew-proj]
+            [resolver-sim.protocols.sew.equilibrium      :as sew-eq]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -576,6 +578,15 @@
       :double-settlements
       :invalid-state-transitions
       :negative-payoff-count
-      :coalition-net-profit}))
+      :coalition-net-profit})
+
+  (trace-projection [_ result]
+    (sew-proj/trace-end-projection result))
+
+  (mechanism-property-validators [_]
+    sew-eq/mechanism-property-validators)
+
+  (equilibrium-concept-validators [_]
+    sew-eq/equilibrium-concept-validators))
 
 (def protocol (SEWProtocol.))

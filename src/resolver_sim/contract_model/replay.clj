@@ -430,7 +430,7 @@
   (let [effective-metrics (into base-metrics (engine/metric-vocabulary protocol))
         validation (validate-scenario scenario effective-metrics)]
     (if-not (:ok validation)
-      {:outcome :invalid :scenario-id (:scenario-id scenario) :events-processed 0 :trace [] :metrics (zero-metrics) :halt-reason (:error validation)}
+      {:outcome :invalid :scenario-id (:scenario-id scenario) :events-processed 0 :trace [] :metrics (zero-metrics) :halt-reason (:error validation) :protocol protocol}
       (let [agents   (:agents scenario)
             p-params (get scenario :protocol-params {})
             context  (engine/build-execution-context protocol agents p-params)
@@ -444,14 +444,14 @@
             (let [open (when-not (:allow-open-disputes? scenario)
                          (seq (engine/open-disputes protocol world)))]
               (if open
-                {:outcome :fail :scenario-id scenario-id :events-processed (count trace) :halt-reason :open-disputes-at-end :detail {:open-disputes (vec open)} :trace trace :metrics metrics :agents agents}
+                {:outcome :fail :scenario-id scenario-id :events-processed (count trace) :halt-reason :open-disputes-at-end :detail {:open-disputes (vec open)} :trace trace :metrics metrics :agents agents :protocol protocol}
                 (do
                   (log/info :scenario/end {:id scenario-id :outcome :pass})
-                  {:outcome :pass :scenario-id scenario-id :events-processed (count trace) :trace trace :metrics metrics :agents agents})))
+                  {:outcome :pass :scenario-id scenario-id :events-processed (count trace) :trace trace :metrics metrics :agents agents :protocol protocol})))
             (let [raw-event  (first events)
                   alias-res  (engine/resolve-id-alias protocol raw-event id-alias-map)]
               (if-not (:ok alias-res)
-                {:outcome :invalid :scenario-id scenario-id :events-processed (count trace) :halted-at-seq (:seq raw-event) :halt-reason :unresolved-alias :detail (dissoc alias-res :ok) :trace trace :metrics metrics}
+                {:outcome :invalid :scenario-id scenario-id :events-processed (count trace) :halted-at-seq (:seq raw-event) :halt-reason :unresolved-alias :detail (dissoc alias-res :ok) :trace trace :metrics metrics :protocol protocol}
                 (let [event    (:event alias-res)
                       step     (process-step protocol context world event)
                       entry    (:trace-entry step)
@@ -470,7 +470,7 @@
                   (if (:halted? step)
                     (do
                       (log/error :scenario/halt {:id scenario-id :seq (:seq event) :reason :invariant-violation})
-                      {:outcome :fail :scenario-id scenario-id :events-processed (count new-trace) :halted-at-seq (:seq event) :halt-reason :invariant-violation :trace new-trace :metrics new-metrics})
+                      {:outcome :fail :scenario-id scenario-id :events-processed (count new-trace) :halted-at-seq (:seq event) :halt-reason :invariant-violation :trace new-trace :metrics new-metrics :protocol protocol})
                     (recur (:world step) (rest events) new-trace new-metrics new-alias-map)))))))))))
 
 (defn replay-with-sew-protocol

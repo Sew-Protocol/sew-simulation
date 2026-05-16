@@ -123,4 +123,37 @@
      be incremented — i.e. every key you expect to see in the :metrics map of
      a replay result, beyond the universal base set.
 
-     Return #{} for protocols that produce no named metrics beyond the base set.") )
+     Return #{} for protocols that produce no named metrics beyond the base set.")
+
+  (trace-projection [protocol result]
+    "Return the terminal trace projection for this replay result.
+
+     The projection is a protocol-specific map consumed by
+     evaluate-mechanism-properties and evaluate-equilibrium-concepts.
+     It should contain at minimum:
+       :terminal-world   — terminal state (keys at protocol's discretion)
+       :metrics          — the result's :metrics map
+       :trace-summary    — {:events-count :actors :dispute-count ...}
+
+     Return nil when the result has no trace (e.g. :outcome :invalid
+     with 0 events), or when the protocol does not support projections.")
+
+  (mechanism-property-validators [protocol]
+    "Return a map of {keyword → validator-fn} for protocol-specific mechanism
+     properties. These are merged with the framework's built-in generic
+     validators in evaluate-mechanism-properties.
+
+     Each validator-fn accepts a projection map (as returned by trace-projection)
+     and returns a result map with :property :status :severity :basis etc.
+
+     Return {} for protocols that add no mechanism-property validators.")
+
+  (equilibrium-concept-validators [protocol]
+    "Return a map of {keyword → validator-fn} for protocol-specific equilibrium
+     concepts. These are merged with the framework's built-in generic
+     validators in evaluate-equilibrium-concepts.
+
+     Each validator-fn accepts a projection map (as returned by trace-projection)
+     and returns a result map with :property :status :severity :basis etc.
+
+     Return {} for protocols that add no equilibrium-concept validators.") )
